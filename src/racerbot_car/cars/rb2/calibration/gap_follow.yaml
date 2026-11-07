@@ -1,11 +1,16 @@
 gap_follow_node:
   ros__parameters:
-    # 0.349 rad = 20 deg (was 0.26). Both sides reach ~25 deg since the
-    # 2026-10-16 steering calibration (docs/hardware-reference.md); 20 leaves
-    # 5 deg for the gain's error below 19 deg, where nothing was measured.
+    # 0.42 rad = 24 deg (0.349 until 2026-11-07, 0.26 before 2026-10-16).
+    # Measured, not extrapolated: through vesc.yaml's map 0.42 is servo 0.918
+    # right / 0.263 left, and the 2026-10-16 circles put those at 24.1 and
+    # 24.3 deg (right 0.90 -> 23.3, 0.95 -> 25.6; left 0.318 -> 21.1,
+    # 0.178 -> 29.2). Full stick (0.436) gave equal 24.2 deg circles. 0.349
+    # drove the 2026-11-06 hairpin at full lock with ~0.1 m to spare, and
+    # wedged in it once (run 171030). docs/hardware-reference.md.
     # Must fit inside vesc.yaml's servo clip (test_steering_limits_fit_servo.py).
-    max_steering_angle: 0.349
+    max_steering_angle: 0.42
     # Authority bound, checked at startup: at most half of max_steering_angle.
-    # Car 2: 0.1745 = half of its 0.349 (car 1 uses 0.165, half of its 0.33);
+    # Car 2: 0.1745, half of its former 0.349 and under half of 0.42 (car 1
+    # uses 0.165, half of its 0.33); kept, not raised with the limit;
     # gap_follow_node refuses to start if this exceeds half.
     arc_guard_max_correction: 0.1745

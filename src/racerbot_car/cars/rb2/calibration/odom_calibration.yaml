@@ -6,7 +6,7 @@ odom_calibration_node:
     # Largest steering angle any driving node may request (gap_follow.yaml and
     # pure_pursuit.yaml max_steering_angle). The clamp check warns when
     # servo_min/servo_max cut it short on either side.
-    planner_max_steering_rad: 0.349
+    planner_max_steering_rad: 0.42
     # Fallbacks, used only until the live values are read from the running
     # nodes (vesc_to_odom_node, ackermann_to_vesc_node, vesc_driver_node).
     speed_to_erpm_gain: -4447.983786

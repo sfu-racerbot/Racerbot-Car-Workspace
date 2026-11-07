@@ -65,9 +65,9 @@ def test_the_safety_values_the_race_defaults_left_alone(car):
     assert P['emergency_stop_clearance'] == pytest.approx(0.0, abs=1e-9)  # m
     assert P['forward_stop_clearance'] == pytest.approx(0.20, abs=1e-9)  # m
     # docs/gap-follow.md#race-defaults-2026-10-27, car 1.
-    # Car 2: 0.349, from its 2026-10-16 circles (docs/car1-vs-car2.md, car 2's
-    # test_race_defaults.py before the merge).
-    expected = {'rb1': 0.33, 'rb2': 0.349}
+    # Car 2: 0.42 since 2026-11-07 (0.349 before), inside its 2026-10-16 measured
+    # circles: docs/hardware-reference.md, car 2's steering.
+    expected = {'rb1': 0.33, 'rb2': 0.42}
     assert effective_config('gap_follow.yaml', 'gap_follow_node', car_id=car)['max_steering_angle'] == \
         pytest.approx(expected[car], abs=1e-9)  # rad
 
