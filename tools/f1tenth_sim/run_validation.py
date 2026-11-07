@@ -77,6 +77,7 @@ OVERTAKE_CLEAR_MARGIN = 1.0
 OVERTAKE_MIN_SIDE_CLEARANCE = 0.70
 # Stand-off the scripted opponent keeps from whatever is in front of it.
 OPPONENT_RESERVE_DISTANCE = 0.5
+SAFETY_MODES = ("fallback", "map")
 
 # Which fidelity fixes are in force. Set from --fidelity in main(); the
 # module-level default keeps probe scripts that import this file honest.
@@ -221,6 +222,33 @@ def closest_valid(scan: np.ndarray, half_angle_rad: float, car_id=None) -> float
         np.isfinite(values) & (values > 0.0) & (values >= _lidar().range_min)
     ]
     return float(values.min()) if values.size else math.inf
+
+
+def apply_map_safety(scan, steering: float, speed: float, car_id=None) -> tuple[float, float, str]:
+    """On the car's own map, walls do not trigger avoidance; retain raw emergency stop."""
+    _ensure_config(car_id)
+    params = PURE_PURSUIT_PARAMS
+    distance = closest_valid(
+        scan, math.radians(float(params['safety_fov_deg']) / 2.0), _CAR_ID)
+    if distance < float(params['emergency_stop_distance']):
+        return steering, 0.0, "stop"
+    return steering, speed, "none"
+
+
+def lap_times_from_counts(times, counts) -> list[float]:
+    """Duration of each completed lap from simulation times and cumulative counts."""
+    if len(times) == 0 or len(counts) == 0:
+        return []
+    lap_times = []
+    completed_laps = int(float(counts[0]))
+    lap_start = float(times[0])
+    for now, count in zip(times[1:], counts[1:]):
+        current_laps = int(float(count))
+        while current_laps > completed_laps:
+            lap_times.append(float(now) - lap_start)
+            lap_start = float(now)
+            completed_laps += 1
+    return lap_times
 
 
 # Which line pure_pursuit follows: "shipped" is the raceline that comes with
