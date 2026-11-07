@@ -108,7 +108,13 @@ def _map(args, logs: Path, out: Path, tag: str) -> dict:
     run_dir = runs[-1].parent if runs else None
     result.update(exit_code=done.returncode, run_dir=str(run_dir) if run_dir else None,
                   laps_closed=done.stdout.count('Closed mapping lap'))
-    contact = _contact(sim_status())
+    status = sim_status()
+    contact = _contact(status)
+    # Always reported, so a run that fails an earlier check still says whether
+    # the car touched anything (the end-of-mapping stop, 2026-11-07).
+    result.update(contact=contact or 'none',
+                  wall_contact_steps=status.get('wall_contact_steps'),
+                  status_read=bool(status))
     if done.returncode != 0:
         result['failure'] = f'map_course exited {done.returncode}'
     elif run_dir is None:
