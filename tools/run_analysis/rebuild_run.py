@@ -33,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(REPO_ROOT / 'src' / 'pure_pursuit'))
 from pure_pursuit import map_localize, occupancy_map, racing_math, recorded_path, run_commands  # noqa: E402
+from racerbot_car.layers import effective_config  # noqa: E402
 from run_analysis import runlog, slam_bag  # noqa: E402
 
 CONFIG_PATH = REPO_ROOT / 'src' / 'pure_pursuit' / 'config' / 'auto_map_race.yaml'
@@ -99,8 +100,8 @@ def load_inputs(run_dir) -> RunInputs:
                      slam_pose=np.asarray(slam.get('slam_pose', np.zeros((0, 4))), dtype=float).reshape(-1, 4))
 
 
-def load_config() -> dict:
-    return next(iter(yaml.safe_load(CONFIG_PATH.read_text()).values()))['ros__parameters']
+def load_config(car_id=None) -> dict:
+    return effective_config('auto_map_race.yaml', 'auto_map_race_node', car_id)
 
 
 def _write_map(out_dir: Path, inputs: RunInputs, max_speckle_cells: int) -> None:

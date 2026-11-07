@@ -145,16 +145,18 @@ def generate_launch_description():
             'opponent_detection_mode': 'map',
         }],
     )
-    supervisor = Node(
-        package='pure_pursuit',
-        executable='auto_map_race_node',
-        name='auto_map_race_node',
-        output='screen',
-        parameters=[LaunchConfiguration('supervisor_config'), {
-            'mapping_laps': LaunchConfiguration('mapping_laps'),
-            'output_directory': LaunchConfiguration('output_directory'),
-        }],
-    )
+    def supervisor(context):
+        return [Node(
+            package='pure_pursuit',
+            executable='auto_map_race_node',
+            name='auto_map_race_node',
+            output='screen',
+            parameters=[*layered(LaunchConfiguration('supervisor_config').perform(context),
+                                 'auto_map_race.yaml', car_id), {
+                'mapping_laps': LaunchConfiguration('mapping_laps'),
+                'output_directory': LaunchConfiguration('output_directory'),
+            }],
+        )]
 
     return LaunchDescription([
         opponent_arg,
@@ -171,5 +173,5 @@ def generate_launch_description():
         slam,
         OpaqueFunction(function=mapping_controller),
         racing_controller,
-        supervisor,
+        OpaqueFunction(function=supervisor),
     ])

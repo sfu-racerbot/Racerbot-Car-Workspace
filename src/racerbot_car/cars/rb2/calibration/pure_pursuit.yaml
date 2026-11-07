@@ -9,3 +9,6 @@ pure_pursuit_node:
     # corner. Re-derive both if vesc.yaml's gain/offset/servo_min/servo_max
     # ever change.
     max_steering_angle: 0.42
+    # car_measure.py, 20261106-{163633,170803,171030}: 2.9-3.1 m/s^2
+    # achieved on both sides when asked for 3.5-5 m/s^2.
+    max_lateral_accel: 2.9

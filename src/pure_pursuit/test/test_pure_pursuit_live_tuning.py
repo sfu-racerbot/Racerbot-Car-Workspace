@@ -35,8 +35,8 @@ TUNABLES = live_tuning.by_name(live_tuning.PURE_PURSUIT_TUNABLES)
 
 
 def config_values():
-    with open(CONFIG) as handle:
-        return yaml.safe_load(handle)['pure_pursuit_node']['ros__parameters']
+    from racerbot_car.layers import effective_config
+    return effective_config('pure_pursuit.yaml', 'pure_pursuit_node')
 
 
 def current_values():

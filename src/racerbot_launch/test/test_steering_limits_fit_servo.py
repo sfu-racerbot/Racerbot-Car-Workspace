@@ -74,9 +74,8 @@ def _limits(car):
             'gap_follow.yaml', 'gap_follow_node', car_id=car)['max_steering_angle'],
         'pure_pursuit.yaml max_steering_angle': effective_config(
             'pure_pursuit.yaml', 'pure_pursuit_node', car_id=car)['max_steering_angle'],
-        'auto_map_race.yaml profile_max_steering_angle': _params(
-            os.path.join(_SRC, 'pure_pursuit', 'config', 'auto_map_race.yaml'),
-            'auto_map_race_node')['profile_max_steering_angle'],
+        'auto_map_race.yaml profile_max_steering_angle': effective_config(
+            'auto_map_race.yaml', 'auto_map_race_node', car_id=car)['profile_max_steering_angle'],
         # Hand-run optimizations check feasibility against this unless the
         # flag is passed (docs/racing-autonomy.md).
         'optimize_raceline --max-steering-angle default':
