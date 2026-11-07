@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from pure_pursuit.min_time_line import CarPhysics, speed_profile
+from pure_pursuit.min_time_line import CarPhysics, cone_clearance, speed_profile
 
 
 def test_speed_delay_respects_future_planned_speeds():
@@ -26,3 +26,14 @@ def test_speed_delay_respects_future_planned_speeds():
         distance = (positions[:-1] - positions[i]) % total
         future = speed[distance <= speed[i] * physics.speed_delay]
         assert speed[i] <= future.min() + 1e-10  # m/s, floating-point tolerance
+
+
+def test_cone_clearance_parallel_wall():
+    xy = np.array([[0, 0], [1, 0], [2, 0], [3, 0], [3, -2], [0, -2]])
+    wall_y = 0.5  # m
+    step_floor = 0.01  # m
+    field = lambda x, y: np.maximum(wall_y - y, 0.0)
+    actual = cone_clearance(field, xy, laser_x=0.0, step_floor=step_floor)[1]
+    # oracle: closed form; the +30 degree ray intersects y=wall_y at this range.
+    expected = wall_y / np.sin(np.deg2rad(30.0))
+    assert abs(actual - expected) <= step_floor  # m, documented ray-march accuracy
