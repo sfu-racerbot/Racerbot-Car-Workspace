@@ -4,9 +4,10 @@ import numpy as np
 import pytest
 
 from pure_pursuit.min_time_line import (
-    CarPhysics, cone_clearance, footprint_clearance, lap_time, speed_profile,
+    CarPhysics, cone_clearance, footprint_clearance, lap_time, offsets_of,
+    optimize_min_time, speed_profile,
 )
-from pure_pursuit.raceline_optimizer import path_frames
+from pure_pursuit.raceline_optimizer import path_frames, resample_closed_path, signed_curvature
 
 
 def stadium():
@@ -28,14 +29,61 @@ def test_stadium_acceleration_and_braking():
     straight, radius = 6.0, 2.0  # m
     corner_speed = np.sqrt(p.a_lat_left * radius)
     x = xy[:60, 0]
-    # oracle: closed form, braking v² <= v_corner² + 2*a_brake*d.
-    assert np.all(speed[:60] <= np.sqrt(corner_speed**2 + 2 * p.a_brake * (straight - x))
-                  + 0.02)  # m/s; 2 cm/s discretization at the arc entry
+    # oracle: closed form, braking v² <= v_corner² + 2*a_brake*d. Station 61
+    # is the first with both neighbours on the constructed circular arc.
+    chord = 2 * radius * np.sin(np.pi / (2 * 64))
+    assert np.all(speed[:60] <= np.sqrt(corner_speed**2 + 2 * p.a_brake * (straight - x + chord))
+                  + 1e-9)  # m/s, rounding tolerance
     # Acceleration and braking parabolas intersect when a_accel*x=a_brake*(L-x).
     peak = np.sqrt(corner_speed**2 + 2 * p.a_accel * p.a_brake * straight
                    / (p.a_accel + p.a_brake))
     assert peak < p.v_max
     assert np.max(speed[:60]) == pytest.approx(peak, rel=0.02)  # m/s, 2%
+
+
+def test_speed_delay_moves_braking_earlier():
+    xy = stadium()
+    options = dict(v_max=8.0, steering_rate=100.0, steering_delay=0.0)
+    immediate, _, _ = speed_profile(xy, CarPhysics(speed_delay=0.0, **options))
+    delayed, _, _ = speed_profile(xy, CarPhysics(speed_delay=0.1, **options))
+    # oracle: invariant: a delayed response must start braking earlier; compare
+    # against the same threshold on the descending half of the straight.
+    threshold = 4.0  # m/s, below both straight peaks and above corner speed
+    assert immediate[:60].max() > threshold and delayed[:60].max() > threshold
+    start = int(np.argmax(immediate[:60]))
+    assert np.flatnonzero(delayed[start:60] < threshold)[0] < np.flatnonzero(
+        immediate[start:60] < threshold)[0]
+
+
+def test_steering_rate_limits_step():
+    xy = stadium()
+    p = CarPhysics(v_max=8.0, steering_rate=0.5, steering_delay=0.0, speed_delay=0.0,
+                   v_min=0.01)
+    speed, kappa, seg = speed_profile(xy, p)
+    slower, _, _ = speed_profile(xy, CarPhysics(v_max=8.0, steering_rate=0.25,
+                                                 steering_delay=0.0, speed_delay=0.0,
+                                                 v_min=0.01))
+    s = np.r_[0.0, np.cumsum(seg)]
+    window = 2 * np.mean(seg)  # m; documented minimum window at zero delay
+    periodic_kappa = np.r_[kappa, kappa[0]]
+    ahead = np.interp((s[:-1] + window) % s[-1], s, periodic_kappa)
+    behind = np.interp((s[:-1] - window) % s[-1], s, periodic_kappa)
+    slope = np.maximum(abs(ahead - kappa), abs(kappa - behind)) / window
+    near = np.arange(57, 64)  # geometric straight-to-arc transition
+    # oracle: invariant v*|dkappa/ds| <= curvature_rate, module's documented window.
+    assert np.max(slope[near]) > 0.1  # 1/m²; ensure the test sees the step
+    assert np.all(speed[near] * slope[near] <= p.curvature_rate * 1.05)  # 1/(m s)
+    assert np.min(slower[near] - speed[near]) < -0.1  # m/s
+
+
+def test_offsets_constant_normal_shift():
+    angle = np.linspace(0, 2 * np.pi, 120, endpoint=False)
+    center = 3.0 * np.column_stack((np.cos(angle), np.sin(angle)))  # m
+    _, normals = path_frames(center)
+    shift = 0.4  # m
+    # oracle: invariant: projecting the parallel circle on its normal recovers shift.
+    assert np.allclose(offsets_of(center, center + shift * normals), shift,
+                       atol=0.005, rtol=0.0)  # m, 5 mm
 
 
 def test_car_physics_validation_and_limits():
