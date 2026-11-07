@@ -77,6 +77,7 @@ OVERTAKE_CLEAR_MARGIN = 1.0
 OVERTAKE_MIN_SIDE_CLEARANCE = 0.70
 # Stand-off the scripted opponent keeps from whatever is in front of it.
 OPPONENT_RESERVE_DISTANCE = 0.5
+SAFETY_MODES = ("fallback", "map")
 
 # Which fidelity fixes are in force. Set from --fidelity in main(); the
 # module-level default keeps probe scripts that import this file honest.
@@ -150,7 +151,7 @@ def __getattr__(name):
 
 
 def make_plant(track: str, num_agents: int, seed: int, calibration=None,
-               car_id=None) -> FidelityPlant:
+               car_id=None, max_laps: int = 1) -> FidelityPlant:
     """Build the environment and wrap it in this car's fidelity layer.
 
     ``calibration`` None is the selected car's calibration; a given one (a floor
@@ -180,7 +181,7 @@ def make_plant(track: str, num_agents: int, seed: int, calibration=None,
             integrator_timestep=INTEGRATOR_DT,
             integrator=IntegratorType.RK4,
             dynamics_model=DynamicModel.ST,
-            max_laps=1,
+            max_laps=max_laps,
         ),
         observation_config=ObservationConfig(type=ObservationType.DIRECT),
         lidar_config=components["lidar_config"],
@@ -221,6 +222,33 @@ def closest_valid(scan: np.ndarray, half_angle_rad: float, car_id=None) -> float
         np.isfinite(values) & (values > 0.0) & (values >= _lidar().range_min)
     ]
     return float(values.min()) if values.size else math.inf
+
+
+def apply_map_safety(scan, steering: float, speed: float, car_id=None) -> tuple[float, float, str]:
+    """On the car's own map, walls do not trigger avoidance; retain raw emergency stop."""
+    _ensure_config(car_id)
+    params = PURE_PURSUIT_PARAMS
+    distance = closest_valid(
+        scan, math.radians(float(params['safety_fov_deg']) / 2.0), _CAR_ID)
+    if distance < float(params['emergency_stop_distance']):
+        return steering, 0.0, "stop"
+    return steering, speed, "none"
+
+
+def lap_times_from_counts(times, counts) -> list[float]:
+    """Duration of each completed lap from simulation times and cumulative counts."""
+    if len(times) == 0 or len(counts) == 0:
+        return []
+    lap_times = []
+    completed_laps = int(float(counts[0]))
+    lap_start = float(times[0])
+    for now, count in zip(times[1:], counts[1:]):
+        current_laps = int(float(count))
+        while current_laps > completed_laps:
+            lap_times.append(float(now) - lap_start)
+            lap_start = float(now)
+            completed_laps += 1
+    return lap_times
 
 
 # Which line pure_pursuit follows: "shipped" is the raceline that comes with
@@ -350,6 +378,7 @@ class CommandShaper:
             self.control_dt,
             float(params['max_steering_rate']),
         )
+        steering = float(np.clip(steering, -STEERING_LIMIT, STEERING_LIMIT))
         desired_curvature = math.tan(desired_steering) / self.wheelbase
         commanded_curvature = math.tan(steering) / self.wheelbase
         online_curvature = max(abs(desired_curvature), abs(commanded_curvature))
@@ -409,10 +438,12 @@ class PathFollower:
         lookahead_gain: Optional[float] = None,
         use_measured_lookahead: bool = True,
         car_id=None,
+        steering_limit: Optional[float] = None,
     ):
         select_profile(PROFILE.name, car_id)
         self.VEHICLE_LIMITS = tracking_laws.VehicleLimits(
-            wheelbase=WHEELBASE, max_steering_angle=STEERING_LIMIT,
+            wheelbase=WHEELBASE,
+            max_steering_angle=(STEERING_LIMIT if steering_limit is None else steering_limit),
             max_steering_rate=MAX_STEERING_RATE, control_dt=CONTROL_DT)
         if min_lookahead is None:
             min_lookahead = float(PURE_PURSUIT_PARAMS['min_lookahead'])
@@ -793,13 +824,27 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                   law_params: Optional[dict] = None, car_id=None,
                   calibration=None, plan: Optional["PathPlan"] = None,
                   max_speed: Optional[float] = None,
-                  max_lateral_accel: Optional[float] = None) -> dict:
+                  max_lateral_accel: Optional[float] = None,
+                  safety: str = "fallback", laps: int = 1,
+                  steering_limit: float | None = None) -> dict:
     """One solo lap of pure pursuit. The optional arguments default to the selected
     car's own: its calibration, the track's own line planned at the PathPlan defaults,
     and pure_pursuit.yaml's speed and lateral limits."""
+    global STEERING_LIMIT
+    if safety not in SAFETY_MODES:
+        raise ValueError(f"safety must be one of {SAFETY_MODES}")
+    if laps < 1:
+        raise ValueError("laps must be at least 1")
+    if steering_limit is not None and (
+            not math.isfinite(steering_limit) or steering_limit <= 0.0):
+        raise ValueError("steering_limit must be positive and finite")
+    if "STEERING_LIMIT" not in globals():
+        _ensure_config()
+    original_steering_limit = STEERING_LIMIT
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
-    plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id)
+    plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id,
+                       max_laps=laps)
     line = plant.env.unwrapped.track.raceline
     if plan is None:
         plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
@@ -809,7 +854,8 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     # clock, and the scenario's 0.5m limit would fail the comparison before
     # the car had turned a wheel.
     obs, _ = plant.reset(plan_initial_pose(plan, line))
-    follower = PathFollower(plan, law_name=law_name, law_params=law_params, car_id=car_id)
+    follower = PathFollower(plan, law_name=law_name, law_params=law_params,
+                            car_id=car_id, steering_limit=steering_limit)
     command_shaper = CommandShaper(car_id, max_speed, max_lateral_accel)
     max_cross_track = 0.0
     cross_track_sum = 0.0
@@ -819,8 +865,13 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     avoid_steps = 0
     stop_steps = 0
     lap_time_s = None
+    lap_times: list[float] = []
+    lap_times_clock: list[float] = []
+    lap_counts: list[float] = []
     started = time.monotonic()
     max_steps = math.ceil(timeout_s / CONTROL_DT)
+    if steering_limit is not None:
+        STEERING_LIMIT = float(steering_limit)
 
     try:
         for step in range(max_steps):
@@ -846,31 +897,37 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             min_scan = min(
                 min_scan, closest_valid(ego["scan"], math.radians(30.0), car_id)
             )
-            steering, speed, safety = apply_fallback_safety(
-                ego["scan"], steering, speed, car_id=car_id
-            )
-            avoid_steps += int(safety == "avoid")
-            stop_steps += int(safety == "stop")
+            safety_function = apply_map_safety if safety == "map" else apply_fallback_safety
+            steering, speed, safety_result = safety_function(
+                ego["scan"], steering, speed, car_id=car_id)
+            avoid_steps += int(safety_result == "avoid")
+            stop_steps += int(safety_result == "stop")
 
             if error > 1.0:
                 speed = 0.0
                 stop_steps += 1
 
-            hard_speed_cap = 1.0 if safety == "avoid" else command_shaper.max_speed
+            hard_speed_cap = 1.0 if safety_result == "avoid" else command_shaper.max_speed
             steering, speed = command_shaper.command(
                 steering, speed, hard_speed_cap,
                 measured_speed=ego["std_state"][3])
             obs, _reward, done, _truncated, info = plant.step(
                 [(steering, speed)]
             )
+            lap_times_clock.append(float(info["sim_time"]))
+            lap_counts.append(float(info["lap_counts"][0]))
+            lap_times = lap_times_from_counts(lap_times_clock, lap_counts)
             if lap_time_s is None and float(info["lap_counts"][0]) >= 1.0:
                 lap_time_s = float(info["sim_time"])
+            if float(info["lap_counts"][0]) >= laps:
+                break
             if done or obs["agent_0"]["collision"]:
                 break
         else:
             step = max_steps - 1
     finally:
         plant.close()
+        STEERING_LIMIT = original_steering_limit
 
     compute = sorted(follower.law_compute_ms)
     n_compute = len(compute)
@@ -893,6 +950,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                 float(np.percentile(cross_track_sq, 95)), 4)
             if cross_track_sq else None,
             "lap_time_s": lap_time_s,
+            "lap_times_s": lap_times,
             "law_fail_steps": follower.law_fail_steps,
             "law_compute_ms_p50": _pct(0.50),
             "law_compute_ms_p99": _pct(0.99),
