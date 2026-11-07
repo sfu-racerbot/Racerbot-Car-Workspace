@@ -67,6 +67,10 @@ def clipped_sides(angle, gain, offset, servo_min, servo_max):
 def _limits(car):
     joy = effective_config('joy_teleop.yaml', 'joy_teleop', car_id=car)
     assert joy['human_control.axis_mappings.drive-steering_angle.offset'] == 0.0
+    # oracle: spec, the hand-run CLI defaults to the current car's planner.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv('RACERBOT_CAR', car)
+        optimizer_limit = optimize_raceline.build_arg_parser().get_default('max_steering_angle')
     return {
         # Full stick: the F710 axis reads +/-1.0.
         'joy_teleop.yaml full stick': abs(joy['human_control.axis_mappings.drive-steering_angle.scale']),
@@ -79,7 +83,7 @@ def _limits(car):
         # Hand-run optimizations check feasibility against this unless the
         # flag is passed (docs/racing-autonomy.md).
         'optimize_raceline --max-steering-angle default':
-            optimize_raceline.build_arg_parser().get_default('max_steering_angle'),
+            optimizer_limit,
     }
 
 

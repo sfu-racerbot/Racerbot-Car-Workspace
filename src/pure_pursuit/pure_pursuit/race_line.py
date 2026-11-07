@@ -38,6 +38,33 @@ class RaceLineConfig:
     curvature_margin: float = 1.0
     max_deviation: float = 0.35
 
+    @classmethod
+    def from_params(cls, values: dict):
+        """Build from effective supervisor values plus the controller's stop distance.
+
+        Use load_params() to combine those two effective node blocks. Required
+        keys deliberately have no CarPhysics fallback from a different car.
+        """
+        physics_keys = {
+            'max_steering_angle': 'profile_max_steering_angle',
+            'wheelbase': 'profile_wheelbase', 'a_lat_left': 'profile_max_lateral_accel',
+            'a_lat_right': 'profile_max_lateral_accel_right', 'a_accel': 'profile_max_accel',
+            'a_brake': 'profile_max_brake', 'v_max': 'profile_max_speed',
+            'v_min': 'profile_min_speed', 'linkage_gain': 'profile_steering_linkage_gain',
+            'steering_rate': 'profile_steering_rate', 'steering_delay': 'profile_steering_delay',
+            'speed_delay': 'profile_speed_delay',
+        }
+        config_keys = {
+            'mode': 'race_line_mode', 'spacing': 'waypoint_spacing',
+            'wall_margin': 'race_line_wall_margin', 'cone_margin': 'race_line_cone_margin',
+            'body_floor': 'race_line_body_floor',
+            'min_feature_wavelength': 'profile_min_feature_wavelength',
+            'curvature_margin': 'profile_curvature_margin', 'max_deviation': 'profile_max_deviation',
+            'emergency_stop_distance': 'emergency_stop_distance',
+        }
+        return cls(physics=CarPhysics(**{k: values[v] for k, v in physics_keys.items()}),
+                   **{k: values[v] for k, v in config_keys.items()})
+
     def __post_init__(self):
         if self.mode not in ('fastest', 'recorded', 'min_curvature', 'min_time'):
             raise ValueError(f'unknown mode: {self.mode}')
@@ -205,20 +232,41 @@ def write_race_line(out_dir, line: RaceLine, floor_test_speed: float = 1.5) -> d
             'raceline_floor_test.csv': float(floor_speed.max())}
 
 
+def load_params(car_id=None, supervisor_config=None) -> dict:
+    """Read the same car layers as launch, including the unchanged controller stop."""
+    from racerbot_car.identity import current_car_id
+    from racerbot_car.layers import effective_config, effective_values, layered
+    car_id = current_car_id() if car_id is None else car_id
+    if supervisor_config is None:
+        values = effective_config('auto_map_race.yaml', 'auto_map_race_node', car_id)
+    else:
+        values = effective_values(layered(str(supervisor_config), 'auto_map_race.yaml', car_id),
+                                  'auto_map_race_node')
+    values['emergency_stop_distance'] = effective_config(
+        'pure_pursuit.yaml', 'pure_pursuit_node', car_id)['emergency_stop_distance']
+    return values
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', required=True, type=Path)
-    parser.add_argument('--mode', default='fastest',
+    parser.add_argument('--car', help='Car ID (default: current car).')
+    parser.add_argument('--config', type=Path, help='Supervisor base YAML, before car calibration.')
+    parser.add_argument('--mode',
                         choices=('fastest', 'recorded', 'min_curvature', 'min_time'))
-    defaults = CarPhysics()
-    for name in ('a_lat_left', 'a_lat_right', 'a_brake', 'a_accel', 'v_max', 'max_steering_angle'):
-        parser.add_argument('--' + name.replace('_', '-'), type=float, default=getattr(defaults, name))
-    parser.add_argument('--wall-margin', type=float, default=0.15)
+    overrides = dict(a_lat_left='profile_max_lateral_accel',
+                     a_lat_right='profile_max_lateral_accel_right', a_brake='profile_max_brake',
+                     a_accel='profile_max_accel', v_max='profile_max_speed',
+                     max_steering_angle='profile_max_steering_angle', wall_margin='race_line_wall_margin')
+    for name in overrides:
+        parser.add_argument('--' + name.replace('_', '-'), type=float)
     args = parser.parse_args(argv)
-    physics = CarPhysics(a_lat_left=args.a_lat_left, a_lat_right=args.a_lat_right,
-                         a_brake=args.a_brake, a_accel=args.a_accel, v_max=args.v_max,
-                         max_steering_angle=args.max_steering_angle)
-    cfg = RaceLineConfig(physics=physics, mode=args.mode, wall_margin=args.wall_margin)
+    values = load_params(args.car, args.config)
+    values.update({key: getattr(args, name) for name, key in overrides.items()
+                   if getattr(args, name) is not None})
+    if args.mode is not None:
+        values['race_line_mode'] = args.mode
+    cfg = RaceLineConfig.from_params(values)
     grid = OccupancyMap.from_yaml(args.run_dir / 'map.yaml', inflate_cells=0)
     seed = load_xy_csv(args.run_dir / 'raceline_raw.csv')
     line = build_race_line(grid, seed, cfg)
@@ -228,7 +276,7 @@ def main(argv=None) -> int:
     print(f'choice: {line.source if line.ok else "none"}; {line.reason}')
     if not line.ok:
         return 1
-    write_race_line(args.run_dir, line)
+    write_race_line(args.run_dir, line, values['floor_test_speed'])
     return 0
 
 
