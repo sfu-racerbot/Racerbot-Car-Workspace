@@ -1,7 +1,10 @@
 """Build and compare racing lines against the same final-waypoint limits."""
 
 from dataclasses import dataclass
+import argparse
+import json
 import math
+from pathlib import Path
 
 import numpy as np
 
@@ -11,6 +14,7 @@ from pure_pursuit.min_time_line import (
     speed_profile,
 )
 from pure_pursuit.occupancy_map import OccupancyMap
+from pure_pursuit.racing_math import load_xy_csv
 from pure_pursuit.raceline_optimizer import (
     optimize_minimum_curvature, refine_centerline, resample_closed_path,
     signed_curvature,
@@ -165,3 +169,68 @@ def build_race_line(grid: OccupancyMap, seed_xy, cfg: RaceLineConfig) -> RaceLin
                         tuple(candidates), f'chosen {best.source}: {best.est_lap_s:.3f} s')
     reason = '; '.join(f'{c.source}: {c.reason}' for c in candidates)
     return RaceLine(False, None, None, None, math.inf, tuple(candidates), reason)
+
+
+def write_race_line(out_dir, line: RaceLine, floor_test_speed: float = 1.5) -> dict:
+    """Write the selected waypoints without rounding away the checked geometry."""
+    if not line.ok:
+        raise ValueError(f'cannot write a failed race line: {line.reason}')
+    if not math.isfinite(floor_test_speed) or floor_test_speed < 0:
+        raise ValueError('floor_test_speed must be finite and non-negative')
+    xy, speed = np.asarray(line.xy, float), np.asarray(line.speed, float)
+    if (xy.ndim != 2 or xy.shape[1] != 2 or len(xy) < 4 or speed.shape != (len(xy),)
+            or not np.isfinite(xy).all() or not np.isfinite(speed).all() or np.any(speed < 0)):
+        raise ValueError('invalid selected waypoints or speeds')
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    floor_speed = np.minimum(speed, floor_test_speed)
+    for name, velocities in (('raceline_profiled.csv', speed),
+                             ('raceline_floor_test.csv', floor_speed)):
+        np.savetxt(out / name, np.column_stack((xy, velocities)), delimiter=',',
+                   header='x,y,speed', comments='', fmt='%.17g')
+
+    def finite(value):
+        return value if math.isfinite(value) else None
+
+    report = {
+        'choice': line.source, 'ok': line.ok, 'est_lap_s': finite(line.est_lap_s),
+        'reason': line.reason,
+        'candidates': [dict(source=c.source, ok=c.ok, est_lap_s=finite(c.est_lap_s),
+                            min_cone_m=finite(c.min_cone_m), min_body_m=finite(c.min_body_m),
+                            max_curvature=finite(c.max_curvature), reason=c.reason)
+                       for c in line.candidates],
+    }
+    (out / 'race_line.json').write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
+    return {'raceline_profiled.csv': float(speed.max()),
+            'raceline_floor_test.csv': float(floor_speed.max())}
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--run-dir', required=True, type=Path)
+    parser.add_argument('--mode', default='fastest',
+                        choices=('fastest', 'recorded', 'min_curvature', 'min_time'))
+    defaults = CarPhysics()
+    for name in ('a_lat_left', 'a_lat_right', 'a_brake', 'a_accel', 'v_max', 'max_steering_angle'):
+        parser.add_argument('--' + name.replace('_', '-'), type=float, default=getattr(defaults, name))
+    parser.add_argument('--wall-margin', type=float, default=0.15)
+    args = parser.parse_args(argv)
+    physics = CarPhysics(a_lat_left=args.a_lat_left, a_lat_right=args.a_lat_right,
+                         a_brake=args.a_brake, a_accel=args.a_accel, v_max=args.v_max,
+                         max_steering_angle=args.max_steering_angle)
+    cfg = RaceLineConfig(physics=physics, mode=args.mode, wall_margin=args.wall_margin)
+    grid = OccupancyMap.from_yaml(args.run_dir / 'map.yaml', inflate_cells=0)
+    seed = load_xy_csv(args.run_dir / 'raceline_raw.csv')
+    line = build_race_line(grid, seed, cfg)
+    for candidate in line.candidates:
+        print(f'{candidate.source}: {"pass" if candidate.ok else "fail"}; '
+              f'{candidate.est_lap_s:.3f} s; {candidate.reason}')
+    print(f'choice: {line.source if line.ok else "none"}; {line.reason}')
+    if not line.ok:
+        return 1
+    write_race_line(args.run_dir, line)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
