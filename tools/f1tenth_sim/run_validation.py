@@ -438,8 +438,12 @@ class PathFollower:
         lookahead_gain: Optional[float] = None,
         use_measured_lookahead: bool = True,
         car_id=None,
+        steering_limit: Optional[float] = None,
     ):
+        global STEERING_LIMIT
         select_profile(PROFILE.name, car_id)
+        if steering_limit is not None:
+            STEERING_LIMIT = float(steering_limit)
         self.VEHICLE_LIMITS = tracking_laws.VehicleLimits(
             wheelbase=WHEELBASE, max_steering_angle=STEERING_LIMIT,
             max_steering_rate=MAX_STEERING_RATE, control_dt=CONTROL_DT)
@@ -839,8 +843,6 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     original_steering_limit = STEERING_LIMIT
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
-    if steering_limit is not None:
-        STEERING_LIMIT = float(steering_limit)
     plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id,
                        max_laps=laps)
     line = plant.env.unwrapped.track.raceline
@@ -852,8 +854,11 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     # clock, and the scenario's 0.5m limit would fail the comparison before
     # the car had turned a wheel.
     obs, _ = plant.reset(plan_initial_pose(plan, line))
-    follower = PathFollower(plan, law_name=law_name, law_params=law_params, car_id=car_id)
+    follower = PathFollower(plan, law_name=law_name, law_params=law_params,
+                            car_id=car_id, steering_limit=steering_limit)
     command_shaper = CommandShaper(car_id, max_speed, max_lateral_accel)
+    if steering_limit is not None:
+        STEERING_LIMIT = float(steering_limit)
     max_cross_track = 0.0
     cross_track_sum = 0.0
     cross_track_sq: list[float] = []
