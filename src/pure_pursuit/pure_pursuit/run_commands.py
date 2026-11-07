@@ -125,6 +125,9 @@ def commands_text(run_dir, raceline_ok: bool = True, map_ok: bool = True,
         'If you closed it, start it again:',
         '  ros2 launch f1tenth_stack bringup_launch.py',
         '',
+        'Only with start:=start_pose -- check the car is on the mapping stop. This must print GO:',
+        f'  ros2 run pure_pursuit check_start --ros-args -p run_dir:={run_dir}',
+        '',
         'Terminal 2 -- pick ONE, then hold LB to drive:',
     ]
     for law, description in STEERING_LAWS:
