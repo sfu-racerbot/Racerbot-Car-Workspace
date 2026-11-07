@@ -82,3 +82,19 @@ def test_params_from_run_takes_the_launched_values_and_that_days_code_paths(tmp_
     assert "not_a_parameter" not in out
     for name, value in vc.OLD_CODE.items():          # the run's code had none of these paths
         assert out[name] == value
+
+
+def test_params_from_run_with_launched_code_keeps_every_launched_value(tmp_path):
+    """A run made on today's code (e.g. car 2's 20261106-171030, launched with aim_depth_bias 1.0) must be
+    simulated with what it was launched with: OLD_CODE describes the 2026-10-30 code only."""
+    params = tmp_path / "metadata" / "params"
+    params.mkdir(parents=True)
+    launched = {"max_speed": 5.0, "aim_depth_bias": 1.0, "swept_clearance_max_length": 4.5}
+    (params / "gap_follow_node.yaml").write_text(yaml.safe_dump({"/gap_follow_node": {"ros__parameters": launched}}))
+    out = vc.params_from_run(tmp_path, old_code=False)
+    # oracle: the values this test launched with.
+    assert out["aim_depth_bias"] == 1.0
+    assert out["swept_clearance_max_length"] == 4.5
+    assert out["max_speed"] == 5.0
+    # OLD_CODE keys the run was not launched with stay unset, so the mirror uses today's defaults.
+    assert "opponent_follow_floor" not in out

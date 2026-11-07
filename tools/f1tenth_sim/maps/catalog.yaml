@@ -1,3 +1,6 @@
+# Simulator tracks imported from occupancy maps by track_import.py.
+# One entry per track; files live beside this one. Regenerate an
+# entry by re-running the import command recorded in it.
 car1_course_2026_10_26:
   import_command: 'python3 tools/f1tenth_sim/track_import.py /home/racerbotcar-1/.ros/racerbot_auto/20261026-194514-clean/map.yaml
     --name car1_course_2026_10_26 --source ''car 1 course: cleaned SLAM map of run
@@ -8,6 +11,26 @@ car1_course_2026_10_26:
   width_median_m: 1.52
   width_min_m: 1.06
   width_p10_m: 1.3
+car2_course_2026_11_06a:
+  import_command: 'python3 tools/f1tenth_sim/track_import.py data/rb2/racerbot_auto/20261106-164002-rebuilt/map.yaml
+    --name car2_course_2026_11_06a --source ''car 2 course, 2026-11-06 afternoon (32.6
+    m): rebuilt map data/rb2/racerbot_auto/20261106-164002-rebuilt from run 20261106-164002'''
+  lap_length_m: 32.28
+  source: 'car 2 course, 2026-11-06 afternoon (32.6 m): rebuilt map data/rb2/racerbot_auto/20261106-164002-rebuilt
+    from run 20261106-164002'
+  width_median_m: 1.5
+  width_min_m: 0.9
+  width_p10_m: 1.06
+car2_course_2026_11_06b:
+  import_command: 'python3 tools/f1tenth_sim/track_import.py data/rb2/racerbot_auto/20261106-184753-rebuilt/map.yaml
+    --name car2_course_2026_11_06b --source ''car 2 course, 2026-11-06 evening (22
+    m): rebuilt map data/rb2/racerbot_auto/20261106-184753-rebuilt from run 20261106-184753'''
+  lap_length_m: 21.38
+  source: 'car 2 course, 2026-11-06 evening (22 m): rebuilt map data/rb2/racerbot_auto/20261106-184753-rebuilt
+    from run 20261106-184753'
+  width_median_m: 1.4
+  width_min_m: 0.98
+  width_p10_m: 1.1
 circular_obs:
   import_command: python3 tools/f1tenth_sim/track_import.py tools/f1tenth_sim/maps/sources/circularTrack.yaml
     --name circular_obs --source 'sfu-racerbot/racerbot_a src/maps/circularTrack.yaml
@@ -30,8 +53,9 @@ course_2026_10_30:
   width_p10_m: 1.06
 course_2026_10_30_scans:
   import_command: python3 tools/run_analysis/scan_map.py data/rb2/racerbot_runs/20261030-185036
-    data/rb2/racerbot_runs/20261030-184556 data/rb2/racerbot_runs/20261030-175728 data/rb2/racerbot_runs/20261030-180355
-    data/rb2/racerbot_runs/20261030-181616 data/rb2/racerbot_runs/20261030-183607 --map data/rb2/racerbot_auto/20261030-185036-fixed
+    data/rb2/racerbot_runs/20261030-184556 data/rb2/racerbot_runs/20261030-175728
+    data/rb2/racerbot_runs/20261030-180355 data/rb2/racerbot_runs/20261030-181616
+    data/rb2/racerbot_runs/20261030-183607 --map data/rb2/racerbot_auto/20261030-185036-fixed
     --out tools/f1tenth_sim/maps/course_2026_10_30_scans; the centerline is course_2026_10_30's
   lap_length_m: 51.29
   source: 'car 2 course, 2026-10-30: walls of course_2026_10_30 corrected by where
@@ -68,3 +92,15 @@ room_2026_07_27:
   width_median_m: 1.42
   width_min_m: 0.98
   width_p10_m: 1.1
+car2_course_2026_11_06a_scans:
+  import_command: python3 tools/run_analysis/scan_map.py data/rb2/racerbot_runs/20261106-163633
+    data/rb2/racerbot_runs/20261106-164401 data/rb2/racerbot_runs/20261106-170803 --map data/rb2/racerbot_auto/20261106-164002-rebuilt
+    --check data/rb2/racerbot_runs/20261106-171030 --out tools/f1tenth_sim/maps/car2_course_2026_11_06a_scans;
+    the centerline is car2_course_2026_11_06a's
+  lap_length_m: 32.28
+  source: 'car 2 course, 2026-11-06 afternoon: walls of car2_course_2026_11_06a corrected
+    by where real scans landed, on fit runs 163633, 164401, 170803. Contact walls'' median
+    offset on held-out run 171030 -0.3 cm, against +4.2 cm before'
+  width_median_m: 1.5
+  width_min_m: 0.9
+  width_p10_m: 1.06

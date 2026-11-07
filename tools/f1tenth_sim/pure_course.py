@@ -5,11 +5,13 @@
     python3 tools/f1tenth_sim/pure_course.py --track course_2026_10_30_scans --floor sfu_course_2026_10_30 \\
         --line $M/raceline_raw.csv --speed 4.0,5.0 --lateral 2.5,3.0
 
-Each combination of planned top speed and lateral limit drives one solo lap with
+Each combination of planned top speed and lateral limit drives a solo run with
 run_validation's pure pursuit controller (the same math as pure_pursuit_node), starting
 on the line, and prints the lap time, whether it finished, cross-track error, and how
 often the reactive safety layer took over. Without --line it follows the track's own
 centre line, as run_validation.py does.
+
+    python3 tools/f1tenth_sim/pure_course.py --safety map --laps 3
 """
 
 from __future__ import annotations
@@ -27,14 +29,14 @@ import run_validation as rv  # noqa: E402
 from sim_fidelity import FLOORS, with_floor, with_friction  # noqa: E402
 
 
-def plan_line(xy, top_speed: float, lateral: float):
+def plan_line(xy, top_speed: float, lateral: float, brake: float = 8.0, accel: float = 3.0):
     """A PathPlan along ``xy`` with run_validation's profile, at these limits."""
     from pure_pursuit import racing_math
     xy = np.asarray(xy, float)
     seg = racing_math.compute_segment_lengths(xy, closed=True)
     kappa = racing_math.estimate_path_curvature(xy, closed=True)
     speed = racing_math.compute_velocity_profile(seg, kappa, v_max=top_speed, v_min=0.5, a_lat_max=lateral,
-                                                 a_accel_max=3.0, a_brake_max=8.0, closed=True,
+                                                 a_accel_max=accel, a_brake_max=brake, closed=True,
                                                  smoothing_passes=8, friction_ellipse=True)
     return rv.PathPlan(xy=xy, seg_len=seg, speed=speed)
 
@@ -50,16 +52,24 @@ def main(argv=None) -> int:
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--friction", type=float)
     ap.add_argument("--floor", choices=sorted(FLOORS))
+    ap.add_argument("--safety", choices=rv.SAFETY_MODES, default="fallback")
+    ap.add_argument("--laps", type=int, default=1)
+    ap.add_argument("--brake", type=float, default=8.0, help="profile braking limit, m/s^2 (car 2 measured 3.0-4.5)")
+    ap.add_argument("--accel", type=float, default=3.0, help="profile acceleration limit, m/s^2")
+    ap.add_argument("--steering-limit", type=float,
+                    help="steering limit in radians (default: car configuration)")
     args = ap.parse_args(argv)
     calibration = with_friction(args.friction, with_floor(args.floor))
     track = eval_gap.track_path(args.track)
     xy = load_line(args.line) if args.line else None
     for top, lateral in itertools.product(*([float(v) for v in s.split(",")] for s in (args.speed, args.lateral))):
-        plan = plan_line(xy, top, lateral) if xy is not None else None
+        plan = plan_line(xy, top, lateral, args.brake, args.accel) if xy is not None else None
         r = rv.run_pure_solo(track, args.seed, args.timeout, calibration=calibration, plan=plan,
-                             max_speed=top, max_lateral_accel=lateral)
+                             max_speed=top, max_lateral_accel=lateral, safety=args.safety,
+                             laps=args.laps, steering_limit=args.steering_limit)
         print(f"top {top:.1f} lateral {lateral:.1f}: lap {r['lap_time_s']} finished {r['passed']} contact {r['contact_steps']} "
-              f"cross-track max {r['max_cross_track_m']} safety avoid {r['avoid_steps']} stop {r['stop_steps']}", flush=True)
+              f"cross-track max {r['max_cross_track_m']} safety avoid {r['avoid_steps']} stop {r['stop_steps']} "
+              f"lap times {[round(value, 2) for value in r['lap_times_s']]}", flush=True)
     return 0
 
 
