@@ -14,6 +14,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from pure_pursuit import run_commands  # noqa: E402
 from pure_pursuit.tracking_laws import LAW_NAMES  # noqa: E402
@@ -55,13 +57,15 @@ def test_race_command_names_the_run_and_the_law():
         f'ros2 launch racerbot_launch race_launch.py run_dir:={RUN} steering_law:=mpc')
 
 
-def test_text_has_one_command_per_law_bringup_and_the_leave_it_there_rule():
+def test_text_has_one_command_per_law_bringup_and_the_start_anywhere_rule():
     text = run_commands.commands_text(RUN)
     for law in LAW_NAMES:
         assert f'  {run_commands.race_command(RUN, law)}\n' in text
     assert '  ros2 launch f1tenth_stack bringup_launch.py\n' in text
-    assert 'leave the car exactly where it stopped' in text
-    assert 'facing the same way' in text
+    # tech lead, 2026-11-07: put the car anywhere on the course
+    assert 'anywhere on the course' in text
+    assert 'facing the racing direction' in text
+    assert 'start:=start_pose' in text
     assert str(RUN / 'commands.txt') in text
     assert '!!' not in text
 
@@ -98,3 +102,32 @@ def test_missing_start_pose_is_called_out_only_when_missing():
     assert 'start pose was not recorded' in run_commands.commands_text(RUN, start_ok=False)
     text = run_commands.commands_text(RUN)
     assert 'start_pose.yaml' in text and 'not recorded' not in text
+
+
+def test_seeder_parameters_anywhere_uses_run_paths_and_offsets(tmp_path):
+    # Interface spec: the two run files and the supplied laser offsets.
+    assert run_commands.seeder_parameters(tmp_path, 'anywhere', 0.26, -0.02) == {
+        'mode': 'anywhere', 'map_yaml': str(tmp_path / 'map.yaml'),
+        'waypoints_file': str(tmp_path / 'raceline_profiled.csv'),
+        'laser_offset_x': 0.26, 'laser_offset_y': -0.02}
+
+
+def test_seeder_parameters_start_pose_reads_saved_pose(tmp_path):
+    # Interface spec: use the recorded pose and the supplied laser offsets.
+    run_commands.write_start_pose(tmp_path, (1.25, -2.5, 0.75))
+    assert run_commands.seeder_parameters(tmp_path, 'start_pose', 0.26, 0.0) == {
+        'mode': 'start_pose', 'x': 1.25, 'y': -2.5, 'yaw': 0.75,
+        'laser_offset_x': 0.26, 'laser_offset_y': 0.0}
+
+
+def test_seeder_parameters_start_pose_without_file_uses_origin(tmp_path):
+    # Interface spec: absent start pose falls back to (0, 0, 0).
+    assert run_commands.seeder_parameters(tmp_path, 'start_pose', 0.26, 0.0) == {
+        'mode': 'start_pose', 'x': 0.0, 'y': 0.0, 'yaw': 0.0,
+        'laser_offset_x': 0.26, 'laser_offset_y': 0.0}
+
+
+def test_seeder_parameters_rejects_unknown_start(tmp_path):
+    # Interface spec: other start modes raise ValueError.
+    with pytest.raises(ValueError, match='start must be one of'):
+        run_commands.seeder_parameters(tmp_path, 'elsewhere', 0.26, 0.0)
