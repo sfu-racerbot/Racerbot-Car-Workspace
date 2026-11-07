@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rclpy
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from sensor_msgs.msg import LaserScan
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -81,6 +81,30 @@ def test_finds_the_car_where_loc_put_it_and_seeds_there(rig, scans):
     for received in got:
         assert received.pose.pose.position.x == pytest.approx(expected[0], abs=0.15)  # m
         assert received.pose.pose.position.y == pytest.approx(expected[1], abs=0.15)  # m
+
+
+def test_a_filter_settling_half_a_metre_off_is_not_accepted(rig, scans):
+    seeder, helper, pub, got = rig(args() + ['-p', 'confirm_radius:=0.30'])
+    pose_pub = helper.create_publisher(PoseStamped, '/test_only/pf_pose', 10)
+    msg = scan(scans, 2)
+    assert spin([helper, seeder], lambda: seeder.seeded and bool(got), 45,
+                lambda: pub.publish(msg))
+    assert spin([helper, seeder], lambda: pose_pub.get_subscription_count() > 0, 5)
+    seed = got[-1].pose.pose.position
+    pose = PoseStamped()
+    pose.header.frame_id = 'map'
+    pose.pose.orientation.w = 1.0
+    pose.pose.position.y = seed.y
+    # Closed form: equal y and a 0.50 m x offset give a distance of 0.50 m.
+    pose.pose.position.x = seed.x + 0.50
+    spin([helper, seeder], lambda: seeder.done, 2, lambda: pose_pub.publish(pose))
+    assert not seeder.done
+    assert not seeder.succeeded
+    # Closed form: equal y and a 0.20 m x offset give a distance of 0.20 m.
+    pose.pose.position.x = seed.x + 0.20
+    pose_pub.publish(pose)
+    assert spin([helper, seeder], lambda: seeder.done, 5)
+    assert seeder.succeeded
 
 
 def test_nothing_is_seeded_before_the_scans_agree(rig, scans):
