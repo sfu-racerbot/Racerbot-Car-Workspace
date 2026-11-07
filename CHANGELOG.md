@@ -6,7 +6,15 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): pure_pursuit confirms a car before passing it, and gives up a pass that isn't working
+## 2026-11-07 (latest): gap_follow's forward reserve 0.20 -> 0.12 m, and car 2 steers to 0.42 rad
+
+### gap_follow, racerbot_car
+
+- **Behavior change: `forward_stop_clearance` is 0.12 m (was 0.20).** The tech lead saw the car stop its sharp turns near walls with room still to turn. Car 2's 2026-11-06 runs, turning at or near full lock, were held to 0.4 m/s or less by the creep and clearance ceilings over 400 times; TTC and emergency clearance fired 4 times in all. In the simulator (car 2, 0.42 rad, 6 seeds) 0.12 m took course 06a from 11.50 s to 11.35 s and left 06b at 8.46 s, no contact. The bubble (`safety_margin` 0.12) and `swept_clearance_margin` 0.02 were tried and not shipped: they gave contact. TTC, emergency clearance and swept clearance are unchanged. Not yet driven.
+- Three test scenes sized for the 0.20 m reserve now move with it (`test_launch_boost_node.py`, `test_gap_mirror_parity.py` blocked grids; `test_gap_follow_corners_node.py`'s narrow straight, 0.75 -> 0.70 m a side). Their assertions are unchanged and each still fails when the code it guards is broken.
+- **Car 2's autonomy steering limit is 0.42 rad** (PR #27): inside its 2026-10-16 measured circles.
+
+## 2026-11-07: pure_pursuit confirms a car before passing it, and gives up a pass that isn't working
 
 ### pure_pursuit
 

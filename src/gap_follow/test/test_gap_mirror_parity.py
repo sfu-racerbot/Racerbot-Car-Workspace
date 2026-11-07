@@ -17,10 +17,12 @@ import json
 import math
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 import rclpy
+import yaml
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
 from sensor_msgs.msg import Imu, Joy
@@ -480,7 +482,12 @@ def test_mirror_matches_the_node_on_a_blocked_grid():
     # A car 0.5 m ahead: the braking ceiling leaves no room to speed up, so the
     # launch stays armed on both until the way clears.
     from test_opponent_awareness_node import _box
-    blocked = _raycast(_corridor(1.0, 1.0) + _box(0.5))
+    # 0.5 m was set with the 0.20 m forward reserve; the box moves with it (0.12
+    # since 2026-11-07), so it leaves the same room past the reserve.
+    reserve = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / 'config' / 'gap_follow.yaml').read_text()
+    )['gap_follow_node']['ros__parameters']['forward_stop_clearance']
+    blocked = _raycast(_corridor(1.0, 1.0) + _box(0.5 - (0.20 - reserve)))
     states = _compare_launch([(blocked, True), (blocked, True),
                               (_raycast(_corridor(1.0, 1.0)), True)])
     assert states == ['armed', 'armed', 'active']
