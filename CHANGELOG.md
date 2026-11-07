@@ -6,7 +6,36 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-02 (latest): car 1's motor command gain, from the 2026-10-30 lap gap
+## 2026-11-07 (latest): pure_pursuit confirms a car before passing it, and gives up a pass that isn't working
+
+### pure_pursuit
+
+- **Behavior change: a detected opponent is only tracked and overtaken once `OpponentGate` confirms it.** That takes 6 sightings over at least 0.15 s within 0.3 s, no jump over 0.5 m, an along-track speed between −1.5 and 8 m/s, and at least 0.30 m from the nearest mapped wall. On car 2's solo run `20261106-175300` the node overtook a phantom (a wall, misread from a wrong particle-filter pose) and ended in `body_contact`. Replayed, every phantom on that day's four map-racer runs sat 0.05–0.25 m from a mapped wall; with the gate none is confirmed. A real car within about 0.15 m of a wall is followed but not passed. The reactive safety net is not behind the gate.
+- **Behavior change: a pass is given up** when the lead hasn't grown by 0.10 m for 1.5 s, or after 8 s unfinished, and no new pass starts for 3 s (`overtake_stall_sec`, `overtake_min_lead_gain`, `overtake_max_duration_sec`, `overtake_retry_sec`).
+- `test_opponent_integration.py`'s three node fixtures now confirm a detection on its first sighting (`opponent_confirm_count:=1`, `opponent_confirm_min_span_sec:=0.0`). No assertion changed. The gate's shipped defaults are tested in `test_opponent_gate.py` and `test_opponent_confirmation.py`.
+- New tool: `tools/run_analysis/replay_opponent_gate.py` replays a recorded run's detections through the gate.
+
+## 2026-11-07: race from anywhere on the course
+
+### pure_pursuit, racerbot_launch
+
+- **Behavior change: `race_launch.py run_dir:=...` now finds the car from its LiDAR anywhere on the saved map (`start:=anywhere`, the new default).** It used to seed the particle filter at the spot where mapping stopped, so the car had to be put back there. `start:=start_pose` keeps the old behaviour. `seed_start_pose` searches the whole map (`map_localize.localize_scan`), confirms on later scans that the car is still, and seeds the filter only then. It refuses, saying why and retrying for 2 minutes, on a poor fit, more than 6% of beams passing through the map's walls, a near-tie with another place on the course, or a car facing more than 60° against the racing line. pure_pursuit still starts only after the seeder succeeds.
+- **The filter must settle within 0.30 m of that seed in anywhere mode** (`start_pose` mode keeps 1.0 m). On car 2's run `20261106-175300` the filter sat 2.0-2.2 m along a straight from the truth, and a phantom opponent and a false overtake followed.
+- Tests: `test_map_localize_anywhere.py` (six real scans of run `20261106-164401`, found within 7 cm), `test_seed_anywhere.py`, `test_run_commands.py`. New tool: `tools/run_analysis/scan_fixture.py`.
+
+## 2026-11-07: map_course brakes to a stop instead of cutting the controls
+
+### pure_pursuit (auto_map_race_node)
+
+- **Behavior change: leaving the mapping phase brakes under gap_follow's steering.** The last lap's closure used to send an all-zero command at once (speed 0 *and* steering 0), from 3+ m/s. On car 2 on 2026-11-06 that put the body into a wall in 4 of 5 `map_course` runs: gap_follow logged clearance -0.009 to -0.146 m about a second later while asking for -0.28 to -0.35 rad. Now gap_follow's command keeps going out, steering unchanged, with its speed capped by `v0 - mapping_stop_decel * t`, then the node holds the all-zero stop as before. gap_follow's own stops win (min), and LB released or a stale gap_follow command is an immediate full stop. The map save, and in map-then-race mode the handover, wait for the ramp. A profile refused in map-then-race mode (state `error`) brakes the same way.
+- **New parameters:** `mapping_stop_decel` (2.0 m/s², must be positive and finite or the node refuses to start), `mapping_stop_hold_sec` (0.5 s).
+- Tests: `src/pure_pursuit/test/test_auto_map_race_controlled_stop.py` (11, each seen to fail against the old code or a deliberate break).
+
+### Tools
+
+- `tools/racerbot_sim/run_map_course_validation.py` always reports the simulator's contact verdict for the mapping step, even when an earlier check fails.
+
+## 2026-11-02: car 1's motor command gain, from the 2026-10-30 lap gap
 
 ### racerbot_car (rb1 calibration)
 

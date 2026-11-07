@@ -537,6 +537,18 @@ class AutoMapRaceNode(Node):
         # map-then-race behaviour, unchanged.
         self.declare_parameter('finish_after_mapping', False)
         self.declare_parameter('finish_hold_sec', 1.0)
+        # --- Leaving the mapping phase (2026-11-07) ---
+        # The last lap used to end with an all-zero command: speed 0 and
+        # steering 0 at once, from 3+ m/s and often in a bend. On car 2 on
+        # 2026-11-06 that put the body into a wall in 4 of 5 map_course runs
+        # (gap_follow logged clearance -0.009 to -0.146 m about 1 s later).
+        # Instead gap_follow's command keeps going out, steering unchanged,
+        # with its speed capped by v0 - mapping_stop_decel * t, and the full
+        # stop follows mapping_stop_hold_sec after the cap reaches zero.
+        # gap_follow's own stops still win (min), and the deadman and a stale
+        # command still give an immediate full stop.
+        self.declare_parameter('mapping_stop_decel', 2.0)
+        self.declare_parameter('mapping_stop_hold_sec', 0.5)
         # Well under the documented 106-correction pathological case from
         # 2026-08-19. UNVALIDATED: no run this session closed even once, so
         # tune against real "good" and "bad" lap data before trusting it.
@@ -668,6 +680,15 @@ class AutoMapRaceNode(Node):
         self.finish_after_mapping = bool(value('finish_after_mapping'))
         self.finish_hold_sec = max(0.0, float(value('finish_hold_sec')))
         self.finish_exit_time = None
+        self.mapping_stop_decel = float(value('mapping_stop_decel'))
+        if not (math.isfinite(self.mapping_stop_decel) and self.mapping_stop_decel > 0.0):
+            raise ValueError(
+                f'mapping_stop_decel must be a positive deceleration in m/s^2, got '
+                f'{self.mapping_stop_decel!r}')
+        self.mapping_stop_hold_sec = max(0.0, float(value('mapping_stop_hold_sec')))
+        # (start time, starting speed) of the brake ramp that ends mapping;
+        # None while mapping or once the ramp and its hold are over.
+        self.stop_ramp = None
         # Set when a mapping-only run is done; main() then exits cleanly.
         self.exit_requested = False
         # Mapping-only runs: SLAM's first pose of the car, taken while it is
@@ -1338,6 +1359,51 @@ class AutoMapRaceNode(Node):
     def _publish_stop(self):
         self._publish_command(None)
 
+    def _start_stop_ramp(self):
+        """Begin braking out of the mapping phase from gap_follow's last fresh speed."""
+        now_sec = self._now_sec()
+        command, _state, _detail = self._command_status(
+            self.mapping_cmd, self.mapping_cmd_time, now_sec, 'gap_follow')
+        start_speed = 0.0 if command is None else max(0.0, float(command.drive.speed))
+        self.stop_ramp = (now_sec, start_speed)
+        self.get_logger().info(
+            f'Mapping done: braking from {start_speed:.2f} m/s at '
+            f'{self.mapping_stop_decel:.1f} m/s^2 with gap follow still steering, '
+            f'then holding stopped. Keep holding LB.')
+
+    def _stop_ramp_running(self, now_sec: float) -> bool:
+        """True while the end-of-mapping brake ramp or its hold is still going."""
+        if self.stop_ramp is None:
+            return False
+        start_sec, start_speed = self.stop_ramp
+        if now_sec - start_sec > start_speed / self.mapping_stop_decel + self.mapping_stop_hold_sec:
+            self.stop_ramp = None
+            return False
+        return True
+
+    def _publish_stop_ramp(self, now_sec: float):
+        """gap_follow's command, steering unchanged, speed under the brake ramp.
+
+        A missing or stale gap_follow command is a full stop, as in mapping.
+        gap_follow asking for less (its own stops) always wins.
+        """
+        start_sec, start_speed = self.stop_ramp
+        cap = max(0.0, start_speed - self.mapping_stop_decel * (now_sec - start_sec))
+        command, stop_state, source_detail = self._command_status(
+            self.mapping_cmd, self.mapping_cmd_time, now_sec, 'gap_follow')
+        if command is None:
+            self._publish_stop()
+            self._log_decision(stop_state, f'{source_detail}; braking out of mapping', None)
+            return
+        ramped = AckermannDriveStamped()
+        ramped.drive.steering_angle = command.drive.steering_angle
+        ramped.drive.speed = float(max(0.0, min(float(command.drive.speed), cap)))
+        self._publish_command(ramped)
+        self._log_decision(
+            'mapping_stopping',
+            f'{source_detail}; braking out of mapping, speed cap {cap:.2f} m/s, '
+            'gap follow steering', ramped)
+
     def _publish_command(self, source):
         output = AckermannDriveStamped()
         output.header.stamp = self.get_clock().now().to_msg()
@@ -1532,7 +1598,10 @@ class AutoMapRaceNode(Node):
             if self.recorder.update(*pose, now_sec, odom_yaw, odom_xy):
                 self._mapping_lap_completed()
 
-        if self.state == 'loading_profile':
+        if self.state == 'loading_profile' and not self._stop_ramp_running(now_sec):
+            # Not before the end-of-mapping brake ramp is over: the car is
+            # still moving under gap_follow until then (_start_stop_ramp).
+            #
             # Order matters, and this is a safety ordering, not a tidiness
             # one. slam_toolbox's save_map/serialize_map are long BLOCKING
             # calls on its own executor: while they run it stops advancing
@@ -1569,6 +1638,8 @@ class AutoMapRaceNode(Node):
         if not deadman_ok:
             self._publish_stop()
             self._log_decision(deadman_state, deadman_detail, None)
+        elif self._stop_ramp_running(now_sec):
+            self._publish_stop_ramp(now_sec)
         elif (self.state == 'mapping' and self.finish_after_mapping
               and self.start_pose is None):
             self._publish_stop()
@@ -1751,6 +1822,7 @@ class AutoMapRaceNode(Node):
                     f'check ({"; ".join(failed_checks)}), but the '
                     f'{self.max_mapping_laps}-lap ceiling is reached -- accepting '
                     'it anyway rather than mapping indefinitely.')
+            self._start_stop_ramp()
             self.state = 'loading_profile'
             try:
                 self.profile_path = self._write_profile()

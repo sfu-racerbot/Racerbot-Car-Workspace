@@ -69,6 +69,7 @@ from std_msgs.msg import String
 from drive_intent import predict, schema
 from drive_intent.throttle import FailureLatch, IntentThrottle
 from pure_pursuit import live_tuning, racing_math, tracking_laws
+from pure_pursuit.opponent_gate import OpponentGate, WallDistance
 
 
 class _MpcStopped(Exception):
@@ -302,6 +303,20 @@ class PurePursuitNode(Node):
         self.declare_parameter('overtake_min_side_clearance', 0.70)
         self.declare_parameter('overtake_lookahead_distance', 4.0)
         self.declare_parameter('overtake_max_blind_sec', 3.0)
+        # A detection must pass OpponentGate (opponent_gate.py) before it
+        # is tracked or overtaken: run 20261106-175300 overtook a phantom.
+        self.declare_parameter('opponent_confirm_count', 6)
+        self.declare_parameter('opponent_confirm_window_sec', 0.3)
+        self.declare_parameter('opponent_confirm_min_span_sec', 0.15)
+        self.declare_parameter('opponent_max_jump_m', 0.5)
+        self.declare_parameter('opponent_max_reverse_speed', 1.5)
+        self.declare_parameter('opponent_max_speed', 8.0)
+        self.declare_parameter('opponent_min_wall_distance', 0.30)
+        # A pass that stops gaining on the opponent is given up.
+        self.declare_parameter('overtake_stall_sec', 1.5)
+        self.declare_parameter('overtake_min_lead_gain', 0.10)
+        self.declare_parameter('overtake_max_duration_sec', 8.0)
+        self.declare_parameter('overtake_retry_sec', 3.0)
         self.declare_parameter('laser_offset_x', 0.26)
         self.declare_parameter('laser_offset_y', 0.0)
         # Which point on the car pose_topic's pose describes. 'laser' for
@@ -485,6 +500,28 @@ class PurePursuitNode(Node):
         self.overtake_lookahead_distance = float(
             self.get_parameter('overtake_lookahead_distance').value)
         self.overtake_max_blind_sec = float(self.get_parameter('overtake_max_blind_sec').value)
+        self.overtake_stall_sec = float(self.get_parameter('overtake_stall_sec').value)
+        self.overtake_min_lead_gain = float(self.get_parameter('overtake_min_lead_gain').value)
+        self.overtake_max_duration_sec = float(self.get_parameter('overtake_max_duration_sec').value)
+        self.overtake_retry_sec = float(self.get_parameter('overtake_retry_sec').value)
+        for name in ('overtake_stall_sec', 'overtake_max_duration_sec'):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError(f'pure_pursuit_node: {name} must be finite and > 0, got {value}.')
+        for name in ('overtake_min_lead_gain', 'overtake_retry_sec'):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value >= 0.0):
+                raise ValueError(f'pure_pursuit_node: {name} must be finite and >= 0, got {value}.')
+        # OpponentGate (built with the other opponent state below) raises a
+        # ValueError naming any bad one.
+        self._opponent_gate_kwargs = dict(
+            confirm_count=self.get_parameter('opponent_confirm_count').value,
+            window_sec=float(self.get_parameter('opponent_confirm_window_sec').value),
+            min_span_sec=float(self.get_parameter('opponent_confirm_min_span_sec').value),
+            max_jump_m=float(self.get_parameter('opponent_max_jump_m').value),
+            max_reverse_speed=float(self.get_parameter('opponent_max_reverse_speed').value),
+            max_speed=float(self.get_parameter('opponent_max_speed').value),
+            min_wall_distance=float(self.get_parameter('opponent_min_wall_distance').value))
         self.laser_offset_x = float(self.get_parameter('laser_offset_x').value)
         self.laser_offset_y = float(self.get_parameter('laser_offset_y').value)
         self.pose_frame = str(self.get_parameter('pose_frame').value)
@@ -700,8 +737,13 @@ class PurePursuitNode(Node):
         # Opponent tracking + overtake state -- see OpponentTracker above
         # and _update_opponent_and_overtake below.
         self.opponent = OpponentTracker(self.opponent_velocity_smoothing, self.opponent_lost_timeout_sec)
+        self.opponent_gate = OpponentGate(**self._opponent_gate_kwargs)
         self.overtake_active = False
         self.overtake_side = 1  # +1 = pass on the left, -1 = pass on the right
+        self._overtake_started_sec = None
+        self._overtake_best_lead = None
+        self._overtake_best_lead_sec = None
+        self._overtake_retry_after_sec = -math.inf
 
         # Map-subtraction detection state: stays None until a map arrives
         # (map_callback). Until then 'map' mode falls back to the
@@ -718,6 +760,11 @@ class PurePursuitNode(Node):
         # live map.
         self._live_map_ray_caster = None
         self._frozen_map_ray_caster = None
+        # Distance to the nearest mapped wall, for OpponentGate. Built from
+        # the same two maps, chosen the same way, but not held back by the
+        # settle window: it is only ever used to *refuse* a detection.
+        self._live_wall_distance = None
+        self._frozen_wall_distance = None
         self.localization_source = 'slam'
 
         # Live tuning: publish the catalogue of parameters this node will
@@ -863,6 +910,7 @@ class PurePursuitNode(Node):
         if hasattr(self, 'opponent'):
             self.opponent = OpponentTracker(
                 self.opponent_velocity_smoothing, self.opponent_lost_timeout_sec)
+            self.opponent_gate.reset()
             self.overtake_active = False
         self.profile_ready = True
         # See opponent_detection_settle_sec's declare_parameter comment and
@@ -1102,7 +1150,32 @@ class PurePursuitNode(Node):
             and self._seconds_since(self.last_odom_time) < self.odom_timeout_sec
         )
 
+    @staticmethod
+    def _wall_distance_from(msg: OccupancyGrid):
+        q = msg.info.origin.orientation
+        return WallDistance(
+            msg.data, msg.info.width, msg.info.height, msg.info.resolution,
+            msg.info.origin.position.x, msg.info.origin.position.y,
+            origin_yaw=2.0 * math.atan2(q.z, q.w) if (q.z or q.w) else 0.0)
+
+    def _build_wall_distance(self, msg: OccupancyGrid, which: str):
+        try:
+            return self._wall_distance_from(msg)
+        except Exception as exc:  # a bad map must not take the node down
+            self.get_logger().error(
+                f"Could not build the {which} wall-distance field ({exc}) -- detections "
+                f"are not checked against the walls of that map.")
+            return None
+
+    @property
+    def opponent_wall_distance(self):
+        """WallDistance for whichever map matches the pose source, or None."""
+        if self.localization_source == 'particle_filter' and self._frozen_wall_distance is not None:
+            return self._frozen_wall_distance
+        return self._live_wall_distance
+
     def map_callback(self, msg: OccupancyGrid):
+        self._live_wall_distance = self._build_wall_distance(msg, 'live')
         # Import here, not at module top: range_libc is only needed in
         # 'map' mode, and the heuristic mode must keep working on a
         # machine where it isn't built.
@@ -1123,6 +1196,7 @@ class PurePursuitNode(Node):
         against, published once by auto_map_race_node right after that
         file's on-disk despeckling finishes. See the parameter comment
         above frozen_map_topic's declaration for why this exists."""
+        self._frozen_wall_distance = self._build_wall_distance(msg, 'frozen')
         try:
             from pure_pursuit.map_subtraction import MapRayCaster
             self._frozen_map_ray_caster = MapRayCaster(msg, self.max_range)
@@ -2294,7 +2368,7 @@ class PurePursuitNode(Node):
         or None to leave the plan alone. See "Racing against opponents" in
         docs/racing-autonomy.md for the full strategy this implements.
         """
-        now_sec = self.get_clock().now().nanoseconds / 1e9
+        now_sec = self._now_sec()
         detector_name = (
             'map subtraction'
             if self.opponent_detection_mode == 'map' and self.map_ray_caster is not None
@@ -2337,9 +2411,20 @@ class PurePursuitNode(Node):
             opp_idx, _ = racing_math.find_nearest_index(
                 self.xy, (opponent_x, opponent_y), closed=self.closed_loop,
                 prev_index=self.opponent.prev_nearest_index, search_window=self.nearest_search_window)
-            self.opponent.prev_nearest_index = opp_idx
-            self.opponent.update(
-                float(self.cumulative_arc_length[opp_idx]), now_sec, self.total_track_length)
+            walls = self.opponent_wall_distance
+            wall_distance = walls.at(opponent_x, opponent_y) if walls is not None else math.inf
+            verdict = self.opponent_gate.observe(
+                now_sec, opponent_x, opponent_y, float(self.cumulative_arc_length[opp_idx]),
+                self.total_track_length, wall_distance=wall_distance)
+            if verdict.confirmed:
+                self.opponent.prev_nearest_index = opp_idx
+                self.opponent.update(
+                    float(self.cumulative_arc_length[opp_idx]), now_sec, self.total_track_length)
+            else:
+                # Not a car yet (or not one at all): nothing to track or
+                # pass. The reactive safety net still reads the raw scan.
+                self.last_opponent_status = f"{detection_summary}, not confirmed: {verdict.reason}"
+                detection = None
 
         ego_arc_length = float(self.cumulative_arc_length[nearest_idx])
 
@@ -2349,6 +2434,11 @@ class PurePursuitNode(Node):
             # needs this tick's actual scan -- picking which side to pass
             # on reads directly from it.
             if self.opponent.arc_length is None or not self.opponent.is_fresh(now_sec):
+                return None
+            if now_sec < self._overtake_retry_after_sec:
+                self.last_opponent_status = (
+                    f"opponent tracked; no new pass for another "
+                    f"{self._overtake_retry_after_sec - now_sec:.1f}s after the last was abandoned")
                 return None
             gap_ahead = racing_math.track_progress_gap(
                 ego_arc_length, self.opponent.arc_length, self.total_track_length)
@@ -2403,6 +2493,9 @@ class PurePursuitNode(Node):
                 return None
             self.overtake_active = True
             self.overtake_side = side
+            self._overtake_started_sec = now_sec
+            self._overtake_best_lead = -gap_ahead
+            self._overtake_best_lead_sec = now_sec
             self.last_opponent_status = (
                 f"overtake active: opponent gap={gap_ahead:.2f}m, "
                 f"closing={closing_rate:.2f}m/s, passing "
@@ -2448,6 +2541,22 @@ class PurePursuitNode(Node):
             # pass was declared complete). See racing_math.track_lead_distance.
             lead = racing_math.track_lead_distance(
                 ego_arc_length, predicted_arc, self.total_track_length)
+            if lead > self._overtake_best_lead + self.overtake_min_lead_gain:
+                self._overtake_best_lead = lead
+                self._overtake_best_lead_sec = now_sec
+            if lead < self.overtake_clear_margin:
+                stalled_for = now_sec - self._overtake_best_lead_sec
+                passing_for = now_sec - self._overtake_started_sec
+                if stalled_for > self.overtake_stall_sec:
+                    self._abandon_overtake(
+                        now_sec, f"no gain on the opponent for {stalled_for:.1f}s "
+                                 f"(lead {lead:.2f}m, best {self._overtake_best_lead:.2f}m)")
+                    return None
+                if passing_for > self.overtake_max_duration_sec:
+                    self._abandon_overtake(
+                        now_sec, f"pass still unfinished after {passing_for:.1f}s "
+                                 f"> {self.overtake_max_duration_sec:.1f}s")
+                    return None
             if lead >= self.overtake_clear_margin:
                 self.get_logger().info("overtake: clear of the opponent -- back to the racing line.",
                                        throttle_duration_sec=1.0)
@@ -2473,6 +2582,21 @@ class PurePursuitNode(Node):
             else min(overtake_idx + 1, self.num_waypoints - 1)
         return racing_math.lateral_offset_point(
             self.xy, overtake_idx, next_idx, self.overtake_side * self.overtake_lateral_offset)
+
+    def _now_sec(self) -> float:
+        """The clock the opponent gate and pass timers read (tests step it)."""
+        return self.get_clock().now().nanoseconds / 1e9
+
+    def _abandon_overtake(self, now_sec: float, why: str):
+        """Give the pass up: back to the racing line, and the opponent must
+        be confirmed afresh before another pass, no sooner than
+        overtake_retry_sec from now."""
+        self.overtake_active = False
+        self.opponent_gate.reset()
+        self.opponent = OpponentTracker(self.opponent_velocity_smoothing, self.opponent_lost_timeout_sec)
+        self._overtake_retry_after_sec = now_sec + self.overtake_retry_sec
+        self.last_opponent_status = f"overtake abandoned: {why}"
+        self.get_logger().warn(f"overtake: {why} -- abandoning the pass.", throttle_duration_sec=1.0)
 
     def _seconds_since(self, stamp) -> float:
         if stamp is None:
