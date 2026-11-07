@@ -107,11 +107,10 @@ def generate_launch_description():
 
     * ``run_dir:=<dir>`` -- a run directory written by a mapping run
       (``ros2 run racerbot_launch map_course``, or auto_map_race_launch.py).
-      Uses that run's map.yaml and raceline_profiled.csv, and seeds the
-      particle filter at the run's start_pose.yaml -- where the car stopped
-      when mapping ended (the map origin for runs without one) -- so no RViz
-      click is needed. Leave the car there, or put it back on that spot
-      facing the same way, before launching. This is what map_course prints.
+      Uses that run's map.yaml and raceline_profiled.csv, and finds the car
+      from LiDAR anywhere on the open course facing the racing direction.
+      With start:=start_pose, seed at the mapping stop instead (map origin
+      if no start pose was recorded). This is what map_course prints.
 
           ros2 launch racerbot_launch race_launch.py \
               run_dir:=$HOME/racerbot-ws/data/<car>/racerbot_auto/<time> steering_law:=stanley
@@ -151,8 +150,11 @@ def generate_launch_description():
         description='pure_pursuit (default), stanley, lqr or mpc.')
     seed_arg = DeclareLaunchArgument(
         'seed_start', default_value='true',
-        description='With run_dir: seed the particle filter at the mapping '
-                    'end-of-mapping stop (start_pose.yaml). false: seed it yourself.')
+        description='With run_dir: automatically seed the particle filter. '
+                    'false: seed it yourself.')
+    start_arg = DeclareLaunchArgument(
+        'start', default_value='anywhere', choices=run_commands.START_MODES,
+        description='anywhere: find the car from LiDAR; start_pose: use the mapping stop.')
 
     # Same trick for particle_filter's config, but to check it rather than to
     # read a default out of it: a bad GPU ray-caster setting fails here, at
@@ -186,16 +188,15 @@ def generate_launch_description():
                     'launch', 'localize_run_launch.py')),
                 launch_arguments={'map_yaml': map_yaml, 'standalone': 'true'}.items())]
             if LaunchConfiguration('seed_start').perform(context).lower() in ('true', '1', 'yes'):
-                # The start pose map_course recorded; runs from before it
-                # existed (or auto_map_race_launch.py's) fall back to the map
-                # origin, where odometry read zero when SLAM started.
-                start = run_commands.read_start_pose(run_dir) or (0.0, 0.0, 0.0)
+                start = LaunchConfiguration('start').perform(context)
+                laser_offset_x = float(pp_params.get('laser_offset_x', 0.26))
+                laser_offset_y = float(pp_params.get('laser_offset_y', 0.0))
                 seeder = Node(
                     package='pure_pursuit', executable='seed_start_pose',
                     name='seed_start_pose', output='screen',
-                    parameters=[{'x': start[0], 'y': start[1], 'yaw': start[2],
-                                 'laser_offset_x': float(pp_params.get('laser_offset_x', 0.26)),
-                                 'laser_offset_y': float(pp_params.get('laser_offset_y', 0.0))}])
+                    parameters=[{**run_commands.seeder_parameters(
+                        run_dir, start, laser_offset_x, laser_offset_y),
+                        'give_up_sec': 120.0 if start == 'anywhere' else 60.0}])
         if not run_dir:
             pure_pursuit = IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(
@@ -234,5 +235,5 @@ def generate_launch_description():
         return localize + [seeder, RegisterEventHandler(
             OnProcessExit(target_action=seeder, on_exit=after_seed))]
 
-    return LaunchDescription([waypoints_arg, run_dir_arg, steering_law_arg, seed_arg,
+    return LaunchDescription([waypoints_arg, run_dir_arg, steering_law_arg, seed_arg, start_arg,
                               OpaqueFunction(function=layers)])

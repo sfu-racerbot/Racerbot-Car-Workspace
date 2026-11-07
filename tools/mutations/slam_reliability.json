@@ -383,8 +383,8 @@
   },
   {
    "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
-   "old": "if not field.is_free(pose[0], pose[1]):",
-   "new": "if False:",
+   "old": "if not field.is_free(pose[0], pose[1]):\n            continue  # inside a wall every beam ends on a wall, so its fit means nothing\n        fit = scan_fit",
+   "new": "if False:\n            continue  # inside a wall every beam ends on a wall, so its fit means nothing\n        fit = scan_fit",
    "tests": [
     "src/pure_pursuit/test/test_map_localize.py"
    ]
@@ -407,8 +407,8 @@
   },
   {
    "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
-   "old": "    if len(bx) < MIN_BEAMS:",
-   "new": "    if len(bx) < 0:",
+   "old": "    if len(bx) < MIN_BEAMS:\n        return (0.0, 0.0, 0.0), 0.0",
+   "new": "    if len(bx) < 0:\n        return (0.0, 0.0, 0.0), 0.0",
    "tests": [
     "src/pure_pursuit/test/test_map_localize.py"
    ]
