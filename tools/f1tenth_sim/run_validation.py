@@ -151,7 +151,7 @@ def __getattr__(name):
 
 
 def make_plant(track: str, num_agents: int, seed: int, calibration=None,
-               car_id=None) -> FidelityPlant:
+               car_id=None, max_laps: int = 1) -> FidelityPlant:
     """Build the environment and wrap it in this car's fidelity layer.
 
     ``calibration`` None is the selected car's calibration; a given one (a floor
@@ -181,7 +181,7 @@ def make_plant(track: str, num_agents: int, seed: int, calibration=None,
             integrator_timestep=INTEGRATOR_DT,
             integrator=IntegratorType.RK4,
             dynamics_model=DynamicModel.ST,
-            max_laps=1,
+            max_laps=max_laps,
         ),
         observation_config=ObservationConfig(type=ObservationType.DIRECT),
         lidar_config=components["lidar_config"],
@@ -836,12 +836,13 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     if steering_limit is not None and (
             not math.isfinite(steering_limit) or steering_limit <= 0.0):
         raise ValueError("steering_limit must be positive and finite")
+    original_steering_limit = STEERING_LIMIT
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
-    original_steering_limit = STEERING_LIMIT
     if steering_limit is not None:
         STEERING_LIMIT = float(steering_limit)
-    plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id)
+    plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id,
+                       max_laps=laps)
     line = plant.env.unwrapped.track.raceline
     if plan is None:
         plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
