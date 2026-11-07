@@ -165,7 +165,9 @@ def cone_clearance(field_at, xy, laser_x=0.26, half_fov=math.radians(30.0), beam
     """Shortest forward-cone LiDAR range at each station, driving along the path's own heading.
 
     `field_at(x, y)` is the distance in metres to the nearest mapped wall (0 inside one). Rays are marched
-    by that distance, so each hit is found to within `step_floor`.
+    by that distance and stop within `step_floor` of a wall, measured perpendicular to it, so a range is
+    never longer than the true one and short by at most step_floor / sin(angle between ray and wall):
+    the conservative direction for a safety check.
     """
     xy = np.asarray(xy, dtype=float)
     tangents, _ = path_frames(xy)
