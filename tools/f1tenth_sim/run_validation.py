@@ -840,7 +840,8 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     if steering_limit is not None and (
             not math.isfinite(steering_limit) or steering_limit <= 0.0):
         raise ValueError("steering_limit must be positive and finite")
-    _ensure_config()
+    if "STEERING_LIMIT" not in globals():
+        _ensure_config()
     original_steering_limit = STEERING_LIMIT
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
