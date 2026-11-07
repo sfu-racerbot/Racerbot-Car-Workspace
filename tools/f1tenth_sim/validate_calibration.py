@@ -159,15 +159,21 @@ def real_card(run, line, loc_dir) -> dict:
 
 # --- the simulated run -----------------------------------------------------------------
 
-def params_from_run(run) -> dict:
-    """The run's launched parameters that the mirror knows, with today's code paths set as that run's."""
+def params_from_run(run, old_code: bool = True) -> dict:
+    """The run's launched parameters that the mirror knows, with today's code paths set as that run's.
+
+    ``old_code`` (the default) overlays OLD_CODE: what the 2026-10-30 code did, for runs of that code.
+    A run made on later code was launched with those parameters itself (e.g. car 2's 20261106-171030 with
+    aim_depth_bias 1.0); pass ``old_code=False`` (``--launched-code``) to simulate exactly what it ran.
+    """
     import yaml
     import gap_mirror
     raw = yaml.safe_load((Path(run) / "metadata" / "params" / "gap_follow_node.yaml").read_text())
     values = raw[next(iter(raw))]["ros__parameters"] if "ros__parameters" not in raw else raw["ros__parameters"]
     known = gap_mirror.node_params()
     params = {k: v for k, v in values.items() if k in known}
-    params.update(OLD_CODE)
+    if old_code:
+        params.update(OLD_CODE)
     return params
 
 
@@ -426,6 +432,9 @@ def main(argv=None) -> int:
     s.add_argument("--seconds", type=float, default=115.0)
     s.add_argument("--workers", type=int, default=5)
     s.add_argument("--set", action="append", default=[], help="a parameter, name=value")
+    s.add_argument("--launched-code", action="store_true",
+                   help="drive exactly the run's launched parameters, without OLD_CODE (the 2026-10-30 code "
+                        "paths); for runs made on code after 2026-11-01")
     s.add_argument("--cal", action="append", default=[], help="a calibration field, name=value, for experiments")
     s.add_argument("--out", required=True)
     g = sub.add_parser("fit-plant", help="fit plant settings: real commands against the gyro")
@@ -491,7 +500,7 @@ def main(argv=None) -> int:
         return 0
     calibration = with_friction(args.friction, with_floor(args.floor))
     track = args.track or (FLOORS[args.floor].track if args.floor else "course_2026_10_30")
-    params = params_from_run(args.params_from)
+    params = params_from_run(args.params_from, old_code=not args.launched_code)
 
     if args.curve:
         calibration = replace(calibration, grip_curve=tuple(map(tuple, json.loads(Path(args.curve).read_text())["curve"])))
