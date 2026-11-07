@@ -1,5 +1,7 @@
 """ROS-free minimum-time line tests, collected by the pure_pursuit suite."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -86,6 +88,47 @@ def test_offsets_constant_normal_shift():
                        atol=0.005, rtol=0.0)  # m, 5 mm
 
 
+def test_optimize_stadium_corridor():
+    center = resample_closed_path(stadium(), 0.25, smooth=False)
+    width = 1.0  # m, on each side of the radius-2 m stadium
+    widths = np.full(len(center), width)
+
+    def field(x, y):
+        # Closed form: distance to the stadium centerline, then to either wall.
+        radial = np.hypot(np.maximum(np.abs(x - 3.0) - 3.0, 0.0), y)
+        return np.maximum(width - np.abs(radial - 2.0), 0.0)
+
+    physics = CarPhysics(steering_delay=0.0, speed_delay=0.0)
+    emergency, margin, body_floor = 0.35, 0.10, 0.08  # m
+    result = optimize_min_time(center, widths, widths, physics, field,
+                               emergency_stop_distance=emergency, cone_margin=margin,
+                               body_floor=body_floor, control_spacing=2.0, max_iter=30)
+    # oracle: invariants: optimize from center, improve time and enforce physical margins.
+    assert result.ok, result.reason
+    assert result.lap_s <= result.start_lap_s * 0.99  # s; at least 1% improvement
+    assert np.all(cone_clearance(field, result.xy) >= emergency + margin)  # m
+    assert np.all(footprint_clearance(field, result.xy) >= body_floor)  # m
+    assert np.max(np.abs(signed_curvature(result.xy))) <= physics.curvature_limit + 0.02  # 1/m
+
+
+def test_optimize_rejects_bad_widths():
+    center = resample_closed_path(stadium(), 0.25, smooth=False)
+    physics = CarPhysics()
+    field = lambda x, y: np.ones(np.broadcast(x, y).shape)
+    half_width, wall_margin = 0.155, 0.10  # m
+    width = half_width + wall_margin - 0.01  # m, less than required on each side
+    widths = np.full(len(center), width)
+    result = optimize_min_time(center, widths, widths, physics, field,
+                               half_width=half_width, wall_margin=wall_margin)
+    # oracle: spec min_time_line.optimize_min_time rejects a corridor narrower than the car plus margins.
+    assert not result.ok
+    assert f'{2 * width:.2f} m wide' in result.reason
+    with pytest.raises(ValueError, match='width_left and width_right'):
+        optimize_min_time(center, widths[:-1], widths, physics, field)
+    with pytest.raises(ValueError, match='width_left and width_right'):
+        optimize_min_time(center, widths, widths[:-1], physics, field)
+
+
 def test_car_physics_validation_and_limits():
     # oracle: spec min_time_line.CarPhysics: positive finite values, nonnegative delays.
     positive = ('a_lat_left', 'a_lat_right', 'a_accel', 'a_brake', 'v_max', 'v_min',
@@ -106,10 +149,10 @@ def test_car_physics_validation_and_limits():
     # oracle: closed form, bicycle steering geometry and small-angle rack rate.
     assert physics.curvature_limit == pytest.approx(
         np.tan(physics.linkage_gain * physics.max_steering_angle) / physics.wheelbase,
-        abs=1e-12)  # 1/m
+        abs=1e-12, rel=0.0)  # 1/m
     assert physics.curvature_rate == pytest.approx(
         physics.steering_rate * physics.linkage_gain / physics.wheelbase,
-        abs=1e-12)  # 1/(m s)
+        abs=1e-12, rel=0.0)  # 1/(m s)
 
 
 def test_circle_speed_and_lap_time():
@@ -156,30 +199,23 @@ def test_footprint_parallel_wall():
     field = lambda x, y: np.maximum(wall_y - y, 0.0)
     # oracle: closed form, nearest body edge is half_width nearer to the wall.
     assert footprint_clearance(field, xy, half_width=half_width)[1] == pytest.approx(
-        wall_y - half_width, abs=0.001)  # m, 1 mm
+        wall_y - half_width, abs=0.001, rel=0.0)  # m, 1 mm
 
 
 def test_speed_delay_respects_future_planned_speeds():
-    # Stadium: 6 m straights and 2 m radius semicircles, counter-clockwise.
-    radius, straight, spacing = 2.0, 6.0, 0.1
-    x = np.arange(0.0, straight, spacing)
-    angle = np.linspace(-np.pi / 2, np.pi / 2, 64, endpoint=False)
-    xy = np.vstack([
-        np.column_stack([x, np.full_like(x, -radius)]),
-        np.column_stack([straight + radius * np.cos(angle), radius * np.sin(angle)]),
-        np.column_stack([straight - x, np.full_like(x, radius)]),
-        np.column_stack([-radius * np.cos(angle), -radius * np.sin(angle)]),
-    ])
+    xy = stadium()
     physics = CarPhysics(v_max=8.0, steering_delay=0.0, speed_delay=0.1)
     speed, _, seg = speed_profile(xy, physics)
+    plan, _, _ = speed_profile(xy, replace(physics, speed_delay=0.0))
     positions = np.concatenate(([0.0], np.cumsum(seg)))
     total = positions[-1]
-    # oracle: invariant, min_time_line._respond_early docstring: every station
-    # must be no faster than any station within speed * delay metres ahead.
+    # oracle: spec min_time_line.speed_profile, delay shifts the unshifted plan
+    # by its own response-distance window, including wrap-around and v_min.
     for i in range(len(speed)):
         distance = (positions[:-1] - positions[i]) % total
-        future = speed[distance <= speed[i] * physics.speed_delay]
-        assert speed[i] <= future.min() + 1e-10  # m/s, floating-point tolerance
+        future = plan[distance <= plan[i] * physics.speed_delay]
+        assert speed[i] == pytest.approx(max(physics.v_min, future.min()),
+                                         abs=1e-9, rel=0.0)  # m/s
 
 
 def test_cone_clearance_parallel_wall():
