@@ -874,6 +874,27 @@ The geometric fallback is a heuristic, not certainty. Map mode removes the most 
 >
 > Fixed by tracking which map matches the *current* pose source rather than always using the live one: `auto_map_race_node` publishes `localization_source_topic` (`/auto_map_race/localization_source`, latched, "slam" or "particle_filter") on every handover/demotion, and `frozen_map_topic` (`/auto_map_race/frozen_map`, latched) once, right after the saved map's on-disk despeckling finishes -- the exact snapshot the particle filter's own `map_server` loads. `pure_pursuit_node` selects between that and the live `/map` accordingly (`_select_map_ray_caster`). With no `auto_map_race_node` in the graph (or an older one, before this existed), neither topic is ever published and behavior is exactly what it was before: always the live map.
 
+#### Confirming it's a car before racing it (2026-11-07)
+
+**In plain terms:** one scan that looks like a car isn't enough. The node watches a detection for about a sixth of a second, checks that it behaves like a car and isn't sitting on a wall, and only then tracks it and considers passing it.
+
+This exists because of car 2's solo run `20261106-175300`, with no other car on the track. The particle filter's pose (its estimate of where the car is, see [glossary](glossary.md)) was 0.8–2.2 m wrong along a straight.
+
+Map subtraction then compared the scan with the map from the wrong place. It read a real wall as an unmapped object, and the node committed to an overtake. The "car" kept being seen ahead, so the pass never ended, and the car drove its passing offset towards a wall until `body_contact` stopped it.
+
+A detection is a car (`opponent_gate.py`, `OpponentGate`) once it has been:
+
+- seen `opponent_confirm_count` (6) times within `opponent_confirm_window_sec` (0.3 s);
+- seen over at least `opponent_confirm_min_span_sec` (0.15 s), never jumping more than `opponent_max_jump_m` (0.5 m) between sightings;
+- moving along the track no faster than `opponent_max_speed` (8 m/s), and backwards no faster than `opponent_max_reverse_speed` (1.5 m/s, the jitter of the along-track estimate);
+- at least `opponent_min_wall_distance` (0.30 m) from the nearest wall of the map.
+
+The wall distance is what stops the phantom. Replaying all of car 2's 6 November map-racer runs (`tools/run_analysis/replay_opponent_gate.py`), every false detection sat 0.05–0.25 m from a mapped wall.
+
+The time and motion checks alone still confirmed run `175300`'s phantom 70 times, because it sits still in the map just as a stopped car would. With the wall check, none of the four runs confirms anything.
+
+The cost: a real car driving with its side within about 0.15 m of a wall is never passed. It is still followed, because the reactive safety net reads the raw scan and is not behind this check. Until a detection is confirmed, `/drive_intent` and the decision log say why, for example `not confirmed: seen 3 of 6 needed`.
+
 ### 2. "Am I catching them?" — tracking progress along the track, not raw position
 
 **In plain terms:** instead of asking "where is the other car in x/y space" — and then having to guess where the track goes from there to predict anything — this asks "how far around the *track* are they."
@@ -956,6 +977,14 @@ That comparison uses `racing_math.track_lead_distance`, a signed lead that takes
 That's deliberately not re-checked against a fresh detection every tick. Alongside or just past an opponent, it commonly falls completely out of the forward LiDAR cone, and that must not read as "lost it, panic" rather than "passed it, done."
 
 If the tracked opponent goes stale (`opponent_lost_timeout_sec`, default 1 s, with no update at all) and no overtake is in progress, tracking is simply cleared — nothing to react to.
+
+**Giving up a pass (2026-11-07).** A pass that isn't working is abandoned, and the car goes back to its racing line behind the other car:
+
+- its lead on the opponent hasn't grown by more than `overtake_min_lead_gain` (0.10 m) for `overtake_stall_sec` (1.5 s), or
+- it is still unfinished after `overtake_max_duration_sec` (8 s), or
+- the opponent has been out of sight for `overtake_max_blind_sec` (3 s), as before.
+
+After either of the first two, the opponent has to be confirmed again, and no new pass starts for `overtake_retry_sec` (3 s). On run `20261106-175300` the pass on the phantom lasted its whole 5.7 s, the lead never better than −2.4 m. The stall rule would have ended it after 1.5 s even if the phantom had got past the confirmation step.
 
 > **Two known defects in this logic, found in simulation on 2026-08-05. Read both before relying on the overtake.**
 >

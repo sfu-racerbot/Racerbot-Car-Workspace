@@ -299,6 +299,35 @@ pure_pursuit_node:
     # blind for longer than this and the dead-reckoned position is no
     # longer trustworthy, so the pass is abandoned.
     overtake_max_blind_sec: 3.0
+    # A pass that stops gaining is given up: no gain in lead of more than
+    # overtake_min_lead_gain for overtake_stall_sec, or still unfinished after
+    # overtake_max_duration_sec. Then no new pass for overtake_retry_sec.
+    # Car 2's run 20261106-175300 held a pass on a phantom for its whole
+    # 5.7 s, the lead never better than -2.4 m, and ended in body_contact.
+    overtake_stall_sec: 1.5
+    overtake_min_lead_gain: 0.10      # meters
+    overtake_max_duration_sec: 8.0
+    overtake_retry_sec: 3.0
+    # --- Is it really a car? (opponent_gate.py) ---
+    # A detection is only tracked and overtaken once it has been seen
+    # opponent_confirm_count times within opponent_confirm_window_sec,
+    # spanning at least opponent_confirm_min_span_sec, never jumping more than
+    # opponent_max_jump_m between sightings, moving along the track between
+    # -opponent_max_reverse_speed and opponent_max_speed, and at least
+    # opponent_min_wall_distance from the nearest wall of the map. Until then
+    # it is not raced against; the reactive safety net reads the raw scan
+    # and is not behind this gate.
+    # The wall distance is what stops a phantom: replaying car 2's 6 Nov
+    # map-racer runs, every false detection sat 0.05-0.25 m from a mapped
+    # wall, and without that check run 175300's phantom confirmed 70 times.
+    # A real car is still followed when it hugs a wall; it just isn't passed.
+    opponent_confirm_count: 6
+    opponent_confirm_window_sec: 0.3
+    opponent_confirm_min_span_sec: 0.15
+    opponent_max_jump_m: 0.5
+    opponent_max_reverse_speed: 1.5   # m/s: centroid jitter along a 0.15 m-spaced line reads up to 1 m/s
+    opponent_max_speed: 8.0           # m/s
+    opponent_min_wall_distance: 0.30  # meters
     laser_offset_x: 0.26              # meters -- MEASURED rear-axle base_link to LiDAR
     laser_offset_y: 0.0
 

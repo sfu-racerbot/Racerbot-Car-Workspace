@@ -1,4 +1,5 @@
 """Live-scan seeding against the recorded 20261106-164401 course."""
+import math
 import sys
 import time
 from pathlib import Path
@@ -112,11 +113,19 @@ def test_nothing_is_seeded_before_the_scans_agree(rig, scans):
     assert spin([helper, seeder], lambda: pub.get_subscription_count() > 0, 5)
     pub.publish(scan(scans, 2))
     assert spin([helper, seeder], lambda: seeder.fix is not None, 45)
-    # Spec: moving to scan 4 cannot confirm the scan 2 candidate.
+    # Spec: moving to scan 4 cannot confirm the scan 2 candidate. The disagreeing scan refuses that
+    # candidate; the seeder may then search afresh and confirm the car where it now is, scan 4's
+    # recorded pose, if that search finishes inside these 2 s (it does once the suite has warmed up).
+    # So: whatever is found or published is scan 4's pose (base_link; laser frame on the wire),
+    # never scan 2's, which is 3.9 m away. Recorded poses: loc.py, run 20261106-164401.
     msg = scan(scans, 4)
     spin([helper, seeder], lambda: False, 2, lambda: pub.publish(msg))
-    assert not got
-    assert seeder.found_pose is None
+    there = scans['poses'][4]
+    assert seeder.found_pose is None or math.hypot(
+        seeder.found_pose[0] - there[0], seeder.found_pose[1] - there[1]) < 0.15  # m
+    wire = seed_message_fields(*there, 0.26, 0.0)
+    assert all(math.hypot(r.pose.pose.position.x - wire[0], r.pose.pose.position.y - wire[1]) < 0.15
+               for r in got)  # m
 
 
 def test_a_scan_from_another_course_is_never_seeded(rig, scans):
