@@ -33,7 +33,7 @@ def write_start_pose(run_dir, pose) -> None:
     x, y, yaw = (float(v) for v in pose)
     (Path(run_dir) / START_POSE_FILE).write_text(
         '# Where the car stopped at the end of mapping (map frame, base_link).\n'
-        '# race_launch.py run_dir:=... seeds the particle filter here.\n'
+        '# race_launch.py start:=start_pose seeds the particle filter here.\n'
         f'x: {x:.4f}\ny: {y:.4f}\nyaw: {yaw:.4f}\n')
 
 

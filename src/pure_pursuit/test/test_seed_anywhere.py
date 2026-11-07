@@ -1,5 +1,4 @@
 """Live-scan seeding against the recorded 20261106-164401 course."""
-import math
 import sys
 import time
 from pathlib import Path

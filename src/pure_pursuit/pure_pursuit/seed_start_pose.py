@@ -3,8 +3,8 @@
 In anywhere mode, match live LiDAR scans against the saved map, reject an
 ambiguous or backwards fix, and require agreeing scans before seeding.
 
-A mapping run (``map_course``) saves where the car stopped at the end, in
-the map frame, as start_pose.yaml -- on the racing line it just recorded,
+In start_pose mode, a mapping run (``map_course``) saves where the car stopped
+at the end, in the map frame, as start_pose.yaml -- on the racing line it recorded,
 measured by SLAM while it was still running. A car left there (or put back
 on that spot, facing the same way) is at that pose; race_launch.py passes it
 here as x, y, yaw, and this node hands the filter exactly that, as the "2D
