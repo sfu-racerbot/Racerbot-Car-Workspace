@@ -29,14 +29,14 @@ import run_validation as rv  # noqa: E402
 from sim_fidelity import FLOORS, with_floor, with_friction  # noqa: E402
 
 
-def plan_line(xy, top_speed: float, lateral: float):
+def plan_line(xy, top_speed: float, lateral: float, brake: float = 8.0, accel: float = 3.0):
     """A PathPlan along ``xy`` with run_validation's profile, at these limits."""
     from pure_pursuit import racing_math
     xy = np.asarray(xy, float)
     seg = racing_math.compute_segment_lengths(xy, closed=True)
     kappa = racing_math.estimate_path_curvature(xy, closed=True)
     speed = racing_math.compute_velocity_profile(seg, kappa, v_max=top_speed, v_min=0.5, a_lat_max=lateral,
-                                                 a_accel_max=3.0, a_brake_max=8.0, closed=True,
+                                                 a_accel_max=accel, a_brake_max=brake, closed=True,
                                                  smoothing_passes=8, friction_ellipse=True)
     return rv.PathPlan(xy=xy, seg_len=seg, speed=speed)
 
@@ -54,6 +54,8 @@ def main(argv=None) -> int:
     ap.add_argument("--floor", choices=sorted(FLOORS))
     ap.add_argument("--safety", choices=rv.SAFETY_MODES, default="fallback")
     ap.add_argument("--laps", type=int, default=1)
+    ap.add_argument("--brake", type=float, default=8.0, help="profile braking limit, m/s^2 (car 2 measured 3.0-4.5)")
+    ap.add_argument("--accel", type=float, default=3.0, help="profile acceleration limit, m/s^2")
     ap.add_argument("--steering-limit", type=float,
                     help="steering limit in radians (default: car configuration)")
     args = ap.parse_args(argv)
@@ -61,7 +63,7 @@ def main(argv=None) -> int:
     track = eval_gap.track_path(args.track)
     xy = load_line(args.line) if args.line else None
     for top, lateral in itertools.product(*([float(v) for v in s.split(",")] for s in (args.speed, args.lateral))):
-        plan = plan_line(xy, top, lateral) if xy is not None else None
+        plan = plan_line(xy, top, lateral, args.brake, args.accel) if xy is not None else None
         r = rv.run_pure_solo(track, args.seed, args.timeout, calibration=calibration, plan=plan,
                              max_speed=top, max_lateral_accel=lateral, safety=args.safety,
                              laps=args.laps, steering_limit=args.steering_limit)
