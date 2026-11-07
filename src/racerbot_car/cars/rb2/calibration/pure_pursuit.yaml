@@ -1,10 +1,11 @@
 pure_pursuit_node:
   ros__parameters:
-    # 0.349 rad = 20 deg (was 0.26). Since the 2026-10-16 circle calibration
-    # (vesc.yaml gain -0.78, servo_max 0.95; docs/hardware-reference.md) both
-    # sides reach ~25 deg, so 20 leaves 5 deg for the gain's error below
-    # 19 deg, where nothing was measured. The planner (auto_map_race.yaml
-    # profile_max_steering_angle) plans to 0.30 so this controller keeps
-    # ~3 deg to correct with on the tightest planned corner. Re-derive both
-    # if vesc.yaml's gain/offset/servo_min/servo_max ever change.
-    max_steering_angle: 0.349
+    # 0.42 rad = 24 deg (0.349 until 2026-11-07, 0.26 before 2026-10-16), the
+    # same measured limit as gap_follow.yaml: servo 0.918 right / 0.263 left,
+    # 24.1 / 24.3 deg on the 2026-10-16 circles (vesc.yaml gain -0.78,
+    # servo_max 0.95; docs/hardware-reference.md). The planner
+    # (auto_map_race.yaml profile_max_steering_angle) plans below this so the
+    # controller keeps steering to correct with on the tightest planned
+    # corner. Re-derive both if vesc.yaml's gain/offset/servo_min/servo_max
+    # ever change.
+    max_steering_angle: 0.42

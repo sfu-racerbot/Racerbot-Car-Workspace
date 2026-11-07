@@ -403,6 +403,10 @@ def historical_params(ref, config, node):
 RECALIBRATED = {
     ('rb1', 'vesc.yaml', '/**', 'speed_to_erpm_gain'): (
         3650.0, 4600.0, "docs/hardware-reference.md, car 1's VESC section, 2026-11-02"),
+    ('rb2', 'gap_follow.yaml', 'gap_follow_node', 'max_steering_angle'): (
+        0.349, 0.42, "docs/hardware-reference.md, car 2's steering, 2026-11-07"),
+    ('rb2', 'pure_pursuit.yaml', 'pure_pursuit_node', 'max_steering_angle'): (
+        0.349, 0.42, "docs/hardware-reference.md, car 2's steering, 2026-11-07"),
 }
 
 
