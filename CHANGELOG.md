@@ -6,7 +6,19 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): race from anywhere on the course
+## 2026-11-07 (latest): map_course brakes to a stop instead of cutting the controls
+
+### pure_pursuit (auto_map_race_node)
+
+- **Behavior change: leaving the mapping phase brakes under gap_follow's steering.** The last lap's closure used to send an all-zero command at once (speed 0 *and* steering 0), from 3+ m/s. On car 2 on 2026-11-06 that put the body into a wall in 4 of 5 `map_course` runs: gap_follow logged clearance -0.009 to -0.146 m about a second later while asking for -0.28 to -0.35 rad. Now gap_follow's command keeps going out, steering unchanged, with its speed capped by `v0 - mapping_stop_decel * t`, then the node holds the all-zero stop as before. gap_follow's own stops win (min), and LB released or a stale gap_follow command is an immediate full stop. The map save, and in map-then-race mode the handover, wait for the ramp. A profile refused in map-then-race mode (state `error`) brakes the same way.
+- **New parameters:** `mapping_stop_decel` (2.0 m/s², must be positive and finite or the node refuses to start), `mapping_stop_hold_sec` (0.5 s).
+- Tests: `src/pure_pursuit/test/test_auto_map_race_controlled_stop.py` (11, each seen to fail against the old code or a deliberate break).
+
+### Tools
+
+- `tools/racerbot_sim/run_map_course_validation.py` always reports the simulator's contact verdict for the mapping step, even when an earlier check fails.
+
+## 2026-11-07: race from anywhere on the course
 
 ### pure_pursuit, racerbot_launch
 
