@@ -122,30 +122,37 @@ def _respond_early(speed, s, delay):
     """
     if delay <= 0.0:
         return speed
+    # Backwards over two laps, so every station takes its minimum from stations ahead that have already
+    # been lowered themselves: a single forward sweep over the unfiltered speeds misses chains of windows.
     total = s[-1]
-    out = speed.copy()
-    pos = s[:-1]
-    loop = np.concatenate([pos, pos + total])
-    vals = np.concatenate([speed, speed])
-    for i in range(len(speed)):
-        reach = pos[i] + speed[i] * delay
-        j = np.searchsorted(loop, reach, side='right')
-        out[i] = min(out[i], float(vals[i:max(j, i + 1)].min()))
-    return out
+    n = len(speed)
+    pos = np.concatenate([s[:-1], s[:-1] + total])
+    out = np.concatenate([speed, speed]).astype(float)
+    for i in range(2 * n - 1, -1, -1):
+        reach = pos[i] + out[i] * delay
+        j = int(np.searchsorted(pos, reach, side='right'))
+        if j > i + 1:
+            out[i] = min(out[i], float(out[i + 1:j].min()))
+    return out[:n]
 
 
 def _accel_brake(cap, seg, physics):
     """Forward (acceleration) and backward (braking) passes round a closed loop."""
+    # In squared speed w = v^2 the forward pass w[j] = min(cap[j], w[j-1] + 2 a ds) has the closed form
+    # w[j] = 2 a S[j] + min over k <= j of (cap[k] - 2 a S[k]), S the distance along the path: a running
+    # minimum. Two laps' worth of stations make the loop's closure exact (no corner is further than a lap
+    # behind or ahead); the backward pass is the same thing run in reverse.
+    # The two envelopes are each taken from the corner caps and combined with min(): lowering a speed for
+    # braking can never break the acceleration limit, which only bounds how fast speed may rise.
     n = len(cap)
-    v = cap.copy()
-    for _ in range(2):
-        for k in range(2 * n):
-            i, j = k % n, (k + 1) % n
-            v[j] = min(v[j], math.sqrt(v[i] ** 2 + 2.0 * physics.a_accel * seg[i]))
-        for k in range(2 * n, 0, -1):
-            i, j = k % n, (k - 1) % n
-            v[j] = min(v[j], math.sqrt(v[i] ** 2 + 2.0 * physics.a_brake * seg[j]))
-    return v
+    w = np.tile(np.asarray(cap, dtype=float) ** 2, 3)
+    ds = np.tile(seg, 3)
+    S = np.concatenate([[0.0], np.cumsum(ds)[:-1]])          # distance from the start to station j
+    R = np.cumsum(ds[::-1])[::-1]                             # distance from station j to the end
+    two_a, two_b = 2.0 * physics.a_accel, 2.0 * physics.a_brake
+    accel = two_a * S + np.minimum.accumulate(w - two_a * S)
+    brake = two_b * R + np.minimum.accumulate((w - two_b * R)[::-1])[::-1]
+    return np.sqrt(np.minimum(accel, brake)[n:2 * n])
 
 
 def lap_time(xy, physics: CarPhysics) -> float:
