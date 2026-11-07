@@ -61,8 +61,10 @@ def seeder_parameters(run_dir, start: str, laser_offset_x: float, laser_offset_y
         raise ValueError(f"start must be one of {START_MODES}, got {start!r}")
     params = {'mode': start, 'laser_offset_x': laser_offset_x, 'laser_offset_y': laser_offset_y}
     if start == 'anywhere':
+        # Run 20261106-175300: the filter remained about 1 m off when racing began.
         params.update(map_yaml=str(Path(run_dir) / 'map.yaml'),
-                      waypoints_file=str(Path(run_dir) / 'raceline_profiled.csv'))
+                      waypoints_file=str(Path(run_dir) / 'raceline_profiled.csv'),
+                      confirm_radius=0.30)
     else:
         x, y, yaw = read_start_pose(run_dir) or (0.0, 0.0, 0.0)
         params.update(x=x, y=y, yaw=yaw)

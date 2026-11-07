@@ -105,11 +105,11 @@ def test_missing_start_pose_is_called_out_only_when_missing():
 
 
 def test_seeder_parameters_anywhere_uses_run_paths_and_offsets(tmp_path):
-    # Interface spec: the two run files and the supplied laser offsets.
+    # Interface spec: the run files, supplied laser offsets and 0.30 m radius.
     assert run_commands.seeder_parameters(tmp_path, 'anywhere', 0.26, -0.02) == {
         'mode': 'anywhere', 'map_yaml': str(tmp_path / 'map.yaml'),
         'waypoints_file': str(tmp_path / 'raceline_profiled.csv'),
-        'laser_offset_x': 0.26, 'laser_offset_y': -0.02}
+        'laser_offset_x': 0.26, 'laser_offset_y': -0.02, 'confirm_radius': 0.30}
 
 
 def test_seeder_parameters_start_pose_reads_saved_pose(tmp_path):
@@ -118,6 +118,8 @@ def test_seeder_parameters_start_pose_reads_saved_pose(tmp_path):
     assert run_commands.seeder_parameters(tmp_path, 'start_pose', 0.26, 0.0) == {
         'mode': 'start_pose', 'x': 1.25, 'y': -2.5, 'yaw': 0.75,
         'laser_offset_x': 0.26, 'laser_offset_y': 0.0}
+    # Spec: start_pose keeps the node's default confirmation radius.
+    assert 'confirm_radius' not in run_commands.seeder_parameters(tmp_path, 'start_pose', 0.26, 0.0)
 
 
 def test_seeder_parameters_start_pose_without_file_uses_origin(tmp_path):
