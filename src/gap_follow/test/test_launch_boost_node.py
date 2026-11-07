@@ -154,7 +154,10 @@ def test_a_blocked_grid_does_not_start_the_launch(made, rear_x):
     # A car-sized box dead ahead: at 0.5 m the braking ceiling is 0 (no room
     # to speed up), at 0.35 m the tick creeps. Neither is a launch, and the
     # launch stays armed for when the way is clear.
+    # The positions were set with the 0.20 m forward reserve; they move with it
+    # (0.12 since 2026-11-07), so the box leaves the same room past the reserve.
     node, published = made
+    rear_x -= 0.20 - node.forward_stop_clearance
     blocked = _raycast(_corridor(1.0, 1.0) + _box(rear_x))
     drive = _tick(node, published, blocked)
     assert drive.speed <= node.escape_creep_speed

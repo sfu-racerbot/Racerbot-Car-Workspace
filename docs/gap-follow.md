@@ -76,6 +76,10 @@ The team asked for a faster `gap_follow` with less weave, one that can win races
 >
 > The table below was measured with car 1's values, so car 2's laps will differ.
 
+> **2026-11-07: a smaller forward reserve.** `forward_stop_clearance` is **0.12 m** (it was 0.20). Inside it the car crawls at `escape_creep_speed`. That cone points where the car is aimed, so in a full-lock turn it often sees the wall the car is already turning away from, and the car crawls through a turn it had room to make. Car 2's 2026-11-06 runs did exactly that: turning at or near full lock they were held to 0.4 m/s or less by the creep and clearance ceilings over 400 times, while TTC and emergency clearance fired 4 times in all.
+>
+> In the simulator (car 2, 0.42 rad, 6 seeds each) 0.12 m took the 06a course from 11.50 s to 11.35 s and left 06b at 8.46 s, with no contact on either. Smaller margins were tried and not shipped: `safety_margin` (the bubble) at 0.12 gave contact on 4 of 6 seeds, and `swept_clearance_margin` at 0.02 on 1 of 6. TTC, emergency clearance and swept clearance are unchanged. **Not yet driven.** To go back: `forward_stop_clearance: 0.20` in `gap_follow.yaml`.
+
 ### What changed
 
 - **Top speed 3.5 → 5.0 m/s** (`max_speed`). A launch can still lower it, for example `max_speed:=1.0` for a first floor run. A launch cannot raise it above 5.0.
