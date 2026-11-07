@@ -187,10 +187,12 @@ def sim_drive(job) -> dict:
     from gap_follow import gap_logic, opponent_tracking as ot
     import eval_gap
     import yaml
-    track, params, seed, seconds, calibration, line_path, grip_only = job
+    track, params, seed, seconds, calibration, line_path, grip_only, *rest = job
+    start = rest[0] if rest else None
     plant = eval_gap.make_plant(track, seed, calibration)
     centre = plant.env.unwrapped.track.raceline
-    obs, _ = plant.reset(np.array([[centre.xs[0], centre.ys[0], centre.yaws[0]]]))
+    pose = start if start is not None else (centre.xs[0], centre.ys[0], centre.yaws[0])
+    obs, _ = plant.reset(np.array([pose], dtype=float))
 
     class _Lidar:
         angle_min = float(-eval_gap.components_half_fov())
@@ -432,6 +434,11 @@ def main(argv=None) -> int:
     s.add_argument("--seconds", type=float, default=115.0)
     s.add_argument("--workers", type=int, default=5)
     s.add_argument("--set", action="append", default=[], help="a parameter, name=value")
+    s.add_argument("--start", default=None,
+                   help="x,y,yaw_deg to start from, map frame; default the track centreline's first point. "
+                        "Start where the real runs started: a standing start elsewhere is a different corner "
+                        "approach (2026-11-06: the centreline start is 3 m before the hairpin, every real run "
+                        "started past it)")
     s.add_argument("--launched-code", action="store_true",
                    help="drive exactly the run's launched parameters, without OLD_CODE (the 2026-10-30 code "
                         "paths); for runs made on code after 2026-11-01")
@@ -511,7 +518,12 @@ def main(argv=None) -> int:
     # replace what the run was launched with.
     named = {item.partition("=")[0] for item in args.set}
     params.update({k: v for k, v in eval_gap.parse_set(args.set).items() if k in named})
-    jobs = [(track, params, args.first_seed + k, args.seconds, calibration, args.line, False) for k in range(args.seeds)]
+    start = None
+    if args.start:
+        x, y, yaw_deg = (float(v) for v in args.start.split(","))
+        start = (x, y, math.radians(yaw_deg))
+    jobs = [(track, params, args.first_seed + k, args.seconds, calibration, args.line, False, start)
+            for k in range(args.seeds)]
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(sim_drive, jobs))
     out = combine(results)
