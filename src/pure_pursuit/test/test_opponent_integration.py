@@ -30,6 +30,14 @@ from rclpy.parameter import Parameter
 from pure_pursuit.pure_pursuit_node import OpponentTracker, PurePursuitNode
 from pure_pursuit import racing_math
 
+# The tests built on these fixtures are about what a pass does (side, steering,
+# completion, the safety net over it), so a detection counts as a car on its
+# first sighting. OpponentGate's real defaults -- six sightings over 0.15 s,
+# 0.30 m from any mapped wall -- are tested in test_opponent_gate.py and, in
+# this node, in test_opponent_confirmation.py.
+CONFIRM_AT_ONCE = ('-p', 'opponent_confirm_count:=1', '-p', 'opponent_confirm_min_span_sec:=0.0')
+
+
 @pytest.fixture(scope='module')
 def profiled_csv(tmp_path_factory):
     """Profile the checked-in example track once for the whole test module."""
@@ -55,7 +63,8 @@ def node_factory(profiled_csv):
     rclpy.init(args=['--ros-args',
                      '-p', f'waypoints_file:={profiled_csv}',
                      '-p', 'enable_deadman:=false',
-                     '-p', 'drive_topic:=/test_only/drive'])
+                     '-p', 'drive_topic:=/test_only/drive',
+                     *CONFIRM_AT_ONCE])
     built = []
 
     def make():
@@ -83,7 +92,8 @@ def node(profiled_csv):
     rclpy.init(args=['--ros-args',
                      '-p', f'waypoints_file:={profiled_csv}',
                      '-p', 'enable_deadman:=false',
-                     '-p', 'drive_topic:=/test_only/drive'])
+                     '-p', 'drive_topic:=/test_only/drive',
+                     *CONFIRM_AT_ONCE])
     n = PurePursuitNode()
     yield n
     n.destroy_node()
@@ -935,7 +945,8 @@ def map_mode_node(profiled_csv):
                      '-p', 'enable_deadman:=false',
                      '-p', 'drive_topic:=/test_only/drive',
                      '-p', 'opponent_detection_mode:=map',
-                     '-p', 'opponent_detection_settle_sec:=0.0'])
+                     '-p', 'opponent_detection_settle_sec:=0.0',
+                     *CONFIRM_AT_ONCE])
     n = PurePursuitNode()
     yield n
     n.destroy_node()

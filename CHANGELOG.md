@@ -6,7 +6,16 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-02 (latest): car 1's motor command gain, from the 2026-10-30 lap gap
+## 2026-11-07 (latest): pure_pursuit confirms a car before passing it, and gives up a pass that isn't working
+
+### pure_pursuit
+
+- **Behavior change: a detected opponent is only tracked and overtaken once `OpponentGate` confirms it.** That takes 6 sightings over at least 0.15 s within 0.3 s, no jump over 0.5 m, an along-track speed between −1.5 and 8 m/s, and at least 0.30 m from the nearest mapped wall. On car 2's solo run `20261106-175300` the node overtook a phantom (a wall, misread from a wrong particle-filter pose) and ended in `body_contact`. Replayed, every phantom on that day's four map-racer runs sat 0.05–0.25 m from a mapped wall; with the gate none is confirmed. A real car within about 0.15 m of a wall is followed but not passed. The reactive safety net is not behind the gate.
+- **Behavior change: a pass is given up** when the lead hasn't grown by 0.10 m for 1.5 s, or after 8 s unfinished, and no new pass starts for 3 s (`overtake_stall_sec`, `overtake_min_lead_gain`, `overtake_max_duration_sec`, `overtake_retry_sec`).
+- `test_opponent_integration.py`'s three node fixtures now confirm a detection on its first sighting (`opponent_confirm_count:=1`, `opponent_confirm_min_span_sec:=0.0`). No assertion changed. The gate's shipped defaults are tested in `test_opponent_gate.py` and `test_opponent_confirmation.py`.
+- New tool: `tools/run_analysis/replay_opponent_gate.py` replays a recorded run's detections through the gate.
+
+## 2026-11-02: car 1's motor command gain, from the 2026-10-30 lap gap
 
 ### racerbot_car (rb1 calibration)
 
