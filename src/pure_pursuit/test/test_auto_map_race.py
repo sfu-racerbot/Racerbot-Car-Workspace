@@ -1100,6 +1100,11 @@ class _LapQualityStub:
     def get_logger(self):
         return self.logger
 
+    def _start_stop_ramp(self):
+        # The end-of-mapping brake ramp: its behaviour is pinned through the
+        # real node in test_auto_map_race_controlled_stop.py.
+        self.stop_ramp_starts = getattr(self, 'stop_ramp_starts', 0) + 1
+
     def _write_profile(self):
         self.write_profile_calls += 1
         if self.write_profile_error is not None:

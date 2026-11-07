@@ -134,6 +134,14 @@ auto_map_race_node:
     closure_widen_after_revolutions: 1.25
     max_closure_distance: 4.0
     transition_stop_sec: 2.0
+    # Leaving the mapping phase: gap_follow keeps steering while its speed is
+    # capped by v0 - mapping_stop_decel * t, then the car holds stopped.
+    # The old all-zero stop (steering 0 too) put car 2's body into a wall in
+    # 4 of 5 map_course runs on 2026-11-06. 2.0 m/s^2 is under half the
+    # 4.5 m/s^2 braking car 2 measured (docs/sim-calibration.md), leaving grip
+    # for the bend: 3.5 m/s stops in about 3 m.
+    mapping_stop_decel: 2.0
+    mapping_stop_hold_sec: 0.5
     # slam_toolbox's save_map/serialize_map block its executor, freezing the
     # map->odom TF (and so /slam_pose) while they run. Racing does not start
     # until both finish, so that freeze always lands while the car is
