@@ -115,11 +115,11 @@ def test_seeder_parameters_anywhere_uses_run_paths_and_offsets(tmp_path):
 def test_seeder_parameters_start_pose_reads_saved_pose(tmp_path):
     # Interface spec: use the recorded pose and the supplied laser offsets.
     run_commands.write_start_pose(tmp_path, (1.25, -2.5, 0.75))
+    # Spec: start_pose keeps the node's default confirmation radius.
+    assert 'confirm_radius' not in run_commands.seeder_parameters(tmp_path, 'start_pose', 0.26, 0.0)
     assert run_commands.seeder_parameters(tmp_path, 'start_pose', 0.26, 0.0) == {
         'mode': 'start_pose', 'x': 1.25, 'y': -2.5, 'yaw': 0.75,
         'laser_offset_x': 0.26, 'laser_offset_y': 0.0}
-    # Spec: start_pose keeps the node's default confirmation radius.
-    assert 'confirm_radius' not in run_commands.seeder_parameters(tmp_path, 'start_pose', 0.26, 0.0)
 
 
 def test_seeder_parameters_start_pose_without_file_uses_origin(tmp_path):
