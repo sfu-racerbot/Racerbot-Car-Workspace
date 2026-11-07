@@ -193,7 +193,7 @@ Same result as above, except `gap_follow` drives the lap instead of a human — 
 
 With `bringup_launch.py` running in terminal 1, `ros2 run racerbot_launch map_course` in terminal 2 runs SLAM and `gap_follow` for three closed laps. It saves the map, pose graph and racing line to `~/racerbot-ws/data/<id>/racerbot_auto/<timestamp>/`, then shuts down and prints the race commands.
 
-These seed the localizer where mapping stopped, so no RViz is needed. The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
+These find the car from its LiDAR anywhere on the course and start the localizer there, so no RViz is needed. The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
 
 ## Localizing against a saved map
 

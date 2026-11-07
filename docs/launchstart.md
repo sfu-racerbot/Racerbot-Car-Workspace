@@ -197,7 +197,7 @@ ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<t
 
 Mapping defaults to a 3.5 m/s speed cap. The gyro SLAM profile was validated by replay only up to about 3.3 m/s. Raise the default only after a recorded gyro run at a higher speed produces a clean `slam_report`.
 
-**Then leave the car where it stopped.** That spot is where racing on this map starts. If you'll race this map on another day, mark the spot and the direction (tape on the floor) before moving the car.
+**Then you can move the car.** Racing on this map can start from anywhere on the course, facing the way it drove while mapping. See [Race on a saved map](#race-on-a-saved-map).
 
 Options, added to the end of the command:
 
@@ -321,17 +321,9 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 
 ## Race on a saved map
 
-**The car must be where mapping left it:** still there, or put back on the marked spot facing the same way. The localizer is told the car starts there, because there is no RViz on the car to click a start pose, and it only searches about 0.5 m and 20° around that spot. Simulator-validated only.
+**Put the car anywhere on the course,** on open track and facing the racing direction (the way it drove while mapping). Keep it still until the race controller starts. The race launch matches the car's LiDAR scans (sweeps of distance readings, see [glossary](glossary.md)) against the whole saved map to find it, then starts the localizer there. Tested on recorded scans and in the simulator only; not yet driven.
 
 **Terminal 1:** the `bringup_launch.py` from mapping, still running. Start it again if you closed it.
-
-**Terminal 2, first:** check the car really is on the spot. This reads one LiDAR scan (a sweep of distance readings, see [glossary](glossary.md)) and publishes nothing, so it cannot move the car:
-
-```bash
-ros2 run pure_pursuit check_start --ros-args -p run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run>
-```
-
-**Working when:** it prints `GO: car is 0.05 m and 2 deg from the start pose`. **If it prints `NO-GO`:** it says how far to move the car. Do this before racing, because the race launch cannot tell: it reports `racing can begin` wherever the car really is.
 
 **Terminal 2**, pick one (the end-of-mapping printout has these with your run's folder already filled in):
 
@@ -348,7 +340,22 @@ ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/
 
 **Working when:** `Particle filter is at the start pose; racing can begin.` appears (the race controller only starts after it), then the car drives the racing line while you hold LB.
 
-**If it says the filter never took the start pose:** the car isn't on the spot where mapping left it, or this is the wrong map. Move it there and run the command again. Nothing drives in the meantime.
+**If it can't find the car,** the log says why, and it keeps trying for 2 minutes. Nothing drives in the meantime.
+
+| The log says | What to do |
+|---|---|
+| `ambiguous` | That spot looks like another part of the course. Move the car somewhere with a more distinctive view, such as near a bend. |
+| `does not match this map` | Check this is the right map and that the course hasn't changed. |
+| `faces against the racing direction` | Turn the car round. |
+| `the car must be stationary` | Leave the car still. |
+
+**To start exactly where mapping stopped instead,** put the car back on that spot and add `start:=start_pose`. Before racing that way, check it really is on the spot. This reads one scan and publishes nothing, so it cannot move the car:
+
+```bash
+ros2 run pure_pursuit check_start --ros-args -p run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run>
+```
+
+**Working when:** it prints `GO: car is 0.05 m and 2 deg from the start pose`. **If it prints `NO-GO`:** it says how far to move the car.
 
 **Forgot the run folder?**
 
