@@ -115,25 +115,27 @@ def speed_profile(xy, physics: CarPhysics, passes: int = 3):
 
 
 def _respond_early(speed, s, delay):
-    """Each station's speed no higher than any planned within the next speed * delay metres.
+    """Each station's speed no higher than the plan (`speed` as passed in) anywhere within the next
+    speed * delay metres: braking points move earlier by the distance covered while the car responds.
 
     The car reaches a commanded speed `delay` late, so a braking point planned exactly where braking must
     begin arrives too fast: car 2's simulated hairpin entry ran 0.3 m wide at 2.5 m/s against a planned 2.2.
     """
     if delay <= 0.0:
         return speed
-    # Backwards over two laps, so every station takes its minimum from stations ahead that have already
-    # been lowered themselves: a single forward sweep over the unfiltered speeds misses chains of windows.
+    # The minimum is over the plan as it stood before this shift, never over shifted values: windows of
+    # neighbouring stations overlap, so taking minima of minima would carry every slow corner backwards
+    # round the whole lap (it did: 12.4 s became 21.4 s on the 6 Nov course). The physics is a shift of the
+    # braking points by the response delay, not a chain.
     total = s[-1]
     n = len(speed)
     pos = np.concatenate([s[:-1], s[:-1] + total])
-    out = np.concatenate([speed, speed]).astype(float)
-    for i in range(2 * n - 1, -1, -1):
-        reach = pos[i] + out[i] * delay
-        j = int(np.searchsorted(pos, reach, side='right'))
-        if j > i + 1:
-            out[i] = min(out[i], float(out[i + 1:j].min()))
-    return out[:n]
+    plan = np.concatenate([speed, speed]).astype(float)
+    out = speed.astype(float).copy()
+    for i in range(n):
+        j = int(np.searchsorted(pos, pos[i] + speed[i] * delay, side='right'))
+        out[i] = float(plan[i:max(j, i + 1)].min())
+    return out
 
 
 def _accel_brake(cap, seg, physics):
