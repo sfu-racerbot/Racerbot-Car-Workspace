@@ -193,6 +193,177 @@ def find_start(field, bx, by, near=None, near_radius=1.0, cell_stride=4, yaw_ste
     return best_pose, max(best_fit, 0.0)
 
 
+#: Localizing anywhere (find_pose_anywhere). A real scan fits its own course's map at 0.99+ (car 2,
+#: 2026-11-06, loc.py) and another course's at well under 0.5; another car in view costs a few percent.
+MIN_GLOBAL_FIT = 0.80
+#: Uniqueness is judged on the mean beam-to-wall distance (capped at RESIDUAL_CAP_M), not on fit: along a
+#: straight, the share of beams within 10 cm barely changes 3.6 m further on (0.995 against 0.93, car 2 run
+#: 20261106-164401), while the mean distance does: 0.004-0.013 m at the true pose against 0.028-0.090 m at
+#: the best other place on all six test scans. The best distinct other place must sit at least
+#: AMBIGUITY_RATIO times, and AMBIGUITY_MIN_GAP_M more, above the best, or the answer is not unique.
+RESIDUAL_CAP_M = 0.3
+AMBIGUITY_RATIO = 2.0
+AMBIGUITY_MIN_GAP_M = 0.015
+#: Two answers further apart than this are different places, not one place found twice.
+DISTINCT_M = 1.0
+DISTINCT_RAD = math.radians(30.0)
+#: base_link sits mid-track: a candidate closer than half the car's width to a wall cannot be the car.
+CAR_HALF_WIDTH_M = 0.155
+
+
+@dataclass
+class GlobalFix:
+    """Where a scan is on the map, found with no prior, and whether that answer can be trusted.
+
+    `runner_up_*` describe the best answer at a *different* place (DISTINCT_M or DISTINCT_RAD away); a
+    near-tie in residual means the course looks the same from two places and the fix is refused.
+    `residual` is the mean beam-to-wall distance in metres, capped at RESIDUAL_CAP_M per beam.
+    """
+    pose: tuple
+    fit: float
+    residual: float
+    runner_up_pose: tuple
+    runner_up_fit: float
+    runner_up_residual: float
+    ok: bool
+    reason: str
+
+
+def scan_residual(field, bx, by, pose) -> float:
+    """Mean distance from each beam's end to the nearest wall, capped at RESIDUAL_CAP_M. Lower is better."""
+    if len(bx) == 0:
+        return RESIDUAL_CAP_M
+    return float(np.minimum(field.distance(*_to_map(bx, by, pose)), RESIDUAL_CAP_M).mean())
+
+
+def _distinct(a, b) -> bool:
+    turn = abs((a[2] - b[2] + math.pi) % (2.0 * math.pi) - math.pi)
+    return math.hypot(a[0] - b[0], a[1] - b[1]) > DISTINCT_M or turn > DISTINCT_RAD
+
+
+def spread_candidates(scores, xs, ys, yaws, count, min_step_m=0.3, min_turn_rad=math.radians(15.0)):
+    """Up to `count` (x, y, yaw) in descending score, none within min_step_m and min_turn_rad of another.
+
+    scores[i, j] scores cell (xs[i], ys[i]) at heading yaws[j]. Neighbouring cells and headings of one place
+    all score almost alike, so the plain top `count` can be one place many times over; spreading them keeps a
+    distant equal (a symmetric twin) in the shortlist.
+    """
+    picked = []
+    for flat in np.argsort(scores, axis=None)[::-1]:
+        i, j = np.unravel_index(flat, scores.shape)
+        candidate = (float(xs[i]), float(ys[i]), float(yaws[j]))
+        if all(math.hypot(candidate[0] - p[0], candidate[1] - p[1]) > min_step_m
+               or abs((candidate[2] - p[2] + math.pi) % (2.0 * math.pi) - math.pi) > min_turn_rad
+               for p in picked):
+            picked.append(candidate)
+            if len(picked) >= count:
+                break
+    return picked
+
+
+def find_pose_anywhere(field, bx, by, cell_stride=3, yaw_step=math.radians(5.0), refine=40):
+    """Where on the whole map this scan was taken, and whether that answer is unique enough to race on.
+
+    Scores every `cell_stride`-th free cell at least CAR_HALF_WIDTH_M from a wall at every `yaw_step`, keeps
+    the `refine` best that are not near one another, refines each down the distance field, and compares the
+    best with the best distinct alternative. Refuses (ok False, with the reason) on too few beams, a poor
+    fit, or a near-tie.
+    """
+    nothing = (0.0, 0.0, 0.0)
+    cap = RESIDUAL_CAP_M
+
+    def refused(pose, fit, residual, runner, runner_fit, runner_residual, reason):
+        return GlobalFix(pose, fit, residual, runner, runner_fit, runner_residual, False, reason)
+
+    bx, by = np.asarray(bx, dtype=float), np.asarray(by, dtype=float)
+    if len(bx) < MIN_BEAMS:
+        return refused(nothing, 0.0, cap, nothing, 0.0, cap,
+                       f'only {len(bx)} usable beams in the scan (need {MIN_BEAMS}): is the LiDAR running '
+                       'and unblocked?')
+    rows, cols = np.nonzero(field.free & (field.raw > CAR_HALF_WIDTH_M))
+    keep = (rows % cell_stride == 0) & (cols % cell_stride == 0)
+    xs = field.origin_x + (cols[keep] + 0.5) * field.resolution
+    ys = field.origin_y + (rows[keep] + 0.5) * field.resolution
+    if len(xs) == 0:
+        return refused(nothing, 0.0, cap, nothing, 0.0, cap, 'the map has no open space wide enough for the car')
+    yaws = np.arange(-math.pi, math.pi, yaw_step)
+    sparse_x, sparse_y = bx[::4], by[::4]
+    scores = np.empty((len(xs), len(yaws)))
+    for j, yaw in enumerate(yaws):
+        c, s = math.cos(yaw), math.sin(yaw)
+        wx, wy = c * sparse_x - s * sparse_y, s * sparse_x + c * sparse_y
+        for begin in range(0, len(xs), 2000):
+            batch = slice(begin, begin + 2000)
+            scores[batch, j] = (field.distance(xs[batch, None] + wx, ys[batch, None] + wy) < 0.15).mean(axis=1)
+
+    picked = spread_candidates(scores, xs, ys, yaws, refine)
+    refined = []
+    for start in picked:
+        pose = match_scan(field, bx, by, start, iterations=25, start_trim=0.5)
+        if not field.is_free(pose[0], pose[1]):
+            continue  # inside a wall every beam ends on a wall, so its fit means nothing
+        pose = tuple(float(v) for v in pose)
+        refined.append((scan_residual(field, bx, by, pose), scan_fit(field, bx, by, pose), pose))
+    if not refined:
+        return refused(nothing, 0.0, cap, nothing, 0.0, cap, 'no candidate pose on open floor fits the scan')
+    refined.sort(key=lambda item: item[0])
+    best_residual, best_fit, best = refined[0]
+    runner_residual, runner_fit, runner = next(
+        (item for item in refined[1:] if _distinct(item[2], best)), (cap, 0.0, nothing))
+    if best_fit < MIN_GLOBAL_FIT:
+        return refused(best, best_fit, best_residual, runner, runner_fit, runner_residual,
+                       f'best fit {best_fit:.2f} is under {MIN_GLOBAL_FIT:.2f}: this scan does not match this '
+                       'map. Is this the right course, and has it changed since it was mapped?')
+    if runner_residual < max(AMBIGUITY_RATIO * best_residual, best_residual + AMBIGUITY_MIN_GAP_M):
+        return refused(best, best_fit, best_residual, runner, runner_fit, runner_residual,
+                       f'ambiguous: ({best[0]:.2f}, {best[1]:.2f}) and ({runner[0]:.2f}, {runner[1]:.2f}) fit '
+                       f'about as well ({best_residual * 100:.1f} cm and {runner_residual * 100:.1f} cm mean '
+                       'distance to the walls). The course looks the same from both; move the car somewhere '
+                       'with a more distinctive view.')
+    return GlobalFix(best, best_fit, best_residual, runner, runner_fit, runner_residual, True,
+                     f'found at ({best[0]:.2f}, {best[1]:.2f}, {math.degrees(best[2]):.0f} deg), fit '
+                     f'{best_fit:.2f}, {best_residual * 100:.1f} cm from the walls on average; the next best '
+                     f'place is {runner_residual * 100:.1f} cm')
+
+
+#: A laser cannot pass through a wall. On its own map a real scan crosses a mapped wall on 0.9-3.5% of
+#: beams (six scans of car 2's run 20261106-164401, with and without a car parked ahead); placed as well as
+#: it will go on another SFU corridor course it crosses 8.9-64%, even where its fit was 0.93.
+MAX_GLOBAL_SEE_THROUGH = 0.06
+
+
+def localize_scan(field, ranges, angle_min, angle_increment, laser_x=LASER_X):
+    """find_pose_anywhere on one LaserScan's ranges, then refuse a pose whose beams pass through the map's
+    walls: fit alone can't tell one straight 1.5 m corridor course from another."""
+    bx, by = scan_points(ranges, angle_min, angle_increment, laser_x=laser_x)
+    fix = find_pose_anywhere(field, bx, by)
+    if len(bx) < MIN_BEAMS or fix.fit <= 0.0:
+        return fix
+    # Checked even when the fix is ambiguous: on the wrong map every place fits about equally badly, and
+    # "this is the wrong map" is the answer the operator can act on, not "move the car".
+    see_through = float(see_through_rate(field, [fix.pose], [np.asarray(ranges, dtype=float)], angle_min,
+                                         angle_increment, laser_x=laser_x, stride=2)[0])
+    if see_through <= MAX_GLOBAL_SEE_THROUGH and not fix.ok:
+        return fix
+    if see_through > MAX_GLOBAL_SEE_THROUGH:
+        return GlobalFix(fix.pose, fix.fit, fix.residual, fix.runner_up_pose, fix.runner_up_fit,
+                         fix.runner_up_residual, False,
+                         f'{see_through * 100:.0f}% of beams pass through this map\'s walls at the best place '
+                         f'(at most {MAX_GLOBAL_SEE_THROUGH * 100:.0f}% allowed): this scan does not match this '
+                         'map. Is this the right course, and has it changed since it was mapped?')
+    return GlobalFix(fix.pose, fix.fit, fix.residual, fix.runner_up_pose, fix.runner_up_fit,
+                     fix.runner_up_residual, True, f'{fix.reason}; {see_through * 100:.0f}% see-through')
+
+
+def line_heading_error(line_xy, pose) -> float:
+    """Radians between the car's heading and the racing line's direction at the nearest point, 0 to pi."""
+    line_xy = np.asarray(line_xy, dtype=float)
+    i = int(np.argmin(np.hypot(line_xy[:, 0] - pose[0], line_xy[:, 1] - pose[1])))
+    ahead, behind = line_xy[(i + 1) % len(line_xy)], line_xy[i - 1]
+    direction = math.atan2(ahead[1] - behind[1], ahead[0] - behind[0])
+    return abs((pose[2] - direction + math.pi) % (2.0 * math.pi) - math.pi)
+
+
 @dataclass
 class Track:
     """One row per scan: pose (x, y, yaw) of base_link on the map, and that scan's fit."""

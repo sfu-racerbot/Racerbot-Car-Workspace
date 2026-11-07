@@ -18,6 +18,14 @@ for changes the team made.
 
 - `tools/racerbot_sim/run_map_course_validation.py` always reports the simulator's contact verdict for the mapping step, even when an earlier check fails.
 
+## 2026-11-07: race from anywhere on the course
+
+### pure_pursuit, racerbot_launch
+
+- **Behavior change: `race_launch.py run_dir:=...` now finds the car from its LiDAR anywhere on the saved map (`start:=anywhere`, the new default).** It used to seed the particle filter at the spot where mapping stopped, so the car had to be put back there. `start:=start_pose` keeps the old behaviour. `seed_start_pose` searches the whole map (`map_localize.localize_scan`), confirms on later scans that the car is still, and seeds the filter only then. It refuses, saying why and retrying for 2 minutes, on a poor fit, more than 6% of beams passing through the map's walls, a near-tie with another place on the course, or a car facing more than 60° against the racing line. pure_pursuit still starts only after the seeder succeeds.
+- **The filter must settle within 0.30 m of that seed in anywhere mode** (`start_pose` mode keeps 1.0 m). On car 2's run `20261106-175300` the filter sat 2.0-2.2 m along a straight from the truth, and a phantom opponent and a false overtake followed.
+- Tests: `test_map_localize_anywhere.py` (six real scans of run `20261106-164401`, found within 7 cm), `test_seed_anywhere.py`, `test_run_commands.py`. New tool: `tools/run_analysis/scan_fixture.py`.
+
 ## 2026-11-02: car 1's motor command gain, from the 2026-10-30 lap gap
 
 ### racerbot_car (rb1 calibration)
