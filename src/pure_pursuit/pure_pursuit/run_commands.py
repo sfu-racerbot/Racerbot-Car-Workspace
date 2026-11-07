@@ -14,6 +14,7 @@ import math
 from pathlib import Path
 
 START_POSE_FILE = 'start_pose.yaml'
+START_MODES = ('anywhere', 'start_pose')
 
 # steering_law values pure_pursuit_node accepts (pure_pursuit.yaml), in the
 # order they are offered, with a one-line description each.
@@ -54,6 +55,20 @@ def read_start_pose(run_dir):
     return pose if all(math.isfinite(v) for v in pose) else None
 
 
+def seeder_parameters(run_dir, start: str, laser_offset_x: float, laser_offset_y: float) -> dict:
+    """The seed_start_pose node's parameters for racing the run in run_dir."""
+    if start not in START_MODES:
+        raise ValueError(f"start must be one of {START_MODES}, got {start!r}")
+    params = {'mode': start, 'laser_offset_x': laser_offset_x, 'laser_offset_y': laser_offset_y}
+    if start == 'anywhere':
+        params.update(map_yaml=str(Path(run_dir) / 'map.yaml'),
+                      waypoints_file=str(Path(run_dir) / 'raceline_profiled.csv'))
+    else:
+        x, y, yaw = read_start_pose(run_dir) or (0.0, 0.0, 0.0)
+        params.update(x=x, y=y, yaw=yaw)
+    return params
+
+
 def race_command(run_dir, steering_law: str = 'pure_pursuit') -> str:
     """The one-line race command for ``run_dir`` and one steering law."""
     command = f'ros2 launch racerbot_launch race_launch.py run_dir:={Path(run_dir)}'
@@ -73,7 +88,7 @@ def commands_text(run_dir, raceline_ok: bool = True, map_ok: bool = True,
     if raceline_ok:
         saved.append('raceline_profiled.csv (racing line with speeds)')
     if start_ok:
-        saved.append('start_pose.yaml (where the car is stopped now; racing starts there)')
+        saved.append('start_pose.yaml (where the car stopped mapping)')
     for item in saved:
         lines.append(f'  - {item}')
     if not map_ok:
@@ -92,24 +107,21 @@ def commands_text(run_dir, raceline_ok: bool = True, map_ok: bool = True,
     if not start_ok:
         lines += [
             '',
-            '  !! The start pose was not recorded; racing will assume the car',
-            '  !! starts at the map origin, which may not be where it is.',
+            '  !! The start pose was not recorded; start:=start_pose assumes',
+            '  !! the map origin, which may not be where the car is.',
         ]
     lines += [
         '',
-        'BEFORE RACING: leave the car exactly where it stopped. If you move',
-        'it, put it back on that spot, facing the same way. The race launch',
-        'tells the localizer the car starts there (there is no RViz on the',
-        'car to click a start pose), and it only searches about 0.5 m and',
-        '20 deg around it. Mark the spot (tape on the floor) before you move',
-        'the car, and you can race this map again on any later day.',
+        'BEFORE RACING: put the car anywhere on the course on the open track,',
+        'facing the racing direction (the way it drove while mapping). The',
+        'race launch finds it from its LiDAR and refuses, saying why, if it',
+        'cannot: the map may be wrong, the place may look like another part',
+        'of the course, or the car may be facing backwards.',
+        'Use start:=start_pose to start exactly where mapping stopped instead.',
         '',
         'Terminal 1 -- hardware: the bringup you mapped with, still running.',
         'If you closed it, start it again:',
         '  ros2 launch f1tenth_stack bringup_launch.py',
-        '',
-        'Terminal 2 -- check the car is on the spot. This must print GO:',
-        f'  ros2 run pure_pursuit check_start --ros-args -p run_dir:={run_dir}',
         '',
         'Terminal 2 -- pick ONE, then hold LB to drive:',
     ]
