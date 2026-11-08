@@ -166,6 +166,69 @@ The earlier probe-built lines gave 11.40–11.47 s on 06a and 8.67–8.77 s on 0
 
 These are no-ROS simulator runs of the shipped line and controller math, not a full ROS launch or physical-car validation. **Before driving: static checks, wheels off the ground, then the capped low-speed floor test. Hold LB whenever the car should move.**
 
+## Two-car racing on the 6 Nov courses, 2026-11-08
+
+**The current map racer fails these traffic tests.** All 48 two-car runs ended in independently checked body contact before four laps; none completed a physical pass. The solo lap advantage above does not establish that this controller can race an opponent.
+
+The new `tools/f1tenth_sim/race_two.py` runs car 2's `delay_lqr`, shipped lines and 6 Nov floor model. Both cars start stationary, with the opponent about 3 m ahead on the line. The map and line are already loaded and settled before the start.
+
+The opponent types are another map racer with its profile multiplied by 0.8 or 0.9, shipped `gap_follow`, and a map follower capped at 1.5 m/s. Map opponents use the same opponent decisions and reactive safety as ego. Every row below covers seeds 12345–12350.
+
+An **attempt** starts when the controller commits to its offset target. A **completed pass** requires ground-truth progress at least 1 m ahead for 0.5 s. That independent check prevents a mistaken controller completion from counting as a pass.
+
+**Stuck time** counts ticks within 3 m behind the opponent while commanding at least 0.3 m/s below the normal profile. It stops accumulating when the run ends, so it is a censored measurement, not the eventual time a stalled car would lose.
+
+| Course | Opponent | Attempts / completed / abandoned | Stuck median (range), s | Car / wall contact runs | Emergency stop ticks | Four-lap finishes |
+|---|---|---|---|---|---|---|
+| 06a | Map ×0.8 | 6 / 0 / 0 | 3.01 (1.80–3.05) | 2 / 4 | 178 | 0/6 |
+| 06a | Map ×0.9 | 6 / 0 / 1 | 2.65 (2.55–2.73) | 1 / 5 | 603 | 0/6 |
+| 06a | gap_follow | 7 / 0 / 2 | 2.56 (2.25–3.48) | 1 / 5 | 88 | 0/6 |
+| 06a | 1.5 m/s blocker | 6 / 0 / 0 | 1.83 (1.60–2.00) | 6 / 0 | 38 | 0/6 |
+| 06b | Map ×0.8 | 6 / 0 / 2 | 3.01 (2.93–3.05) | 0 / 6 | 118 | 0/6 |
+| 06b | Map ×0.9 | 6 / 0 / 0 | 2.70 (2.43–2.78) | 0 / 6 | 47 | 0/6 |
+| 06b | gap_follow | 6 / 0 / 0 | 2.49 (2.33–2.55) | 0 / 6 | 35 | 0/6 |
+| 06b | 1.5 m/s blocker | 6 / 0 / 5 | 3.50 (3.30–3.53) | 0 / 6 | 141 | 0/6 |
+
+Contact ends the run immediately. These are failed races, with no four-lap race time or finite time penalty to report. On 06a contact occurred at 2.80–14.78 s; on 06b it occurred at 3.40–4.08 s.
+
+The same harness also ran six solo controls per course, with full map-subtraction avoidance enabled. All finished with zero body contact: four-lap times were 46.35–46.40 s on 06a and 36.50–36.83 s on 06b. The supplied solo flying-lap ranges, 11.40–11.47 / 8.75–8.87 s, exclude the standing start and use `pure_course.py`'s emergency-only map safety.
+
+The 06b full-safety solo controls had 50–58 avoidance ticks in the first three seeds and one body-contact *safety stop* across all six. That stop is a scan-based precaution, not body contact according to the independent map check.
+
+### Where the races are lost
+
+The committed-pass branch replaces `delay_lqr` with pure-pursuit geometry aimed at one point 4 m along the line and offset 0.35 m sideways. This target does not describe a collision-checked route around a corner. The side-room check measures the current scan, not the future swept body along that route.
+
+Seed 12345 gives representative traces:
+
+| Course / opponent | Trace event | Measurement |
+|---|---|---|
+| 06a / Map ×0.8 | Pass starts at 0.925 s | Real opponent confirmed; estimated gap 2.70 m, true gap 3.00 m; left target `(8.264, 0.038)` |
+| 06a / Map ×0.8 | Emergency escape at 2.625 s | Speed 1.73 m/s; only 0.112 m free along the swept arc |
+| 06a / Map ×0.8 | Ego hits wall at 4.275 s | Zero speed command, actual speed 0.55 m/s; pass still active |
+| 06a / blocker | Emergency stop at 2.700 s | Speed 1.77 m/s; arc free distance 0.139 m |
+| 06a / blocker | Car contact at 2.875 s | Zero command, actual speed 1.61 m/s; no 1 m clear lead |
+| 06b / gap_follow | Controller declares completion at 3.275 s | Estimated lead +1.09 m, true lead −1.80 m; wall contact follows at 3.400 s |
+| 06b / blocker | Stall give-up before 4.075 s | No 0.10 m lead gain for 1.5 s; ego hits wall before recovering |
+
+The gate is admitting real cars; late confirmation is not the dominant finding in these starts. Every two-car run commits. Three controller-declared completions against `gap_follow` fail the truth-based completion check, showing that dead-reckoned opponent progress can be wrong enough to rejoin prematurely.
+
+The emergency layers do execute and command zero or 0.25 m/s escape. They do not guarantee a stop within the remaining distance: at 1.77 m/s, even constant 3 m/s² braking needs about 0.52 m, before transport and response delay. A 0.139 m emergency horizon is already too late for that closing event.
+
+The mapped forward-cone pass cap also has an implementation hazard. `_reactive_override` returns a ceiling, but `control_step` assigns it as the new target rather than taking the minimum with the profile. The online curvature ceiling can hide this, so its contribution needs a controlled trial before changing the node.
+
+### Measurement fidelity and evidence
+
+`race_two.py` compiles an explicit allow-list of ROS-free method bodies from `pure_pursuit_node.py`. The detector, confirmation gate, tracker, pass timers and reactive decisions therefore execute the current node source without starting ROS. Clock, scan-message and map-ray-cast I/O are supplied by the simulator.
+
+The ordinary path follower and command shaper remain `run_validation.py` mirrors. Off-line recovery is mirrored separately. Node startup, live map handover and ROS [watchdog](glossary.md#watchdog) scheduling are outside this scenario; the static map is settled before the simulated start.
+
+`run_validation.run_pure_traffic` remains a legacy fixture: it omits the confirmation gate and stall/duration/retry rules, uses the older fallback safety, and follows the track's own line against a scripted 2 m/s opponent. Use the new harness for these course comparisons.
+
+Per-seed results, source/input hashes and decision transitions are stored in [`race_two_2026_11_08.json`](../tools/f1tenth_sim/race_two_2026_11_08.json). Full 40 Hz traces are written by each reproducible run.
+
+Contact verdicts use `FidelityPlant._wall_contact` and `_chassis_contact`, including the closed contact-wall map, never Gym's flag.
+
 ## The fast path: map and race from one launch
 
 The five phases further down are still the best way to *understand* the stack, and they remain available individually for reusing a saved course. But for a course the car has never seen, the supported route is one command:

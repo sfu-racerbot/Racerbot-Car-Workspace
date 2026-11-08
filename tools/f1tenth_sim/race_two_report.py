@@ -45,10 +45,27 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('root', type=Path)
     ap.add_argument('--output', type=Path, required=True)
+    ap.add_argument('--diagnose-seed', type=int)
     args = ap.parse_args()
     report = archive(args.root)
     args.output.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report['table'], indent=2))
+    if args.diagnose_seed is not None:
+        for run in report['runs']:
+            r, events = run['result'], run['events']
+            if r['seed'] != args.diagnose_seed or r['opponent'] == 'solo':
+                continue
+            commit = next((e for e in events if e['active'] == 'True'), None)
+            emergency = next((e for e in events if e['safety'] in (
+                'emergency_obstacle', 'body_contact', 'emergency_escape')), None)
+            print(r['track'], r['opponent'], r['seed'])
+            for label, event in (('commit', commit), ('emergency', emergency), ('end', events[-1])):
+                if event is None:
+                    continue
+                lead = float(event['ego_progress']) - float(event['opp_progress']) - float(event['head_start'])
+                print(label, {k: event[k] for k in ('time', 'ego_speed', 'ego_command',
+                      'desired_steering', 'target', 'arc_clearance', 'mapped_forward',
+                      'status', 'safety', 'safety_detail', 'car_contact', 'wall_contact')}, 'truth lead', round(lead, 3))
 
 
 if __name__ == '__main__':
