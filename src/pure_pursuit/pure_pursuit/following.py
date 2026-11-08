@@ -74,15 +74,16 @@ def project_arc(xy, cumulative, point, index):
 
 
 def speed_ceiling(gap, opponent_speed, age, *, brake=3.0,
-                  delay=0.45, reserve=0.65, speed_uncertainty=1.0, stop_speed=0.30):
+                  delay=0.45, reserve=0.65, speed_uncertainty=1.0, stop_speed=0.30,
+                  speed_credit=0.0, opponent_brake=3.0):
     """Bound ego's delayed stop before the opponent's earliest stop.
 
     Gap is visible rear surface to ego front, along the line. The reserve
     covers centroid/pose error, curvature and tracking. Opponent may stop
-    instantaneously: deliberately give NO stopping-distance credit to its
-    speed. Its tracked speed only increases the uncertainty allowance during
-    lost sightings; it never creates free space. Thus hard braking cannot
-    invalidate an optimistic opponent-velocity prediction.
+    instantaneously unless speed_credit supplies a fresh, conservative speed
+    lower bound. Credit then permits only that leader's immediate braking
+    distance at opponent_brake, not constant-speed forward prediction. The
+    default is zero credit; stale sightings consume additional gap.
 
     Bound the speed target through a 0.45 s response allowance (0.10
     transport + 1/7 speed-loop lag + sensing/tracking budget), then brake
@@ -92,12 +93,17 @@ def speed_ceiling(gap, opponent_speed, age, *, brake=3.0,
     physical braking. Acceleration is bounded by the measured plant's
     4 m/s²; it does not increase this speed target.
     """
-    values = (gap, opponent_speed, age, brake, delay, reserve, speed_uncertainty, stop_speed)
+    values = (gap, opponent_speed, age, brake, delay, reserve, speed_uncertainty,
+              stop_speed, speed_credit, opponent_brake)
     if not all(math.isfinite(v) for v in values):
         return 0.0
-    if min(age, delay, reserve, speed_uncertainty, stop_speed) < 0 or brake <= 0:
+    if min(age, delay, reserve, speed_uncertainty, stop_speed, speed_credit) < 0 or min(brake, opponent_brake) <= 0:
         return 0.0
     available = gap - reserve - age * (abs(opponent_speed) + speed_uncertainty)
+    # Credit is supplied only by a fresh, uncertainty-bounded track. Assume
+    # the leader brakes immediately at its measured bound; never credit the
+    # unbounded exponentially smoothed velocity directly.
+    available += speed_credit ** 2 / (2 * opponent_brake)
     linear = delay * brake
     cap = max(0.0, math.sqrt(max(0.0, linear ** 2 + 2 * brake * available)) - linear)
     # A first-order speed loop asymptotically following tiny falling targets

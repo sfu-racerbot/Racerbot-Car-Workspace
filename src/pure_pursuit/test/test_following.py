@@ -41,6 +41,19 @@ def test_standstill_threshold_boundary():
     assert following.speed_ceiling(.5 + 1e-9, 0, 0, **options) > 1
 
 
+@pytest.mark.parametrize('leader_speed', [0.0, 1.0, 2.0, 4.0])
+def test_confident_speed_credit_is_only_the_leaders_braking_distance(leader_speed):
+    ego_speed, brake, delay, reserve = leader_speed + 1, 3, .45, .65
+    # oracle: closed form; ego delayed stop minus leader immediate stop.
+    gap = reserve + ego_speed * delay + ego_speed ** 2 / (2 * brake) - leader_speed ** 2 / (2 * brake)
+    assert following.speed_ceiling(gap, leader_speed, 0, speed_credit=leader_speed) == pytest.approx(
+        ego_speed, abs=1e-12)  # m/s
+    assert following.speed_ceiling(gap, leader_speed, 0) <= ego_speed
+    assert following.speed_ceiling(gap, leader_speed, 0, speed_credit=-1) == 0
+    assert following.speed_ceiling(gap, leader_speed, 0, speed_credit=math.nan) == 0
+    assert following.speed_ceiling(gap, leader_speed, 0, opponent_brake=0) == 0
+
+
 def test_delayed_speed_loop_stops_before_hard_braking_leader():
     # oracle: invariant against an independently integrated measured plant:
     # 0.10s transport, first-order gain 7/s, +4/-3 m/s² (6 Nov floor).

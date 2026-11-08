@@ -104,6 +104,7 @@ class OpponentTracker:
         self.progress_rate = 0.0
         self.last_update_time = None
         self.prev_nearest_index = None
+        self.history = []
 
     def update(self, arc_length: float, now_sec: float, total_length: float = 0.0):
         if self.arc_length is not None and self.last_update_time is not None:
@@ -122,6 +123,29 @@ class OpponentTracker:
                     self.progress_rate = alpha * raw_rate + (1.0 - alpha) * self.progress_rate
         self.arc_length = arc_length
         self.last_update_time = now_sec
+        self.history = [(t, arc) for t, arc in self.history if 0 <= now_sec - t <= 0.35 + 1e-9]
+        self.history.append((now_sec, arc_length))
+
+    def speed_lower_bound(self, now_sec, total_length, uncertainty, brake):
+        """Current speed lower bound allowing centroid error and hard braking."""
+        if (not all(math.isfinite(v) for v in (now_sec, total_length, uncertainty, brake, self.progress_rate))
+                or uncertainty < 0 or brake <= 0):
+            return 0.0
+        age = self.seconds_since_seen(now_sec)
+        # ROS stamps have nanosecond resolution; arithmetic at a window's
+        # endpoint must not discard it for a floating-point ulp.
+        if age < -1e-9 or age > 0.10 or len(self.history) < 2:
+            return 0.0
+        age = max(0.0, age)
+        span = self.history[-1][0] - self.history[0][0]
+        if span < 0.15:
+            return 0.0
+        delta = self.history[-1][1] - self.history[0][1]
+        if not math.isfinite(delta):
+            return 0.0
+        if total_length > 0:
+            delta = (delta + total_length / 2) % total_length - total_length / 2
+        return max(0.0, min(self.progress_rate, delta / span) - uncertainty - brake * (age + span / 2))
 
     def is_fresh(self, now_sec: float) -> bool:
         return (self.last_update_time is not None
@@ -2408,6 +2432,18 @@ class PurePursuitNode(Node):
             closest = dynamic_closest
             trigger_distance = self.avoidance_trigger_distance
             distance_source = 'map-unexplained object'
+        if (self.enable_opponent_following and self.opponent.arc_length is not None
+                and dynamic_closest is not None and math.isfinite(closest)):
+            # A car can weave onto a different path station or temporarily
+            # fail confirmation. Do not hand steering to gap avoidance in
+            # between sightings: brake on the scan and retain delay_lqr.
+            # This only lowers speed; all body/arc/emergency tiers ran first.
+            cap = following.speed_ceiling(
+                closest + self.laser_offset_x - (self.car_length + self.wheelbase) / 2,
+                0.0, 0.0, brake=self.following_brake, delay=self.following_response_sec,
+                reserve=self.following_reserve, speed_uncertainty=self.following_speed_uncertainty,
+                stop_speed=self.following_stop_speed)
+            return None, cap, None, f"unconfirmed traffic: retain line steering, brake cap={cap:.2f}m/s"
         if closest >= trigger_distance:
             return (
                 None,
@@ -2556,8 +2592,7 @@ class PurePursuitNode(Node):
             opponent_y = laser_world_y + centroid_range * math.sin(world_angle)
 
             opp_idx, _ = racing_math.find_nearest_index(
-                self.xy, (opponent_x, opponent_y), closed=self.closed_loop,
-                prev_index=self.opponent.prev_nearest_index, search_window=self.nearest_search_window)
+                self.xy, (opponent_x, opponent_y), closed=self.closed_loop)
             walls = self.opponent_wall_distance
             wall_distance = walls.at(opponent_x, opponent_y) if walls is not None else math.inf
             verdict = self.opponent_gate.observe(
@@ -2585,6 +2620,16 @@ class PurePursuitNode(Node):
         ego_arc_length = float(self.cumulative_arc_length[nearest_idx])
 
         if (self.enable_opponent_following and self.opponent.arc_length is not None
+                and self.opponent.seconds_since_seen(now_sec) > self.opponent_lost_timeout_sec
+                and racing_math.track_lead_distance(
+                    ego_arc_length, self.opponent.arc_length, self.total_track_length)
+                > self.car_length + self.following_reserve):
+            # The last observed surface has been traversed under scan safety.
+            # Retire that bound once, rather than resurrecting it as 'ahead'
+            # on the next half-lap. New sightings must confirm afresh as usual.
+            self._following_last_seen_ahead = False
+
+        if (self.enable_opponent_following and self.opponent.arc_length is not None
                 and getattr(self, '_following_last_seen_ahead', True)):
             # The detector sees a surface, NOT the opponent's rear axle.
             # Subtract our front extent; do not advance a lost car at its
@@ -2594,6 +2639,8 @@ class PurePursuitNode(Node):
             gap = -racing_math.track_lead_distance(
                 ego_arc, self.opponent.arc_length, self.total_track_length)
             age = self.opponent.seconds_since_seen(now_sec)
+            credit = self.opponent.speed_lower_bound(
+                now_sec, self.total_track_length, self.following_speed_uncertainty, self.following_brake)
             if self.last_scan is not None and self._seconds_since(self.last_scan_time) <= self.scan_timeout_sec:
                 # A frozen last-seen car need not pin us forever after it
                 # rounds a bend: only measured empty corridor can extend
@@ -2605,11 +2652,13 @@ class PurePursuitNode(Node):
                     self.laser_offset_x, self.laser_offset_y, self.car_width / 2 + 0.10)
                 if visible > gap:
                     gap, age = visible, 0.0
+                    credit = 0.0  # empty-road visibility is not an opponent velocity measurement
             self.follow_speed_cap = following.speed_ceiling(
                 gap - (self.car_length / 2 + self.wheelbase / 2),
                 self.opponent.progress_rate, age, brake=self.following_brake,
                 delay=self.following_response_sec, reserve=self.following_reserve,
-                speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed)
+                speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed,
+                speed_credit=credit, opponent_brake=self.following_brake)
             if (age > self.opponent_lost_timeout_sec and self.last_scan is not None
                     and self._seconds_since(self.last_scan_time) <= self.scan_timeout_sec
                     and len(self.last_scan.ranges) >= 2
@@ -2641,7 +2690,8 @@ class PurePursuitNode(Node):
                         raw_gap + self.laser_offset_x - (self.car_length + self.wheelbase) / 2,
                         self.opponent.progress_rate, 0.0, brake=self.following_brake,
                         delay=self.following_response_sec, reserve=self.following_reserve,
-                        speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed)
+                        speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed,
+                        speed_credit=credit, opponent_brake=self.following_brake)
                     self.follow_speed_cap = min(self.follow_speed_cap, cap)
             self.last_opponent_status += f'; following cap={self.follow_speed_cap:.2f}m/s'
         if not allow_pass:

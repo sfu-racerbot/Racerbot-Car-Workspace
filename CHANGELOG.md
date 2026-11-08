@@ -11,7 +11,22 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-08 (latest): measure car 2 racing in traffic
+## 2026-11-08 (latest): car 2 follows traffic without contact
+
+### pure_pursuit
+
+- Enable car 2's braking-aware following and disable its unsafe offset-point passes through its tuning overlay. Following retains `delay_lqr` and caps speed using body gap, measured 3.0 m/s² braking and a 0.45 s response allowance. Only uncertainty-bounded fresh tracks receive stopping-distance credit.
+- Retain line steering while braking for temporarily unconfirmed traffic. The checkpoint's two 06a wall contacts followed switches into generic gap steering. Global opponent projection and one-time retirement of safely traversed old surfaces fix stale-window aliasing and half-lap resurrection that caused repeated 0.25 m/s timeouts.
+- Make mapped pass ceilings lowering-only. Preserve the existing confirmation thresholds, LB deadman, body-contact, arc and emergency checks. `tracking_laws.py` is unchanged.
+
+### Validation
+
+- Six seeds on both 6 Nov courses: all 60 traffic races finish with zero car contact, zero wall contact and zero emergency-stop ticks, including the opponent-braking scenario. Ego finishes second in every race, with zero attempted or completed passes. All finish before 100 s; the verification command permits 120 s.
+- Twelve full-safety solo controls exactly match the checkpoint. Separate flying controls retain 06a 11.40–11.47 s and 06b 8.75–8.87 s at 2.7 m/s², with zero contact or stop ticks.
+- Archive per-seed results, source hashes, braking snapshots, checkpoint failure traces and solo measurements. Commands, finish gaps and deliberate-break evidence are in [stage-1 traffic results](docs/racing-autonomy.md#following-traffic-on-car-2-stage-1).
+- Suites run separately: pure pursuit 1063 passed, 11 existing dependency skips and the known trust-region failure; simulator tools 682 passed; car profiles 231 passed; launch 312 passed. LB command-denial tests remain in the complete pure-pursuit run.
+
+## 2026-11-08: measure car 2 racing in traffic
 
 ### No-ROS simulator
 

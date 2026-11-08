@@ -225,3 +225,67 @@ def test_following_retains_an_ahead_car_round_a_bend_outside_the_avoidance_cone(
     assert d.opponent.arc_length == pytest.approx(12, abs=.05)  # 5cm surface-centroid discretisation
     assert 0 < d.follow_speed_cap < d.max_speed
     assert not d.overtake_active
+
+
+def test_speed_credit_needs_a_continuous_fresh_track_and_allows_braking():
+    tracker = race.OpponentTracker(.3, 1.0)
+    for now in np.arange(0, .351, .025):
+        tracker.update((39.5 + 3 * now) % 40, float(now), 40)
+    # oracle: closed form; 3m/s, minus 1m/s uncertainty and worst braking
+    # through half the .35s measurement interval. Seam wrapping must agree.
+    lower = tracker.speed_lower_bound(.35, 40, 1.0, 3.0)
+    expected_ema = 3 * (1 - .7 ** 14)
+    assert lower == pytest.approx(expected_ema - 1 - 3 * .35 / 2, abs=1e-9)  # m/s
+    assert tracker.speed_lower_bound(.461, 40, 1, 3) == 0
+    assert tracker.speed_lower_bound(.3, 40, 1, 3) == 0  # genuinely future observation
+    assert tracker.speed_lower_bound(.35, 40, -1, 3) == 0
+    assert tracker.speed_lower_bound(.35, 40, 1, 0) == 0
+    assert tracker.speed_lower_bound(.35, 40, math.nan, 3) == 0
+    tracker.update(3, 2.0, 40)
+    assert tracker.speed_lower_bound(2.0, 40, 1, 3) == 0
+    braking = race.OpponentTracker(1, 1)
+    for now in np.arange(0, .351, .025):
+        braking.update(3 * now - 1.5 * now ** 2, float(now), 40)
+    assert 0 < braking.speed_lower_bound(.35, 40, .1, 3) <= 3 - 3 * .35
+    braking.progress_rate = -1
+    assert braking.speed_lower_bound(.35, 40, .1, 3) == 0
+
+
+def test_old_surface_bound_is_retired_once_not_resurrected_each_lap():
+    d, scan = decisions()
+    scan[:] = 10
+    d.opponent.arc_length, d.opponent.last_update_time = 2, 0
+    d.observe([4, 0, 0, 1, 0], scan, 3, 0)
+    d._update_opponent_and_overtake(40, allow_pass=False)
+    # oracle: invariant; a safely traversed old location is not a new car
+    # ahead when progress next wraps. New detections still need confirmation.
+    assert d.follow_speed_cap is None
+    d.observe([0, 0, 0, 1, 0], scan, 20, 0)
+    d._update_opponent_and_overtake(0, allow_pass=False)
+    assert d.follow_speed_cap is None
+
+
+def test_opponent_reacquisition_does_not_alias_to_the_old_search_window():
+    d, scan = decisions()
+    d.opponent.prev_nearest_index = 300  # opposite part of the 40m rectangle
+    for now in np.arange(0, .3, .025):
+        d.observe([0, 0, 0, 1, 0], scan, float(now), 0)
+        d._update_opponent_and_overtake(0, allow_pass=False)
+    # oracle: geometry; surface is 2m ahead of laser x=.26 on y=0.
+    assert d.opponent.arc_length == pytest.approx(2.26, abs=.025)  # m, scan-centroid discretisation
+    assert 0 < d.follow_speed_cap < 2
+
+
+def test_unconfirmed_traffic_brakes_without_borrowing_gap_steering():
+    d, scan = decisions()
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    scan[np.abs(angles) < .08] = 1.1
+    d.opponent.arc_length = 2  # previously confirmed traffic memory
+    d.observe([0, 0, 0, 2, 0], scan, 3, 0)
+    steering, speed, state, _ = d._reactive_override(allow_avoidance=True, desired_steering=.25)
+    # oracle: delayed physical stop, with visible surface-to-front gap.
+    gap = 1.1 + .26 - (.58 + .36) / 2
+    expected = math.sqrt((3 * .45) ** 2 + 6 * (gap - .65)) - 3 * .45
+    assert steering is None
+    assert speed == pytest.approx(expected, abs=1e-9)  # m/s
+    assert state is None
