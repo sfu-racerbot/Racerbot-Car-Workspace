@@ -194,3 +194,25 @@ def test_check_line_judges_each_station_against_its_own_floor():
 def test_race_line_config_refuses_a_tight_floor_below_the_base_floor():
     with pytest.raises(ValueError, match='body_floor_tight'):
         RaceLineConfig(body_floor=0.22, body_floor_tight=0.20)
+
+
+def test_car2_builds_a_minimum_time_line_on_course_06b(tmp_path):
+    # Regression (2026-11-07): with car 2's shipped config the 06b minimum-time line missed
+    # the 0.22 m body floor by 1.4 cm when judged on the final 0.15 m waypoints (the optimizer
+    # checks its own, coarser stations), and the builder refused every candidate. Retries now
+    # ask the optimizer for 1 cm more body room each. Oracle: the shipped CLI's own final
+    # check (check_line, independent of the optimizer) accepts the chosen line, and it is
+    # min_time (recorded and min_curvature fail their own limits on this course).
+    # Fixture: data/rb2/racerbot_auto/20261106-184753-rebuilt (map + recorded lap).
+    data = Path(__file__).parent / 'data' / 'course_20261106b'
+    for name in ('map.yaml', 'map.pgm', 'raceline_raw.csv'):
+        shutil.copy(data / name, tmp_path / name)
+    env = dict(os.environ, OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
+    proc = subprocess.run([sys.executable, '-m', 'pure_pursuit.race_line', '--run-dir',
+                           str(tmp_path), '--car', 'rb2'], env=env, capture_output=True,
+                          text=True, check=False)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    report = json.loads((tmp_path / 'race_line.json').read_text())
+    assert report['ok'] is True and report['choice'] == 'min_time', report
+    chosen = next(c for c in report['candidates'] if c['source'] == 'min_time')
+    assert chosen['ok'] and chosen['min_body_m'] >= 0.22, chosen   # m, the shipped body floor

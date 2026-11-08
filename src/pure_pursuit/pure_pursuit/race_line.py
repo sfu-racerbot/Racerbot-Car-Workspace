@@ -188,13 +188,20 @@ def build_race_line(grid: OccupancyMap, seed_xy, cfg: RaceLineConfig) -> RaceLin
     try:
         if mc is None:
             raise ValueError(f'minimum-curvature corridor unavailable: {corridor_error}')
-        for run in range(3):
+        for run in range(5):
+            # The optimizer checks its own stations (optimize_spacing); the line is judged
+            # again on the final, denser waypoints, where a clearance a few cm short can show.
+            # Each retry asks the optimizer for more room than the final check needs: cone
+            # margin +3 cm and both body floors +1 cm per retry. The judgement below always
+            # uses the configured limits (2026-11-07: course 06b's line failed the final body
+            # check by 1.4 cm with no body headroom on retry).
+            tight = cfg.body_floor_tight if cfg.body_floor_tight is not None else cfg.body_floor
             result = optimize_min_time(
                 mc['line'], mc['remaining_left'], mc['remaining_right'], cfg.physics, field_at,
                 half_width=cfg.half_width, wall_margin=cfg.wall_margin,
                 emergency_stop_distance=cfg.emergency_stop_distance,
-                cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor,
-                body_floor_tight=cfg.body_floor_tight,
+                cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor + 0.01 * run,
+                body_floor_tight=tight + 0.01 * run,
                 laser_x=cfg.laser_x)
             candidate = _candidate('min_time', resample_closed_path(result.xy, cfg.spacing), field_at, cfg)
             if candidate.ok:
