@@ -132,6 +132,38 @@ def test_visible_corridor_stops_before_obstacle_and_is_frame_invariant():
     assert following.visible_arc(transformed, seg, 0, [7, -2, theta], blocked, *args) == pytest.approx(bound, abs=1e-12)
 
 
+@pytest.mark.parametrize('side', [-1, 1])
+def test_near_front_flank_return_cannot_be_skipped_as_ego_body(side):
+    # The shipped line spacing is .15m. The first checked slice is x=.75;
+    # place a return just before it, inside the inflated corridor but beyond
+    # ego's .47m front extent (docs/hardware-reference.md body geometry).
+    stations = np.arange(0, 10, .15)
+    xy = np.column_stack((stations, np.zeros(len(stations))))
+    seg = np.linalg.norm(np.roll(xy, -1, axis=0) - xy, axis=1)
+    angle_min, increment = -3 * math.pi / 4, math.pi / 720
+    angles = angle_min + np.arange(1081) * increment
+    laser_x, half_width = .26, .255
+    obstacle_x, obstacle_y = .735, side * .245
+    bearing = math.atan2(obstacle_y, obstacle_x - laser_x)
+    beam = int(np.argmin(np.abs(angles - bearing)))
+    distance = (obstacle_x - laser_x) / math.cos(angles[beam])
+    return_y = distance * math.sin(angles[beam])
+    # oracle: geometry. This is forward of the body and inside the corridor,
+    # not a self-return. It blocks the x=.75 slice before any free arc can
+    # be certified. The x=.90 slice's narrower angular interval misses it:
+    # about 21.7 degrees versus the return's 27.25 degrees. Thus checking
+    # only later slices cannot substitute for inspecting the nearer one.
+    assert (.58 + .36) / 2 < obstacle_x < stations[5]
+    assert abs(return_y) < half_width
+    assert abs(angles[beam]) < math.atan2(half_width, stations[5] - laser_x)
+    assert abs(angles[beam]) > math.atan2(half_width, stations[6] - laser_x) + increment
+    scan = np.full(1081, 10.0)
+    args = (angle_min, increment, laser_x, 0, half_width)
+    assert following.visible_arc(xy, seg, 0, [0, 0, 0], scan, *args) > 4.5
+    scan[beam] = distance
+    assert following.visible_arc(xy, seg, 0, [0, 0, 0], scan, *args) == 0.0
+
+
 @pytest.mark.parametrize('kind', ['empty', 'single', 'nan', 'inf', 'zero', 'negative', 'short'])
 def test_unknown_corridor_is_not_observed_free_space(kind):
     xy, _, seg = straight()
