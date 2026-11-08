@@ -2777,10 +2777,22 @@ class PurePursuitNode(Node):
         # Fresh odometry closes that gap. It only ever *raises* the basis, is
         # clamped to max_speed so a wild reading cannot inflate it, and every
         # ceiling below still applies, so this cannot outrun a safety limit.
+        #
+        # 2026-11-07: and never above this tick's target. Ramping *down* from
+        # the measured speed held every braking command one slew step
+        # (max_braking_decel * dt, 0.2 m/s) below the car's current speed, so
+        # the speed loop only ever saw a 0.2 m/s error and braked at ~1.4 m/s^2
+        # (gain 7/s on car 2's 2026-11-06 floor) where the profile planned 3.
+        # The car reached corners up to 1 m/s fast and ran wide (simulator,
+        # courses 06a/06b). Capping the basis at the target keeps the climb-back
+        # behaviour above (target above the car's speed) and lets a falling
+        # profile command what it asks, slewed from the last command as before.
+        # gap_follow never slew-limits braking at all. A lower command is never
+        # less safe.
         ramp_basis = self.last_commanded_speed
         if self._odom_fresh():
             ramp_basis = max(
-                ramp_basis, min(abs(self.current_speed), self.max_speed))
+                ramp_basis, min(abs(self.current_speed), self.max_speed, speed_target))
         speed = racing_math.slew_rate_limit(
             speed_target,
             ramp_basis,

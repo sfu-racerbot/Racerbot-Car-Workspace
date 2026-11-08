@@ -516,9 +516,12 @@ class CommandShaper:
         # Mirrors the node: ramp from the car's measured speed when it is
         # higher than the last command, so a one-tick ceiling does not force a
         # slow climb back from a speed the car was never actually at.
+        # ... and never above this tick's target (node, 2026-11-07): ramping down
+        # from the measured speed held braking commands one slew step below the
+        # car's speed, so the speed loop braked at ~1.4 m/s^2 instead of the plan.
         ramp_basis = self.previous_speed
         if measured_speed is not None:
-            ramp_basis = max(ramp_basis, min(abs(float(measured_speed)), self.max_speed))
+            ramp_basis = max(ramp_basis, min(abs(float(measured_speed)), self.max_speed, speed_target))
         speed = racing_math.slew_rate_limit(
             speed_target,
             ramp_basis,
