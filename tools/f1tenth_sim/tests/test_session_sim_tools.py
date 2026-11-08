@@ -103,3 +103,20 @@ def test_detail_lists_every_section_and_the_grip_bins():
     assert len(text) == 1 + 2 + 2
     assert "2.00  2.10 0.200" in text[2] and "nan" in text[2]
     assert text[3] == "grip real: 1:1.00"
+
+
+def test_command_shaper_ramps_a_falling_target_down_from_the_last_command():
+    # Mirrors pure_pursuit_node._shape_normal_command (2026-11-07): the measured-speed basis
+    # never rises above this tick's target, so braking is slewed from the last command and
+    # not held one step below the car's speed. Closed form: one step is
+    # max_braking_decel * CONTROL_DT from the 3.2 m/s last command.
+    import run_validation as rv
+    shaper = rv.CommandShaper(car_id='rb2', max_speed=5.0)
+    step = float(shaper.params['max_braking_decel']) * shaper.control_dt
+    shaper.previous_speed = 3.2
+    _steer, speed = shaper.command(0.0, 2.0, measured_speed=4.0)
+    assert speed == pytest.approx(3.2 - step, abs=1e-9)  # m/s; ramping from 4.0 gives 4.0 - step
+    # a target between the last command and the measured speed is commanded as is
+    shaper.previous_speed = 3.2
+    _steer, speed = shaper.command(0.0, 3.5, measured_speed=4.0)
+    assert speed == pytest.approx(3.5, abs=1e-9)  # m/s

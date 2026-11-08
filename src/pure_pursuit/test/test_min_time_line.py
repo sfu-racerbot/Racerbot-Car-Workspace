@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from pure_pursuit.min_time_line import (
-    CarPhysics, cone_clearance, footprint_clearance, lap_time, offsets_of,
+    CarPhysics, body_floor_at, cone_clearance, footprint_clearance, lap_time, offsets_of,
     optimize_min_time, speed_profile,
 )
 from pure_pursuit.raceline_optimizer import path_frames, resample_closed_path, signed_curvature
@@ -228,3 +228,49 @@ def test_cone_clearance_parallel_wall():
     sine = np.sin(np.deg2rad(30.0))
     expected = wall_y / sine
     assert expected - step_floor / sine <= actual <= expected + 1e-9  # m
+
+
+# --- body_floor_at (2026-11-07): the clearance floor rises near the steering limit -------------
+
+def _circle(radius, n=400):
+    ang = np.linspace(0.0, 2 * np.pi, n, endpoint=False)
+    return np.column_stack([radius * np.cos(ang), radius * np.sin(ang)])
+
+
+def test_body_floor_is_constant_without_a_tight_floor():
+    xy = stadium()
+    for tight in (None, 0.22):
+        floors = body_floor_at(xy, 0.22, tight, 1.0)
+        assert floors.shape == (len(xy),)
+        assert np.all(floors == 0.22)
+
+
+@pytest.mark.parametrize('ratio,weight', [(0.4, 0.0), (0.5, 0.0), (0.7, 0.5), (0.9, 1.0), (1.2, 1.0)])
+def test_body_floor_on_a_circle_follows_the_curvature_ratio(ratio, weight):
+    # Closed form: weight = clip((k / limit - 0.5) / 0.4, 0, 1) with k = 1 / R on a circle (constant
+    # curvature, so the corner window changes nothing). floor = 0.22 + 0.08 * weight.
+    radius = 2.0
+    limit = (1.0 / radius) / ratio
+    floors = body_floor_at(_circle(radius), 0.22, 0.30, limit)
+    assert floors == pytest.approx(np.full(len(floors), 0.22 + 0.08 * weight), abs=2e-3)  # m
+
+
+def test_body_floor_covers_corner_entry_and_exit_but_not_mid_straight():
+    # Stadium: 2 m semicircles (k = 0.5/m) and 6 m straights at 0.1 m spacing. With the limit at
+    # 0.5 / 0.9 the corners are fully tight. Straight stations within window_m (0.6 m) of a corner
+    # get the tight floor; the middle of a straight (3 m from either end) keeps the base floor.
+    xy = stadium()
+    floors = body_floor_at(xy, 0.22, 0.30, 0.5 / 0.9, window_m=0.6)
+    straight = np.arange(0.0, 6.0, 0.1)
+    n = len(straight)
+    assert floors[n // 2] == pytest.approx(0.22, abs=1e-9)          # mid first straight
+    assert floors[n - 3] == pytest.approx(0.30, abs=1e-9)          # 0.3 m before the first corner
+    assert floors[n + 32] == pytest.approx(0.30, abs=1e-9)         # middle of the first corner
+    assert floors[n - 15] == pytest.approx(0.22, abs=1e-9)         # 1.5 m before it
+
+
+def test_body_floor_refuses_bad_inputs():
+    with pytest.raises(ValueError, match='body_floor_tight'):
+        body_floor_at(stadium(), 0.22, float('nan'), 1.0)
+    with pytest.raises(ValueError, match='curvature_limit'):
+        body_floor_at(stadium(), 0.22, 0.30, 0.0)

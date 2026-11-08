@@ -113,6 +113,20 @@ pure_pursuit_node:
     mpc.max_consecutive_misses: 3
     mpc.delay_compensation: 0.05          # s, 0..0.5
 
+    # --- Delay LQR (docs/steering-laws.md#delay-lqr). Not the default: judged in the simulator. ---
+    # The weights, as lqr.*. The last four describe the steering chain, which is physics,
+    # not tuning: they are car 2's, as tools/f1tenth_sim/sim_fidelity/calibration.py models
+    # its floor (pose_delay_ticks 2, steering_delay_ticks 3, steering_servo_gain 15,
+    # steering_rate_max 2.5 at 40 Hz). Car 1's are not measured.
+    delay_lqr.q_lateral: 1.0       # weight on cross-track error e
+    delay_lqr.q_heading: 1.0       # weight on heading error theta
+    delay_lqr.r_steer: 1.0         # weight on steering effort
+    delay_lqr.v_grid_max: 6.0      # m/s -- top of the speed grid the gain is scheduled on
+    delay_lqr.sensing_delay: 0.05     # s -- the pose is 2 ticks old
+    delay_lqr.actuation_delay: 0.075  # s -- 3 ticks of command transport before the servo
+    delay_lqr.servo_gain: 15.0     # 1/s -- the steering servo's proportional gain
+    delay_lqr.servo_rate: 2.5      # rad/s -- the steering servo's slew ceiling
+
     # --- Pure pursuit geometry ---
     # Validated headlessly on Spielberg, Silverstone, and Brands Hatch in
     # F1TENTH Gym; see docs/simulator.md for scenarios and limitations.

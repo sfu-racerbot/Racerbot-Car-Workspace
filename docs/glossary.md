@@ -152,6 +152,18 @@ How far ahead on the path the controller aims. A short lookahead follows the lin
 
 The reactive method `gap_follow` uses: look at the LiDAR scan, find the widest open gap, steer at it. It needs no map, which is why it's the starting point both for new drivers and for new code.
 
+### Tick
+
+One pass of the control loop. The race controller runs 40 ticks a second, so one tick is 25 ms. Delays in the steering docs are counted in ticks, because that is how the code and the simulator count them.
+
+### Feedforward
+
+A steering value worked out from the plan, not from the error. On a bend the line already says how much steering the bend needs, so the controller adds that amount first and corrects what is left over. The name comes from control theory: the controller acts on what it can predict, before an error shows up.
+
+### Contact
+
+In the simulator, the car's body touching a wall. This repo counts contact with a body check against the map's walls. It does not use the simulator's own collision flag for verdicts, because that flag has not been trusted here ([simulator README](../tools/f1tenth_sim/README.md)).
+
 ---
 
 ## Several cars

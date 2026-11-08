@@ -6,9 +6,12 @@ import pytest
 from pure_pursuit.race_line import RaceLineConfig, load_params
 
 
-@pytest.mark.parametrize('car,angle,grip,accel,gain', [
-    ('rb1', .30, 2.5, 6., 1.), ('rb2', .38, 2.9, 4., .99)])
-def test_car_physics_and_controller_stop(car, angle, grip, accel, gain, monkeypatch):
+# 2026-11-07: rb2 grip 2.9 -> 3.2 and speed delay 0.10 -> 0.22 (its calibration overlay gives
+# the measurements); shared body floor 0.08 -> 0.22 on straights, 0.30 near the steering limit
+# (auto_map_race.yaml comment: the line must cover the controller's tracking error).
+@pytest.mark.parametrize('car,angle,grip,accel,gain,delay', [
+    ('rb1', .30, 2.5, 6., 1., .10), ('rb2', .38, 3.2, 4., .99, .22)])
+def test_car_physics_and_controller_stop(car, angle, grip, accel, gain, delay, monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', car)
     values = load_params()
     cfg = RaceLineConfig.from_params(values)
@@ -16,13 +19,14 @@ def test_car_physics_and_controller_stop(car, angle, grip, accel, gain, monkeypa
     assert asdict(cfg.physics) == dict(
         a_lat_left=grip, a_lat_right=grip, a_accel=accel, a_brake=3.,
         v_max=5., v_min=.5, wheelbase=.36, max_steering_angle=angle,
-        linkage_gain=gain, steering_rate=1., steering_delay=.1, speed_delay=.1)
+        linkage_gain=gain, steering_rate=1., steering_delay=.1, speed_delay=delay)
     from racerbot_car.layers import effective_config
     assert cfg.emergency_stop_distance == effective_config(
         'pure_pursuit.yaml', 'pure_pursuit_node', car)['emergency_stop_distance']
     assert cfg.mode == 'fastest'
     assert cfg.spacing == .15
-    assert (cfg.wall_margin, cfg.cone_margin, cfg.body_floor) == (.15, .10, .08)
+    assert (cfg.wall_margin, cfg.cone_margin, cfg.body_floor, cfg.body_floor_tight) == (
+        .15, .10, .22, .30)
 
 
 def test_parameter_mapping_preserves_handedness_and_all_builder_knobs():

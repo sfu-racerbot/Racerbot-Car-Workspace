@@ -365,6 +365,14 @@ class PurePursuitNode(Node):
         self.declare_parameter('mpc.max_iter', 4000)
         self.declare_parameter('mpc.max_consecutive_misses', 3)
         self.declare_parameter('mpc.delay_compensation', 0.05)
+        self.declare_parameter('delay_lqr.q_lateral', 1.0)
+        self.declare_parameter('delay_lqr.q_heading', 1.0)
+        self.declare_parameter('delay_lqr.r_steer', 1.0)
+        self.declare_parameter('delay_lqr.v_grid_max', 6.0)
+        self.declare_parameter('delay_lqr.sensing_delay', 0.05)
+        self.declare_parameter('delay_lqr.actuation_delay', 0.075)
+        self.declare_parameter('delay_lqr.servo_gain', 15.0)
+        self.declare_parameter('delay_lqr.servo_rate', 2.5)
 
         # --- Opponent detection mode: 'heuristic' (shape-based, no map
         # needed) or 'map' (ray-cast map subtraction via range_libc --
@@ -649,7 +657,7 @@ class PurePursuitNode(Node):
             'max_lookahead': self.max_lookahead,
             'lookahead_speed_gain': self.lookahead_speed_gain,
         }
-        for prefix in ('stanley', 'lqr', 'mpc'):
+        for prefix in ('stanley', 'lqr', 'mpc', 'delay_lqr'):
             for full_name in self._declared_law_param_names(prefix):
                 self._law_params[full_name] = self.get_parameter(full_name).value
         try:
@@ -883,6 +891,10 @@ class PurePursuitNode(Node):
         'mpc': ('mpc.dt', 'mpc.horizon_steps', 'mpc.q_lateral', 'mpc.q_heading',
                 'mpc.r_steer', 'mpc.r_rate', 'mpc.deadline_sec', 'mpc.max_iter',
                 'mpc.max_consecutive_misses', 'mpc.delay_compensation'),
+        'delay_lqr': ('delay_lqr.q_lateral', 'delay_lqr.q_heading', 'delay_lqr.r_steer',
+                      'delay_lqr.v_grid_max', 'delay_lqr.sensing_delay',
+                      'delay_lqr.actuation_delay', 'delay_lqr.servo_gain',
+                      'delay_lqr.servo_rate'),
     }
 
     def _declared_law_param_names(self, prefix: str):
@@ -1077,7 +1089,7 @@ class PurePursuitNode(Node):
             # built once in __init__ and cached, so accepting a runtime change
             # would report a value the control loop never uses. Refuse loudly.
             if (parameter.name == 'steering_law'
-                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.'))
+                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.', 'delay_lqr.'))
                     or parameter.name == 'tracking_curvature_smoothing'):
                 return SetParametersResult(
                     successful=False,
@@ -2765,10 +2777,24 @@ class PurePursuitNode(Node):
         # Fresh odometry closes that gap. It only ever *raises* the basis, is
         # clamped to max_speed so a wild reading cannot inflate it, and every
         # ceiling below still applies, so this cannot outrun a safety limit.
+        #
+        # 2026-11-07: and never above this tick's target. Ramping *down* from
+        # the measured speed held every braking command one slew step
+        # (max_braking_decel * dt, 0.2 m/s) below the car's current speed, so
+        # the speed loop only ever saw a 0.2 m/s error and braked at ~1.4 m/s^2
+        # (gain 7/s on car 2's 2026-11-06 floor) where the profile planned 3.
+        # The car reached corners up to 1 m/s fast and ran wide (simulator,
+        # courses 06a/06b). Capping the basis at the target keeps the climb-back
+        # behaviour above (target above the car's speed) and lets a falling
+        # profile command what it asks, slewed from the last command as before.
+        # gap_follow never slew-limits braking at all. What this guarantees: the
+        # command is never higher than the old basis gave for the same inputs,
+        # never above the tick's target, and every hard ceiling below still
+        # applies unchanged.
         ramp_basis = self.last_commanded_speed
         if self._odom_fresh():
             ramp_basis = max(
-                ramp_basis, min(abs(self.current_speed), self.max_speed))
+                ramp_basis, min(abs(self.current_speed), self.max_speed, speed_target))
         speed = racing_math.slew_rate_limit(
             speed_target,
             ramp_basis,

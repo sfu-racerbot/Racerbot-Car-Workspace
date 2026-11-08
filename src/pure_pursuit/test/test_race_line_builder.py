@@ -10,6 +10,7 @@ import sys
 
 import numpy as np
 import pytest
+import yaml
 
 from pure_pursuit.min_time_line import cone_clearance, footprint_clearance
 from pure_pursuit.occupancy_map import FREE, OCCUPIED, OccupancyMap
@@ -19,6 +20,7 @@ from pure_pursuit.racing_math import load_profiled_csv, load_xy_csv
 
 
 DATA = Path(__file__).parent / 'data' / 'course_20261106a'
+PACKAGE = Path(__file__).parent.parent
 OUTPUTS = {'raceline_profiled.csv', 'raceline_floor_test.csv', 'race_line.json'}
 
 
@@ -133,6 +135,18 @@ def test_cli_fixture(tmp_path, args, exit_code, choice):
     for name in ('map.yaml', 'map.pgm', 'raceline_raw.csv'):
         shutil.copy(DATA / name, tmp_path / name)
     env = dict(os.environ, RACERBOT_CAR='rb1', OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
+    if choice == 'recorded':
+        # The fallback case needs a recorded line that meets the floor. The fixture's sits
+        # 0.20 m from the walls, under the shipped 0.22-0.30 m floor (2026-11-07), so this case
+        # runs on a copy of the shipped supervisor config with a 0.15 m floor: what it tests is
+        # that the CLI falls back to the recorded line when no optimized line fits, not the floor.
+        base = yaml.safe_load((PACKAGE / 'config' / 'auto_map_race.yaml').read_text())
+        block = base['auto_map_race_node']['ros__parameters']
+        block['race_line_body_floor'] = 0.15
+        block['race_line_body_floor_tight'] = 0.15
+        config = tmp_path / 'supervisor.yaml'
+        config.write_text(yaml.safe_dump(base))
+        args = [*args, '--config', str(config)]
     proc = subprocess.run([sys.executable, '-m', 'pure_pursuit.race_line', '--run-dir',
                            str(tmp_path), '--car', 'rb2', *args],
                           env=env, capture_output=True, text=True, check=False)
@@ -146,3 +160,59 @@ def test_cli_fixture(tmp_path, args, exit_code, choice):
                 assert not c['ok'] and 'too narrow' in c['reason']
     else:
         assert 'cone' in proc.stdout
+
+
+def test_check_line_judges_each_station_against_its_own_floor():
+    # Invariant: check_line fails iff some station's body clearance is under that station's floor.
+    # A constant clearance field gives the same body clearance (0.26 m) at every station. On a
+    # stadium with fully tight corners the floor is 0.22 m on straights and 0.30 m in corners:
+    # 0.26 fails only because of the corners, so a tight floor of None or 0.25 passes.
+    radius, straight, spacing = 2.0, 6.0, 0.1
+    x = np.arange(0.0, straight, spacing)
+    angle = np.linspace(-np.pi / 2, np.pi / 2, 64, endpoint=False)
+    xy = np.vstack([
+        np.column_stack([x, np.full_like(x, -radius)]),
+        np.column_stack([straight + radius * np.cos(angle), radius * np.sin(angle)]),
+        np.column_stack([straight - x, np.full_like(x, radius)]),
+        np.column_stack([-radius * np.cos(angle), -radius * np.sin(angle)]),
+    ])
+
+    def field_at(px, py):
+        return np.full(np.shape(px), 0.26)
+
+    # curvature limit 0.5 / 0.9: the 2 m corners (0.5/m) are fully tight; cone and curvature pass
+    physics = replace(RaceLineConfig().physics, max_steering_angle=float(np.arctan(0.36 * 0.5 / 0.9 / 0.99)))
+    base = RaceLineConfig(physics=physics, body_floor=0.22, emergency_stop_distance=0.0, cone_margin=0.0)
+    for tight, ok in ((None, True), (0.25, True), (0.30, False)):
+        passed, _, body, _, reason = check_line(field_at, xy, replace(base, body_floor_tight=tight))
+        assert body == pytest.approx(0.26, abs=1e-12)
+        assert passed is ok, reason
+        if not ok:
+            assert 'body 0.2600, limit 0.3000' in reason
+
+
+def test_race_line_config_refuses_a_tight_floor_below_the_base_floor():
+    with pytest.raises(ValueError, match='body_floor_tight'):
+        RaceLineConfig(body_floor=0.22, body_floor_tight=0.20)
+
+
+def test_car2_builds_a_minimum_time_line_on_course_06b(tmp_path):
+    # Regression (2026-11-07): with car 2's shipped config the 06b minimum-time line missed
+    # the 0.22 m body floor by 1.4 cm when judged on the final 0.15 m waypoints (the optimizer
+    # checks its own, coarser stations), and the builder refused every candidate. Retries now
+    # ask the optimizer for 1 cm more body room each. Oracle: the shipped CLI's own final
+    # check (check_line, independent of the optimizer) accepts the chosen line, and it is
+    # min_time (recorded and min_curvature fail their own limits on this course).
+    # Fixture: data/rb2/racerbot_auto/20261106-184753-rebuilt (map + recorded lap).
+    data = Path(__file__).parent / 'data' / 'course_20261106b'
+    for name in ('map.yaml', 'map.pgm', 'raceline_raw.csv'):
+        shutil.copy(data / name, tmp_path / name)
+    env = dict(os.environ, OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
+    proc = subprocess.run([sys.executable, '-m', 'pure_pursuit.race_line', '--run-dir',
+                           str(tmp_path), '--car', 'rb2'], env=env, capture_output=True,
+                          text=True, check=False)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    report = json.loads((tmp_path / 'race_line.json').read_text())
+    assert report['ok'] is True and report['choice'] == 'min_time', report
+    chosen = next(c for c in report['candidates'] if c['source'] == 'min_time')
+    assert chosen['ok'] and chosen['min_body_m'] >= 0.22, chosen   # m, the shipped body floor

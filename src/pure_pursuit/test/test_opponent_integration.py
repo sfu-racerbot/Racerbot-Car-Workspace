@@ -303,6 +303,31 @@ def test_acceleration_ramp_starts_from_measured_speed_not_the_last_command(node)
         1.0 + node.max_acceleration * node.command_slew_max_dt)
 
 
+def test_a_falling_profile_ramps_down_from_the_last_command_not_the_measured_speed(node):
+    # 2026-11-07. The measured-speed basis above is for climbing back up. When
+    # the profile asks for *less* than the car is doing, ramping from the
+    # measured speed held every braking command one slew step below the car's
+    # speed, so the speed loop barely braked and the car reached corners fast.
+    # Closed form: dt is command_slew_max_dt on the first command
+    # (last_command_time None), braking slew is max_braking_decel * dt.
+    _set_odom(node, 4.0)                        # fresh odometry: the car is at 4 m/s
+    step = node.max_braking_decel * node.command_slew_max_dt
+    assert 4.0 - 2 * step > 2.0, 'scene needs the 2 m/s target out of one step'
+
+    node.last_command_time = None
+    node.last_commanded_speed = 3.2             # the command is already falling
+    _, _, speed, *_ = node._shape_normal_command(0.0, 2.0, node.max_speed)
+    # from the last command, not from 4.0 (which would give 4.0 - step)
+    assert speed == pytest.approx(3.2 - step, abs=1e-9)  # m/s
+
+    # A target between the last command and the car's speed is commanded as is:
+    # the measured basis may lift the ramp to the target, never past it.
+    node.last_command_time = None
+    node.last_commanded_speed = 3.2
+    _, _, speed, *_ = node._shape_normal_command(0.0, 3.5, node.max_speed)
+    assert speed == pytest.approx(3.5, abs=1e-9)  # m/s
+
+
 def test_ramp_basis_never_exceeds_the_configured_speed_ceiling(node):
     # A wildly wrong odometry reading must not be able to inflate the ramp
     # basis past max_speed and let the command jump beyond the safety ceiling.

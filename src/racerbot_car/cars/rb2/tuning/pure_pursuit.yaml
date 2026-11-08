@@ -1,0 +1,11 @@
+pure_pursuit_node:
+  ros__parameters:
+    # Car 2's measured steering chain (3-tick command transport, 2-tick pose
+    # delay, servo 15/s at 2.5 rad/s; simulator floor sfu_course_2026_11_06,
+    # fitted to its 2026-11-06 runs) makes pure pursuit weave at speed: 0.45 m
+    # cross-track and wall contact on 06a. delay_lqr predicts through those
+    # delays (its delay_lqr.* defaults are car 2's values) and held 0.09 m mean
+    # cross-track, no contact, on 06a/06b, 9 seeds each (2026-11-07). Car 1's
+    # steering chain is not measured, so it keeps pure_pursuit.
+    # why: car 2's measured steering delays make pure pursuit weave at race speed; delay_lqr predicts through them
+    steering_law: delay_lqr

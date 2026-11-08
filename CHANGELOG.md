@@ -1,12 +1,54 @@
 # Changelog
 
+> **Who this is for:** members checking what changed between runs or releases.
+> **Read first:** [Concepts](docs/concepts.md) for the ROS 2 workspace and configuration files.
+> **You'll be able to:** find behaviour changes, new parameters and their validation evidence.
+> **Time:** a few minutes for the latest entry; older entries are reference material.
+
 Notable changes to the workspace's own packages, newest first. Format:
 one dated section per work session, grouped by package, with behavior
 changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): arc-aware Tier 1 emergency check
+## 2026-11-08 (latest): car 2 map racer beats the shipped gap_follow reference
+
+**Simulator-validated only, not driven on the car.**
+
+### pure_pursuit
+
+- Fix falling-profile braking: cap the measured-speed ramp basis at the target, so a lower target ramps down from the last command instead of braking only one slew step below measured speed. The no-ROS simulator mirrors the fix.
+- Raise shared `race_line_body_floor` from 0.08 to 0.22 m; add `race_line_body_floor_tight: 0.30` m. Clearance rises near the planning steering limit and is held for 0.6 m either side to allow for tracking error.
+- Minimum-time building allows up to four retries after the first attempt, adding 0.01 m body room and 0.03 m cone margin per retry while retaining the final configured checks. This fixes 06b's 0.0138 m clearance shortfall after dense resampling (`b5f6427`).
+- Review fixes re-seed delay LQR's steering history after foreign commands, wrap closed paths at the true seam and refuse a servo too slow for the history window.
+
+### racerbot_car
+
+- Car 2's first tuning overlay, `cars/rb2/tuning/pure_pursuit.yaml`, selects `steering_law: delay_lqr` because its measured steering delays cause weave with pure pursuit. Car 1 retains pure pursuit. The car 2 dashboard configuration lists the overlay.
+- Car 2 calibration sets planning lateral acceleration to 3.2 m/s², `profile_speed_delay` to 0.22 s and the controller's `max_lateral_accel` to 2.7 m/s². The lower online ceiling prevents full-lock wedging; the planned delay allows braking to take effect before corners.
+
+### Shipped-path verification and documentation
+
+- Shipped CLI selects `min_time` for both copied 6 Nov runs: estimated laps 10.581 / 8.039 s, minimum body clearance 0.2500 m on both. Six seeds per course, four laps each, on `sfu_course_2026_11_06`: zero contact and stop ticks; flying medians 11.42 / 8.82 s, ranges 11.40–11.47 / 8.75–8.87 s.
+- Supplied `gap_follow` references at its shipped 5 m/s ceiling are 11.77 / 8.91 s, about 3% / 1% slower than the map racer. At 3.5 m/s, `gap_follow` is still about 3% faster on 06b (8.58 s), but slower on 06a (11.85 s). The earlier probe-built 06b line skipped the final dense check and was about 0.1 s faster than the accepted shipped line.
+- Update racing autonomy, steering-law defaults and results, car profiles and the daily race commands. Full measurement conditions and cross-track results: [car 2 shipped-path verification](docs/racing-autonomy.md#shipped-path-verification-2026-11-08).
+
+## 2026-11-07: delay LQR steering law, simulator only (not the default)
+
+### pure_pursuit
+
+- Add steering law `delay_lqr` (`steering_law:=delay_lqr`). It predicts the car's steering delays out of the loop (position estimate 2 ticks old, command transport 3 ticks, servo time constant 1/15 s), reads the curvature feedforward one servo time constant past the action point, and applies a speed-scheduled LQR. Code: `tracking_laws.py` (`DelayLqrLaw`, `ServoLqrGainTable`, `DelayLqrParams`), `pure_pursuit_node.py`, `run_commands.py`.
+- New parameters in `pure_pursuit.yaml`, launch-time only like the other laws' parameters: `delay_lqr.q_lateral` 1.0, `delay_lqr.q_heading` 1.0, `delay_lqr.r_steer` 1.0, `delay_lqr.v_grid_max` 6.0, `delay_lqr.sensing_delay` 0.05 s, `delay_lqr.actuation_delay` 0.075 s, `delay_lqr.servo_gain` 15 /s, `delay_lqr.servo_rate` 2.5 rad/s. The last four are car 2's floor values. Car 1's are not measured.
+- Default `steering_law` is still `pure_pursuit` for both cars. On the 2026-11-06 floor the law did not reach zero wall contact: after the merge, six of six judged runs contacted, against three of six for pure pursuit (all three on 06a).
+- The merge of origin/main (which includes PR #33) changed the delay law's 06b runs from a long safety stop to a wall contact after a short stop. Details: [Delay LQR results](docs/steering-laws.md#delay-lqr-results).
+- Tests: `test_delay_lqr_law.py` (32 tests), and in `test_tracking_law_integration.py` eight reach tests for the `delay_lqr.*` parameters plus `delay_lqr` in each law-parametrised node test. The law's tests and the reach tests were each seen to fail against a deliberate break.
+
+### No-ROS simulator
+
+- `pure_course.py` prints the mean cross-track next to the max. `--law` takes its choices from `tracking_laws.LAW_NAMES`.
+- The two racing lines behind the results are committed in `tools/f1tenth_sim/lines/`.
+
+## 2026-11-07: arc-aware Tier 1 emergency check
 
 **Behavior change. Simulator-validated only, not yet driven on the car.** Simulator validation has one
 line that contacts (06a, seed 12345), and the same contact happens on the code before this change.

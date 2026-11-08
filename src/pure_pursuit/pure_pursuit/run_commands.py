@@ -23,6 +23,7 @@ STEERING_LAWS = (
     ('stanley', 'Stanley'),
     ('lqr', 'LQR'),
     ('mpc', 'MPC'),
+    ('delay_lqr', 'LQR with the steering delays predicted out'),
 )
 
 RULE = '=' * 72

@@ -10,7 +10,7 @@ import numpy as np
 
 from pure_pursuit import recorded_path
 from pure_pursuit.min_time_line import (
-    CarPhysics, cone_clearance, footprint_clearance, lap_time, optimize_min_time,
+    CarPhysics, body_floor_at, cone_clearance, footprint_clearance, lap_time, optimize_min_time,
     speed_profile,
 )
 from pure_pursuit.occupancy_map import OccupancyMap
@@ -31,6 +31,8 @@ class RaceLineConfig:
     cone_margin: float = 0.10
     emergency_stop_distance: float = 0.35
     body_floor: float = 0.08
+    # Body floor near the steering limit (min_time_line.body_floor_at); None = body_floor.
+    body_floor_tight: float | None = None
     half_width: float = 0.155
     laser_x: float = 0.26
     max_track_width: float = 6.0
@@ -62,7 +64,9 @@ class RaceLineConfig:
             'curvature_margin': 'profile_curvature_margin', 'max_deviation': 'profile_max_deviation',
             'emergency_stop_distance': 'emergency_stop_distance',
         }
+        tight = values.get('race_line_body_floor_tight')   # optional: absent = constant floor
         return cls(physics=CarPhysics(**{k: values[v] for k, v in physics_keys.items()}),
+                   body_floor_tight=None if tight is None else float(tight),
                    **{k: values[v] for k, v in config_keys.items()})
 
     def __post_init__(self):
@@ -76,6 +80,9 @@ class RaceLineConfig:
                      'body_floor', 'laser_x', 'max_deviation'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
                 raise ValueError(f'{name} must be finite and non-negative')
+        if self.body_floor_tight is not None and not (
+                math.isfinite(self.body_floor_tight) and self.body_floor_tight >= self.body_floor):
+            raise ValueError('body_floor_tight must be finite and at least body_floor')
 
 
 @dataclass(frozen=True)
@@ -110,10 +117,16 @@ def check_line(field_at, xy, cfg: RaceLineConfig) -> tuple[bool, float, float, f
     if np.any(np.linalg.norm(np.roll(xy, -1, axis=0) - xy, axis=1) <= 0):
         raise ValueError('duplicate consecutive points')
     cone = float(np.min(cone_clearance(field_at, xy, laser_x=cfg.laser_x)))
-    body = float(np.min(footprint_clearance(field_at, xy, half_width=cfg.half_width)))
+    bodies = np.asarray(footprint_clearance(field_at, xy, half_width=cfg.half_width), dtype=float)
+    floors = body_floor_at(xy, cfg.body_floor, cfg.body_floor_tight, cfg.physics.curvature_limit)
+    # Judged station by station: the floor is higher near the steering limit. Reported as the
+    # station with the least room over its own floor.
+    worst = int(np.argmin(bodies - floors))
+    body, body_limit = float(bodies.min()), float(floors[worst])
+    body_at_worst = float(bodies[worst])
     curvature = float(np.max(np.abs(signed_curvature(xy))))
     limits = (('forward cone', cone, cfg.emergency_stop_distance + cfg.cone_margin, True),
-              ('body', body, cfg.body_floor, True),
+              ('body', body_at_worst, body_limit, True),
               ('curvature', curvature, cfg.physics.curvature_limit + 0.02, False))
     failures = []
     for name, value, limit, minimum in limits:
@@ -175,12 +188,20 @@ def build_race_line(grid: OccupancyMap, seed_xy, cfg: RaceLineConfig) -> RaceLin
     try:
         if mc is None:
             raise ValueError(f'minimum-curvature corridor unavailable: {corridor_error}')
-        for run in range(3):
+        for run in range(5):
+            # The optimizer checks its own stations (optimize_spacing); the line is judged
+            # again on the final, denser waypoints, where a clearance a few cm short can show.
+            # Each retry asks the optimizer for more room than the final check needs: cone
+            # margin +3 cm and both body floors +1 cm per retry. The judgement below always
+            # uses the configured limits (2026-11-07: course 06b's line failed the final body
+            # check by 1.4 cm with no body headroom on retry).
+            tight = cfg.body_floor_tight if cfg.body_floor_tight is not None else cfg.body_floor
             result = optimize_min_time(
                 mc['line'], mc['remaining_left'], mc['remaining_right'], cfg.physics, field_at,
                 half_width=cfg.half_width, wall_margin=cfg.wall_margin,
                 emergency_stop_distance=cfg.emergency_stop_distance,
-                cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor,
+                cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor + 0.01 * run,
+                body_floor_tight=tight + 0.01 * run,
                 laser_x=cfg.laser_x)
             candidate = _candidate('min_time', resample_closed_path(result.xy, cfg.spacing), field_at, cfg)
             if candidate.ok:
