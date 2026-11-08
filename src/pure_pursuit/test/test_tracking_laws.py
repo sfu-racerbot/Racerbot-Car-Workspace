@@ -173,6 +173,8 @@ def test_yaml_mirrors_the_param_dataclasses():
     assert cfg['mpc.max_iter'] == mpc.max_iter
     assert cfg['mpc.max_consecutive_misses'] == mpc.max_consecutive_misses
     assert cfg['mpc.delay_compensation'] == pytest.approx(mpc.delay_compensation)
+    delay_mpc = vars(tracking_laws.DelayMpcParams())
+    assert {key: cfg['delay_mpc.' + key] for key in delay_mpc} == delay_mpc
 
 
 # ============================================================================
