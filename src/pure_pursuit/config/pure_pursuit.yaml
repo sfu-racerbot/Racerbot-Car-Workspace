@@ -339,7 +339,10 @@ pure_pursuit_node:
     opponent_lost_timeout_sec: 1.0    # forget the tracked opponent if it isn't re-detected within this long
     overtake_trigger_gap: 3.0         # meters of *track distance* -- start considering a pass once this close
     overtake_closing_margin: 0.3      # m/s -- must be closing at least this fast to bother attempting a pass
-    overtake_clear_margin: 1.0        # meters of track distance past the opponent before resuming the racing line
+    overtake_clear_margin: 1.0        # metres of measured body clearance before resuming the racing line
+    overtake_completion_hold_sec: 0.5  # continuously measured clearance; loss of sight resets
+    overtake_completion_hysteresis: 0.1  # arm above clear margin, hold above the margin
+    overtake_measurement_uncertainty: 0.35  # m, conservative pose/surface allowance
     overtake_lateral_offset: 0.35      # meters, sideways nudge to the steering target while passing
     # meters. Room the passing side must actually have before the car will
     # commit. pick_pass_side only reports which side is *more* open and always

@@ -68,7 +68,7 @@ from std_msgs.msg import String
 
 from drive_intent import predict, schema
 from drive_intent.throttle import FailureLatch, IntentThrottle
-from pure_pursuit import following, live_tuning, racing_math, tracking_laws
+from pure_pursuit import following, live_tuning, pass_completion, racing_math, tracking_laws
 from pure_pursuit.opponent_gate import OpponentGate, WallDistance
 
 
@@ -157,13 +157,7 @@ class OpponentTracker:
         return now_sec - self.last_update_time
 
     def predicted_arc_length(self, now_sec: float, total_length: float):
-        """Dead-reckoned arc length: last seen position advanced along the
-        track at the smoothed progress rate. This is what makes finishing
-        an overtake robust: alongside or just past the ego car, the
-        opponent is *guaranteed* to leave the forward LIDAR cone, so "was
-        it detected this tick" is precisely the wrong question -- "where
-        must it be by now, given how it was moving" is the right one.
-        """
+        """Progress/stall estimate only; never evidence for pass completion."""
         if self.arc_length is None or self.last_update_time is None:
             return None
         predicted = self.arc_length + self.progress_rate * (now_sec - self.last_update_time)
@@ -339,6 +333,9 @@ class PurePursuitNode(Node):
         self.declare_parameter('overtake_trigger_gap', 3.0)
         self.declare_parameter('overtake_closing_margin', 0.3)
         self.declare_parameter('overtake_clear_margin', 1.0)
+        self.declare_parameter('overtake_completion_hold_sec', 0.5)
+        self.declare_parameter('overtake_completion_hysteresis', 0.1)
+        self.declare_parameter('overtake_measurement_uncertainty', 0.35)
         self.declare_parameter('overtake_lateral_offset', 0.35)
         self.declare_parameter('overtake_min_side_clearance', 0.70)
         self.declare_parameter('overtake_lookahead_distance', 4.0)
@@ -569,6 +566,13 @@ class PurePursuitNode(Node):
         self.overtake_trigger_gap = float(self.get_parameter('overtake_trigger_gap').value)
         self.overtake_closing_margin = float(self.get_parameter('overtake_closing_margin').value)
         self.overtake_clear_margin = float(self.get_parameter('overtake_clear_margin').value)
+        self.overtake_completion_hold_sec = float(self.get_parameter('overtake_completion_hold_sec').value)
+        self.overtake_completion_hysteresis = float(self.get_parameter('overtake_completion_hysteresis').value)
+        self.overtake_measurement_uncertainty = float(self.get_parameter('overtake_measurement_uncertainty').value)
+        pass_completion.CompletionGate(self.overtake_clear_margin, self.overtake_completion_hold_sec,
+                                       self.overtake_completion_hysteresis)
+        if not math.isfinite(self.overtake_measurement_uncertainty) or self.overtake_measurement_uncertainty < 0:
+            raise ValueError('overtake_measurement_uncertainty must be nonnegative and finite')
         self.overtake_lateral_offset = float(self.get_parameter('overtake_lateral_offset').value)
         self.overtake_min_side_clearance = float(
             self.get_parameter('overtake_min_side_clearance').value)
@@ -2537,7 +2541,12 @@ class PurePursuitNode(Node):
             return None
         # Following needs the car through bends, not just the +/-30 degree
         # avoidance cone. Confirmation/wall rejection remain unchanged.
-        half_fov = math.pi / 2 if self.enable_opponent_following else math.radians(self.avoidance_fov_deg) / 2.0
+        if self.overtake_active:
+            # Completion needs an actual sighting alongside/behind. Use only
+            # the scan's available coverage; never invent a rear observation.
+            half_fov = max(abs(scan.angle_min), abs(scan.angle_max))
+        else:
+            half_fov = math.pi / 2 if self.enable_opponent_following else math.radians(self.avoidance_fov_deg) / 2.0
         if not (-half_fov <= candidate[3] <= half_fov):
             return None
         return candidate
@@ -2552,6 +2561,7 @@ class PurePursuitNode(Node):
         """
         now_sec = self._now_sec()
         self.follow_speed_cap = None
+        measured_arc = None
         detector_name = (
             'map subtraction'
             if self.opponent_detection_mode == 'map' and self.map_ray_caster is not None
@@ -2600,6 +2610,8 @@ class PurePursuitNode(Node):
                 self.total_track_length, wall_distance=wall_distance)
             if verdict.confirmed:
                 self.opponent.prev_nearest_index = opp_idx
+                measured_arc = following.project_arc(
+                    self.xy, self.cumulative_arc_length, (opponent_x, opponent_y), opp_idx)
                 observed_arc = float(self.cumulative_arc_length[opp_idx])
                 if self.enable_opponent_following:
                     observed_arc = following.project_arc(
@@ -2762,6 +2774,9 @@ class PurePursuitNode(Node):
                 )
                 return None
             self.overtake_active = True
+            self._pass_completion = pass_completion.CompletionGate(
+                self.overtake_clear_margin, self.overtake_completion_hold_sec,
+                self.overtake_completion_hysteresis)
             self.overtake_side = side
             self._overtake_started_sec = now_sec
             self._overtake_best_lead = -gap_ahead
@@ -2777,14 +2792,9 @@ class PurePursuitNode(Node):
                 throttle_duration_sec=1.0,
             )
         else:
-            # Mid-pass. Alongside or just past the opponent it is
-            # *guaranteed* to leave the forward LIDAR cone, so "no fresh
-            # detection" must not cancel the pass and snap the steering
-            # back onto a racing line the opponent may still be occupying.
-            # Instead, dead-reckon where the opponent must be by now
-            # (last seen position advanced at its tracked progress rate)
-            # and finish the pass on *ego progress*: it's over only once
-            # the ego car is far enough past that predicted position.
+            # Losing sight must neither manufacture completion nor instantly
+            # snap steering across the opponent. Prediction still informs the
+            # progress/stall timers; completion requires current measurements.
             blind_sec = self.opponent.seconds_since_seen(now_sec)
             if blind_sec > self.overtake_max_blind_sec:
                 # Blind for so long the dead-reckoned position is no
@@ -2801,6 +2811,16 @@ class PurePursuitNode(Node):
                     f"> {self.overtake_max_blind_sec:.2f}s limit")
                 return None
             predicted_arc = self.opponent.predicted_arc_length(now_sec, self.total_track_length)
+            body_lead = -math.inf if measured_arc is None else pass_completion.measured_body_lead(
+                following.project_arc(self.xy, self.cumulative_arc_length,
+                                      (self.car_x, self.car_y), nearest_idx),
+                measured_arc, self.total_track_length if self.closed_loop else 0.0,
+                self.car_length, self.wheelbase, self.overtake_measurement_uncertainty)
+            if self._pass_completion.clear_margin != self.overtake_clear_margin:
+                self._pass_completion = pass_completion.CompletionGate(
+                    self.overtake_clear_margin, self.overtake_completion_hold_sec,
+                    self.overtake_completion_hysteresis)
+            completed = self._pass_completion.observe(now_sec, body_lead, measured_arc is not None)
             # Signed lead, not the wrapped gap. track_progress_gap can only
             # say "somewhere ahead within one lap", so the natural-looking
             # test `gap > total - clear_margin` actually means "at most
@@ -2827,13 +2847,14 @@ class PurePursuitNode(Node):
                         now_sec, f"pass still unfinished after {passing_for:.1f}s "
                                  f"> {self.overtake_max_duration_sec:.1f}s")
                     return None
-            if lead >= self.overtake_clear_margin:
+            if completed:
                 self.get_logger().info("overtake: clear of the opponent -- back to the racing line.",
                                        throttle_duration_sec=1.0)
                 self.overtake_active = False
                 self.last_opponent_status = (
-                    f"overtake complete: ego is {lead:.2f}m past the predicted "
-                    f"opponent position (>= {self.overtake_clear_margin:.2f}m)")
+                    f"overtake complete: measured body lead {body_lead:.2f}m "
+                    f"held >= {self.overtake_clear_margin:.2f}m for "
+                    f"{self.overtake_completion_hold_sec:.2f}s")
                 return None
             self.last_opponent_status = (
                 f"overtake active: passing {'left' if self.overtake_side > 0 else 'right'}, "

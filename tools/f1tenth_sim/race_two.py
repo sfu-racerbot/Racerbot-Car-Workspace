@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_gap  # noqa: E402,F401
 import run_validation as rv  # noqa: E402
 import numpy as np  # noqa: E402
-from pure_pursuit import following, racing_math  # noqa: E402
+from pure_pursuit import following, pass_completion, racing_math  # noqa: E402
 from pure_pursuit.opponent_gate import OpponentGate  # noqa: E402
 from sim_fidelity import with_floor  # noqa: E402
 
@@ -53,7 +53,8 @@ def node_decisions():
     adapter = ast.ClassDef(name='Decisions', bases=[], keywords=[], body=methods, decorator_list=[])
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0),
                               tracker, adapter], type_ignores=[])
-    namespace = dict(math=math, np=np, racing_math=racing_math, following=following)
+    namespace = dict(math=math, np=np, racing_math=racing_math, following=following,
+                     pass_completion=pass_completion)
     exec(compile(ast.fix_missing_locations(module), str(NODE), 'exec'), namespace)
     return namespace['Decisions'], namespace['OpponentTracker']
 
@@ -322,6 +323,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                   opponent_laps=rows[-1]['opp_progress'] / progress[0].length if count == 2 else None,
                   node_sha256=hashlib.sha256(NODE.read_bytes()).hexdigest(),
                   following_sha256=hashlib.sha256(Path(following.__file__).read_bytes()).hexdigest(),
+                  completion_sha256=hashlib.sha256(Path(pass_completion.__file__).read_bytes()).hexdigest(),
                   controller_parameters=params,
                   harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                   setup='standing start; frozen map and line settled before LB; both cars rb2',

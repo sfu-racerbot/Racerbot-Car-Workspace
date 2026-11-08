@@ -18,7 +18,7 @@ This doc is about *why* it's built this way and *how each algorithm works*. The 
 - **Maps a brand-new track and races it from one command, with nobody steering.** `auto_map_race_launch.py` drives the car round reactively, detects the closed lap, records and paces a racing line, then hands control to the race controller. No map saving, no offline tooling, no process restarts, no RViz pose seed.
 - **Turns a hand-driven lap into a real speed plan.** An offline pass measures how sharply the track turns at every point and works backwards from each corner, so braking starts *before* the corner rather than at it. Nothing about this needs a solver or a dynamics model.
 - **Optionally re-derives the fastest line, not just its speed.** The [minimum-curvature optimizer](#phase-4b-optional-optimize-the-line-itself-not-just-its-speed) finds the geometrically fastest path within the track's real width. Against a bare centerline at Brands Hatch: **94.85 s → 92.30 s** — about half the gain of TU Munich's reference implementation, at a clearance margin the reference wasn't holding.
-- **Overtakes, from the [LiDAR](glossary.md#lidar) alone.** No second sensor, no neural network, no radio link to the other car. It subtracts the known map from the live [scan](glossary.md#scan) to find what shouldn't be there, tracks how fast that thing is moving *along the track*, and steers around it when it's catching up.
+- **Detects and follows traffic from the [LiDAR](glossary.md#lidar).** Map subtraction finds objects absent from the saved map, and tracking estimates their progress along the line. Car 2 follows with a braking-aware speed ceiling; its legacy offset-point passes are disabled by default.
 - **Seven independent safety layers, any one of which can stop the car.** They run every control tick, they're ordered, and a stop is published unshaped — no rate limiter can turn a stop into a slow-down. Even an unhandled exception publishes a stop before it propagates.
 - **Refuses to race a line the car can't physically steer.** The supervisor checks the generated racing line against the steering rack's real limit and against the map's own walls, and says no with numbers rather than degrading on track. That check exists because every line this car generated for months was unfollowable for a third of its length.
 - **The math is a plain library, not a [ROS node](glossary.md#node).** All of it lives in `racing_math.py` with no ROS imports, so `python3 -m pytest src/pure_pursuit/test/ -v` runs the whole thing on a laptop — no robot, no build, no `rclpy`.
@@ -51,7 +51,7 @@ Skip the equations for a moment. Here's the whole system in plain language, the 
 - **Localization.** The car constantly compares what its [LiDAR](glossary.md#lidar) (its spinning laser rangefinder) sees right now against that picture, to work out "where am I, exactly." Like finding your spot on a paper map by matching the shape of the room around you to the shape drawn on the page.
 - **Recording a line, then pacing it.** Drive one good lap. A small program then looks at how sharply the track turns everywhere, and works out a sensible speed for every point on it. Slow for tight corners, fast on straights, braking that starts *before* the corner.
 - **Driving it.** Imagine picking a spot a little way ahead on the track — the **lookahead point** — and steering toward it, over and over. Go faster or slower depending on how fast you're supposed to be right there. That is the entire control algorithm. It's called **Pure Pursuit**, and that's genuinely all it is.
-- **Handling other cars.** Notice something car-shaped in the way. Work out whether you're catching up to it. If you are, aim slightly toward whichever side has more room until you're past — then go straight back to the normal line.
+- **Handling other cars.** Detect and confirm a car, then estimate its position and speed along the racing line. Car 2 lowers its speed so it can brake behind it while retaining its normal steering law. The legacy offset passing behaviour is described separately below.
 - **Safety, always on top.** No matter what any of the above wants to do, if something gets too close for comfort the car stops or steers around it first and asks questions later. And none of it moves an inch unless a human is holding the LB button.
 
 Everything past this point explains *why* each piece works the way it does, with the actual math. That's useful once you want to tune it, extend it, or just understand it properly — but it isn't required to get the gist.
@@ -235,7 +235,7 @@ The timeout is 120 s rather than the checkpoint's 100 s, allowing a conservative
 
 ### Stage-1 results, 2026-11-08
 
-All **60 traffic races finished with zero car contact, zero wall contact and zero emergency-stop ticks**. Ego finished second in every race. There were zero attempted, declared or physically completed passes.
+All **60 traffic races finished with zero car contact, zero wall contact and zero ego emergency-stop ticks**. Ego finished second in every race. There were zero attempted, declared or physically completed passes.
 
 Each row covers seeds 12345–12350 and four laps. The finish gap is ego's finish time minus the opponent's, at the same finish line. Results and selected traces are archived in [`race_two_following_stage1_2026_11_08.json`](../tools/f1tenth_sim/race_two_following_stage1_2026_11_08.json).
 
@@ -288,7 +288,7 @@ The runners are `python3 -m pytest src/pure_pursuit/test/` and `python3 -m pytes
 | Coverage | Deliberate break observed | Restored result |
 |---|---|---|
 | Delayed stopping, invalid inputs, standstill threshold | Stub envelope; raise physical braking by 10%; remove the near-zero stop | All selected stub cases fail; numerical regressions fail; pass restored |
-| Continuous projection and seam/[frame](glossary.md#frame) invariance | Stub projection; negate projected arc increment | Fails under both; pass restored |
+| Continuous projection and seam/[frame](glossary.md#tf--transform--frame) invariance | Stub projection; negate projected arc increment | Fails under both; pass restored |
 | Observed empty corridor, invalid scans | Stub visibility; invert range-clearance comparison | Eight stub cases fail; geometry mutation fails; pass restored |
 | Published following command and lowering-only cap | Delete following hard cap; assign mapped ceiling as target | Each real-node published-command test fails; pass restored |
 | Default pass refusal, wide-angle tracking, stale/blocked reacquisition | Stub source-adapted decisions; enable offset pass; narrow tracking to ±30°; admit invalid scans | Both car fixtures fail the affected cases; pass restored |
@@ -299,7 +299,7 @@ The runners are `python3 -m pytest src/pure_pursuit/test/` and `python3 -m pytes
 
 ### Stage-1 package verification
 
-The four suites ran separately with ROS sourced, `RACERBOT_CAR=rb2`, `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, isolated ROS domains 80/81 and localhost discovery. The complete pure-pursuit suite includes the existing LB held, released, never-received and stale-input command tests.
+The four [package](glossary.md#package) and tool suites ran separately with ROS sourced, `RACERBOT_CAR=rb2`, `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, isolated ROS domains 80/81 and localhost discovery. The complete pure-pursuit suite includes the existing LB held, released, never-received and stale-input command tests.
 
 | Suite | Outcome |
 |---|---|
@@ -313,6 +313,61 @@ The known failure remains `test_raceline_optimizer.py::test_the_trust_region_bou
 ### Stage-1 limitations
 
 This is a single-opponent, settled-map simulator validation. It does not establish physical-car behaviour or safe passing. Keep the LB [deadman](glossary.md#deadman) enabled and follow static checks, wheels-off-the-ground checks and capped floor testing before driving.
+
+## Approved measured pass completion, 2026-11-08
+
+The tech lead approved replacing prediction-only completion on 2026-11-08. A pass now completes only after a current, confirmed scan observation establishes conservative body-to-body clearance for 0.50 s. Losing sight resets the hold; predicted progress can still drive stall/give-up timers, but cannot complete a pass.
+
+The measured surface is projected onto the line. Ego's rear extent, a whole opponent-body length and `overtake_measurement_uncertainty` (0.35 m) are included, because a cluster centroid is not an opponent axle or its front bumper.
+
+The default clear margin remains 1.0 m. The gate arms at 1.1 m body clearance and must stay at or above 1.0 m for the full hold. This 0.1 m hysteresis prevents arming on marginal clearance; increasing the live clear margin restarts the timer.
+
+During a committed pass, detection can use the scan's actual available coverage, including alongside and rearward beams.
+
+The confirmation count, observation span, motion and mapped-wall checks remain in force. Car 2's physical 270° scan still has a rear blind sector; a car hidden there cannot supply completion evidence.
+
+The approved update to `test_overtake_resolves_once_ego_is_past_the_opponent` retains a positive completion case.
+
+Previously, that test required completion after the opponent disappeared, based on predicted progress. It now measures the opponent through the stadium bend and verifies the hold. A separate deny case requires the pass to remain incomplete when the opponent disappears.
+
+`pass_completion.py` is ROS-free. The simulator's source adapter executes the node's updated method and the same helper, with a test using real confirmation cadence, a lost sighting and a fresh measured hold.
+
+The full 72-run matrix was repeated after this change. All per-seed finish times, progress, pass counts, contact counts, safety counts and stuck times exactly match stage-1 commit `3ab0f2e`. The paired comparison and final source hashes are in [`race_two_completion_2026_11_08.json`](../tools/f1tenth_sim/race_two_completion_2026_11_08.json).
+
+| Coverage | Deliberate break observed | Restored result |
+|---|---|---|
+| Conservative body lead, seam and invalid geometry | Stub body-lead calculation; negate the ego rear offset | Seven stub cases and the sign regression fail; pass restored |
+| Measured hold, loss, overlap, invalid time and hysteresis | Stub gate; raise hold by 10%; remove hysteresis; allow blind measurements | Eight gate cases fail under stub/hold mutation; hysteresis and blind regressions fail; pass restored |
+| Invalid completion configuration | Stub constructor with `NotImplementedError` | All four configuration cases fail; pass restored |
+| Real-node positive completion and lost-sight refusal | Stub gate; restore prediction-only completion | Positive and deny cases fail under the old predicate; pass restored |
+| Live clearance-margin change | Disable timer reset on margin change | Real-node control path fails the persistence assertion; pass restored |
+| Simulator adapter | Stub completion gate | Both car fixtures fail; pass restored |
+
+After the completion change, the complete suites ran separately again:
+
+| Suite | Outcome |
+|---|---|
+| `src/pure_pursuit/test/` | 1084 passed, 11 existing dependency skips, only the same known trust-region failure; 649.29 s |
+| `tools/f1tenth_sim/tests/` | 684 passed; 43.00 s |
+| `src/racerbot_car/test/` | 231 passed; 9.09 s |
+| `src/racerbot_launch/test/` | 312 passed; 17.11 s |
+
+The ament/colcon runner also ran the following and completion tests: 57 tests, zero errors, failures or skips. In the same isolated development terminal:
+
+```bash
+rb env RACERBOT_CAR=rb2 ROS_DOMAIN_ID=81 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+  OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 colcon test --packages-select pure_pursuit \
+  --pytest-args -q -k "following or pass_completion or overtake_resolves_once or losing_sight or increasing_clearance"
+rb colcon test-result --verbose
+```
+
+**Working when:** the result summary reports `57 tests, 0 errors, 0 failures, 0 skipped`. This targeted runner check supplements the complete pytest suite above.
+
+### Passing-planner disposition
+
+Stage 2 remains the [proposed local passing planner](#proposed-local-passing-planner). The delivered traffic controller attempted zero passes and completed zero physical passes in 60 traffic races, including 0/12 against map ×0.8 and 0/12 against the blocker. No local-planner race or promotion claim is included.
+
+The completion correction does not supply entry, alongside or rejoin trajectories, swept-body feasibility or a temporary path for `delay_lqr`. Car 2 therefore retains passing disabled. A future planner must also account for whether the opponent remains observable while establishing the required clear lead.
 
 ## Two-car racing on the 6 Nov courses, 2026-11-08
 
@@ -1446,6 +1501,8 @@ That prediction automatically follows the track's own curvature, because it's ex
 
 ### 3. Deciding, and executing, an overtake
 
+**This describes the legacy offset pass, disabled by default on car 2.** Its completion gate follows the [approved measured-clearance contract](#approved-measured-pass-completion-2026-11-08), but its path still lacks the swept-body checks required for a safe local passing planner.
+
 An overtake starts when **both** of these are true:
 
 - the opponent is within `overtake_trigger_gap` metres of *track distance* ahead. Not straight-line distance — a hairpin apex might be 1 m away in a straight line but 8 m away along the actual track.
@@ -1482,13 +1539,9 @@ Because of that coupling, the node **refuses to start** if `overtake_lookahead_d
 
 </details>
 
-**Ending the overtake** happens once the car's own arc length is at least `overtake_clear_margin` metres past the opponent's *last known* position.
+**Ending the overtake** requires a current measured body-clearance lower bound above `overtake_clear_margin`, held through `overtake_completion_hold_sec` with hysteresis. The timer resets when the opponent is not measured. Dead-reckoned arc length is used for progress and stall assessment only.
 
-That comparison uses `racing_math.track_lead_distance`, a signed lead that takes the shorter way round the loop.
-
-That's deliberately not re-checked against a fresh detection every tick. Alongside or just past an opponent, it commonly falls completely out of the forward LiDAR cone, and that must not read as "lost it, panic" rather than "passed it, done."
-
-If the tracked opponent goes stale (`opponent_lost_timeout_sec`, default 1 s, with no update at all) and no overtake is in progress, tracking is simply cleared — nothing to react to.
+The legacy pass starter requires a fresh sighting. With following enabled, a lost observed surface remains a scan-constrained bound until safely traversed and retired; elapsed time alone does not manufacture forward free space.
 
 **Giving up a pass (2026-11-07).** A pass that isn't working is abandoned, and the car goes back to its racing line behind the other car:
 

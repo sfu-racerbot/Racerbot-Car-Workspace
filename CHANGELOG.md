@@ -11,17 +11,31 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-08 (latest): car 2 follows traffic without contact
+## 2026-11-08 (latest): approved measured pass-completion contract
+
+### pure_pursuit
+
+- Implement the stronger completion contract approved by the tech lead on 2026-11-08. A pass completes only after a current confirmed [scan](docs/glossary.md#scan) establishes a conservative measured body-to-body lead, held for 0.50 s. Loss of sight resets the hold; predicted progress cannot complete a pass.
+- Keep the 1.0 m clear margin, add 0.1 m arming hysteresis and a 0.35 m measurement allowance, and restart the hold when the live margin changes. Active passes can use the scan's actual alongside/rearward coverage while retaining all confirmation checks.
+- Update `test_overtake_resolves_once_ego_is_past_the_opponent` under that approval, retaining a measured positive case through a bend. Add a separate lost-sight deny test, ROS-free geometry/timing tests, a source-adapter regression and observed deliberate-break checks.
+- Car 2 retains passing disabled; stage 2's local trajectories and swept-body planner remain future work. The validated stage-1 matrix contains zero physical passes: 0/12 against map ×0.8 and 0/12 against the blocker.
+
+### Validation
+
+- Repeat the complete 72-run matrix after completion changes: all recorded race outcomes exactly match stage-1 commit `3ab0f2e`.
+- Suites: `pure_pursuit` 1084 passed, 11 existing skips and only the known trust-region failure; simulator tools 684 passed; car profiles 231 passed; launch 312 passed. The targeted colcon runner passes 57 following/completion tests.
+
+## 2026-11-08: car 2 follows traffic without contact
 
 ### pure_pursuit
 
 - Enable car 2's braking-aware following and disable its unsafe offset-point passes through its tuning overlay. Following retains `delay_lqr` and caps speed using body gap, measured 3.0 m/s² braking and a 0.45 s response allowance. Only uncertainty-bounded fresh tracks receive stopping-distance credit.
 - Retain line steering while braking for temporarily unconfirmed traffic. The checkpoint's two 06a wall contacts followed switches into generic gap steering. Global opponent projection and one-time retirement of safely traversed old surfaces fix stale-window aliasing and half-lap resurrection that caused repeated 0.25 m/s timeouts.
-- Make mapped pass ceilings lowering-only. Preserve the existing confirmation thresholds, LB deadman, body-contact, arc and emergency checks. `tracking_laws.py` is unchanged.
+- Make mapped pass ceilings lowering-only. Preserve the existing confirmation thresholds, [LB deadman](docs/glossary.md#deadman), body-contact, arc and emergency checks. `tracking_laws.py` is unchanged.
 
 ### Validation
 
-- Six seeds on both 6 Nov courses: all 60 traffic races finish with zero car contact, zero wall contact and zero emergency-stop ticks, including the opponent-braking scenario. Ego finishes second in every race, with zero attempted or completed passes. All finish before 100 s; the verification command permits 120 s.
+- Six seeds on 06a and 06b: all 60 traffic races finish with zero car contact, zero wall contact and zero ego emergency-stop ticks, including the braking scenario. Ego finishes second in every race, with zero attempted or completed passes. All finish before 100 s; the verification command permits 120 s.
 - Twelve full-safety solo controls exactly match the checkpoint. Separate flying controls retain 06a 11.40–11.47 s and 06b 8.75–8.87 s at 2.7 m/s², with zero contact or stop ticks.
 - Archive per-seed results, source hashes, braking snapshots, checkpoint failure traces and solo measurements. Commands, finish gaps and deliberate-break evidence are in [stage-1 traffic results](docs/racing-autonomy.md#following-traffic-on-car-2-stage-1).
 - Suites run separately: pure pursuit 1063 passed, 11 existing dependency skips and the known trust-region failure; simulator tools 682 passed; car profiles 231 passed; launch 312 passed. LB command-denial tests remain in the complete pure-pursuit run.

@@ -672,31 +672,99 @@ def test_body_contact_flank_escape_is_refused_even_with_room(node):
 
 
 def test_overtake_resolves_once_ego_is_past_the_opponent(node):
+    # Tech-lead approval, 2026-11-08: replace blind prediction completion
+    # with measured body-to-body lead held with hysteresis. Positive case
+    # retained; the separate loss-of-sight test below pins the deny path.
+    clock = [0.0]
+    node._now_sec = lambda: clock[0]
     scan, _center = _car_ahead_scan()
     node.scan_callback(scan)
     for step in range(4):
+        clock[0] = step * .025
         _set_pose(node, -1.5 + step * 0.2, -1.2, 0.0)
         node.control_loop()
     assert node.overtake_active is True
 
-    # Opponent now out of view (behind the car, as it would be after a
-    # real pass) -- resolution must use the last tracked position, not
-    # wait for opponent_lost_timeout_sec to just give up.
-    #
-    # x=2.7 puts the ego 1.20 m past the dead-reckoned opponent, which
-    # clears overtake_clear_margin (1.0 m). Note the opponent's tracked
-    # arc advances with the ego here -- the same scan is replayed while
-    # the ego moves, so it keeps being re-seen 2.4 m ahead -- which is
-    # why this is 1.20 m of lead and not the 4.2 m the ego travelled.
-    # Do not pull this back toward the opponent to make the pass resolve
-    # sooner: completion measures real track lead now, and a smaller
-    # number is a car rejoining the racing line across an opponent it
-    # has not cleared. See the test below.
-    node.scan_callback(_clear_scan())
-    _set_pose(node, 2.7, -1.2, 0.0)
-    for _ in range(3):
+    # Round the stadium's right bend. The same surface at (1.1,-1.2)
+    # remains within the real 270° scan, now behind/alongside ego. This
+    # supplies actual measurements; a prediction alone is not the oracle.
+    for now in (.2, .45):
+        clock[0] = now
+        _set_pose(node, 3.2, 0.0, math.pi / 2)
+        node.scan_callback(_world_opponent_scan(node, 1.1, -1.2))
         node.control_loop()
+        assert node.overtake_active is True  # oracle: hold is not yet .5s
+    clock[0] = .7
+    _set_pose(node, 3.2, 0.0, math.pi / 2)
+    node.scan_callback(_world_opponent_scan(node, 1.1, -1.2))
+    node.control_loop()
+    # oracle: approved measured lead/persistence contract, not a blind timeout.
     assert node.overtake_active is False
+    assert node.last_opponent_status.startswith('overtake complete: measured body lead')
+
+
+def _world_opponent_scan(node, x, y):
+    scan = _clear_scan(n=1081, angle_span=3 * math.pi / 2)
+    c, s = math.cos(node.car_yaw), math.sin(node.car_yaw)
+    laser_x = node.car_x + node.laser_offset_x * c - node.laser_offset_y * s
+    laser_y = node.car_y + node.laser_offset_x * s + node.laser_offset_y * c
+    bearing = (math.atan2(y - laser_y, x - laser_x) - node.car_yaw + math.pi) % (2 * math.pi) - math.pi
+    distance = math.hypot(x - laser_x, y - laser_y)
+    angles = scan.angle_min + np.arange(len(scan.ranges)) * scan.angle_increment
+    values = np.asarray(scan.ranges)
+    values[np.abs(angles - bearing) < .055] = distance
+    scan.ranges = values.tolist()
+    return scan
+
+
+def test_losing_sight_cannot_complete_a_pass_even_with_predicted_clear_lead(node):
+    clock = [0.0]
+    node._now_sec = lambda: clock[0]
+    scan, _ = _car_ahead_scan()
+    node.scan_callback(scan)
+    for step in range(4):
+        clock[0] = step * .025
+        _set_pose(node, -1.5 + step * .2, -1.2)
+        node.control_loop()
+    assert node.overtake_active
+    for now in (.2, .45, .7):
+        clock[0] = now
+        _set_pose(node, 3.2, 0, math.pi / 2)
+        node.scan_callback(_clear_scan(n=1081, angle_span=3 * math.pi / 2))
+        node.control_loop()
+        # oracle: approved deny path; the old prediction-only completion
+        # would rejoin here, despite no current body-clearance observation.
+        assert node.overtake_active
+        assert not node.last_opponent_status.startswith('overtake complete:')
+
+
+def test_increasing_clearance_during_a_pass_restarts_the_measured_hold(node):
+    clock = [0.0]
+    node._now_sec = lambda: clock[0]
+    scan, _ = _car_ahead_scan()
+    node.scan_callback(scan)
+    for step in range(4):
+        clock[0] = step * .025
+        _set_pose(node, -1.5 + step * .2, -1.2)
+        node.control_loop()
+    for now in (.2, .45):
+        clock[0] = now
+        _set_pose(node, 3.2, 0, math.pi / 2)
+        node.scan_callback(_world_opponent_scan(node, 1.1, -1.2))
+        node.control_loop()
+    node.overtake_clear_margin = 1.1  # live tuning's node attribute, stronger margin
+    for now in (.7, 1.199):
+        clock[0] = now
+        _set_pose(node, 3.2, 0, math.pi / 2)
+        node.scan_callback(_world_opponent_scan(node, 1.1, -1.2))
+        node.control_loop()
+        # oracle: invariant; the old margin's timer cannot authorise a rejoin.
+        assert node.overtake_active
+    clock[0] = 1.2
+    _set_pose(node, 3.2, 0, math.pi / 2)
+    node.scan_callback(_world_opponent_scan(node, 1.1, -1.2))
+    node.control_loop()
+    assert not node.overtake_active
 
 
 def test_overtake_stays_active_while_the_cars_still_overlap(node):

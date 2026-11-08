@@ -289,3 +289,32 @@ def test_unconfirmed_traffic_brakes_without_borrowing_gap_steering():
     assert steering is None
     assert speed == pytest.approx(expected, abs=1e-9)  # m/s
     assert state is None
+
+
+def test_source_adapter_completes_only_on_persistent_measured_body_lead():
+    d, scan = decisions()
+    d.enable_opponent_following = False  # isolate the explicitly opted-in legacy pass
+    for now in np.arange(0, .3, .025):
+        d.observe([4.8, 0, 0, 1, 0], scan, float(now), 0)
+        d._update_opponent_and_overtake(48, allow_pass=True)
+    assert d.overtake_active
+    # Ego rounds the right bend; the stationary observed surface at (7.06,0)
+    # is now behind but still in the physical 270° scan.
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    bearing = (math.atan2(-.5 - d.laser_offset_x, 7.06 - 10) - math.pi / 2 + math.pi) % (2 * math.pi) - math.pi
+    measured = np.full(1081, 10.0)
+    measured[np.abs(angles - bearing) < .055] = math.hypot(7.06 - 10, .5 + d.laser_offset_x)
+    observations = [(now, measured) for now in (.3, .325, .35, .375, .4)]
+    observations += [(.425, np.full(1081, 10.0))]
+    observations += [(float(now), measured) for now in np.arange(.45, .95, .025)]
+    for now, observation in observations:
+        d.observe([10, .5, 0, 1, math.pi / 2], observation, now, 0)
+        d._update_opponent_and_overtake(105, allow_pass=True)
+        # oracle: approved contract; a missing measurement resets the .5s
+        # hold, even though predicted progress already says ego is ahead.
+        assert d.overtake_active
+        assert not d.last_opponent_status.startswith('overtake complete:')
+    d.observe([10, .5, 0, 1, math.pi / 2], measured, .95, 0)
+    assert d._update_opponent_and_overtake(105, allow_pass=True) is None
+    assert not d.overtake_active
+    assert d.last_opponent_status.startswith('overtake complete: measured body lead')
