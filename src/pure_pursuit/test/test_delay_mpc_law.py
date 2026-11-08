@@ -10,7 +10,8 @@ import pytest
 import yaml
 
 from pure_pursuit import tracking_laws as laws
-from test_delay_lqr_law import LIMITS, DT, L, straight_path, circle_path, CONFIG
+from test_delay_lqr_law import (
+    LIMITS, DT, L, straight_path, circle_path, CONFIG, riccati_gain)
 
 
 def make(**params):
@@ -55,6 +56,22 @@ def test_step_demand_activates_rate_and_angle_constraints():
     assert np.all(np.abs(np.diff(np.r_[0., plan])) <= LIMITS.max_steering_rate * tau + 1e-12)
     assert np.max(np.abs(plan)) <= LIMITS.max_steering_angle
     assert np.min(plan) == pytest.approx(-LIMITS.max_steering_angle, abs=1e-4)  # rad
+    # Check the optimizer's raw moves too: output projection alone must not
+    # disguise a QP that ignored command-rate constraints.
+    raw = law._warm_start
+    assert np.all(np.abs(np.diff(np.r_[0., raw])) <= LIMITS.max_steering_rate * tau + 1e-7)
+
+
+def test_unconstrained_straight_matches_independent_servo_lqr():
+    # The DARE terminal cost makes finite MPC equal infinite LQR on a constant
+    # straight. Oracle: independent fixed-point Riccati iteration in the LQR tests.
+    law = make()
+    error = .001  # m; command is below the first rate bound
+    result = law.steer(inp(y=error), straight_path())
+    expected = -riccati_gain(2., q_lateral=law.params.q_lateral,
+                            q_heading=law.params.q_heading,
+                            r_steer=law.params.r_steer)[0] * error
+    assert result.steering == pytest.approx(expected, abs=1e-8)  # rad
 
 
 def test_action_initial_state_matches_closed_form_rollout():

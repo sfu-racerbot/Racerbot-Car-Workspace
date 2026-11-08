@@ -1144,7 +1144,7 @@ class DelayLqrLaw(DelayPredictor):
 
 
 # ---------------------------------------------------------------------------
-# Factory
+# Delay MPC: constrained preview including the servo from the action point.
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -1341,6 +1341,10 @@ class DelayMpcLaw:
                   f'th={self.initial_state[1]:+.3f}rad '
                   f'solve={elapsed * 1e3:.1f}ms it={result.info.iter}')
         return SteeringResult(planned[0], float(commands[0]), detail, tuple(planned))
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
 
 def make_law(name: str, limits: VehicleLimits,
              params: Mapping[str, float]) -> TrackingLaw:

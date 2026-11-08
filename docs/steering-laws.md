@@ -1,11 +1,11 @@
-# Steering laws: pure pursuit, Stanley, LQR, MPC and delay LQR
+# Steering laws: pure pursuit, Stanley, LQR, MPC, delay LQR and delay MPC
 
 > **Who this is for:** anyone racing with `pure_pursuit` (the map-based race controller) who wants to try a different way of steering along the racing line, or tune one.
 > **Read first:** [racing-autonomy.md](racing-autonomy.md#choosing-a-steering-law) — what the racing line is and what the race controller does around the steering.
 > **You'll be able to:** pick a steering law at launch, explain what each one does, tune one in the simulator, and judge it fairly against pure pursuit.
-> **Time:** 25 minutes to read. A tuning run in the simulator takes about a minute; a full judging run about 40 minutes.
+> **Time:** 35 minutes to read. A tuning run in the simulator takes about a minute; a full judging run about 40 minutes.
 
-The race controller follows a recorded racing line. Each tick (40 times a second) a *steering law* decides **how far to turn the wheels** to stay on that line. There are five to choose from at launch.
+The race controller follows a recorded racing line. Each tick (40 times a second) a *steering law* decides **how far to turn the wheels** to stay on that line. There are six to choose from at launch.
 
 Car 2 defaults to `delay_lqr` through its tuning overlay; car 1 retains `pure_pursuit`. Delay LQR has simulator validation only, not physical-car validation; [results below](#delay-lqr-results).
 
@@ -15,7 +15,7 @@ Car 2 defaults to `delay_lqr` through its tuning overlay; car 1 retains `pure_pu
 2. [What a steering law is, and what it isn't](#what-a-steering-law-is-and-what-it-isnt)
 3. [Safety](#safety)
 4. [Choosing a law at launch](#choosing-a-law-at-launch)
-5. [The laws](#the-laws) — [pure pursuit](#pure-pursuit), [Stanley](#stanley), [LQR](#lqr), [MPC](#mpc), [delay LQR](#delay-lqr)
+5. [The laws](#the-laws) — [pure pursuit](#pure-pursuit), [Stanley](#stanley), [LQR](#lqr), [MPC](#mpc), [delay LQR](#delay-lqr), [delay MPC](#delay-mpc)
 6. [Delay compensation and smoothing](#delay-compensation-and-smoothing)
 7. [How the laws were tuned](#how-the-laws-were-tuned)
 8. [Tuning Stanley and LQR](#tuning-stanley-and-lqr) (and MPC)
@@ -25,7 +25,8 @@ Car 2 defaults to `delay_lqr` through its tuning overlay; car 1 retains `pure_pu
 
 ## Highlights
 
-- **Five laws, one switch.** Choose `steering_law:=pure_pursuit | stanley | lqr | mpc | delay_lqr` at launch. Car 2's default is delay LQR; deadman, watchdogs, safety net, overtaking and speed caps apply to every law.
+- **Six laws, one switch.** Choose `steering_law:=pure_pursuit | stanley | lqr | mpc | delay_lqr | delay_mpc` at launch. Car 2's default is delay LQR; deadman, watchdogs, safety net, overtaking and speed caps apply to every law.
+- **Delay MPC is experimental.** It avoids body contact in the current comparison but triggers safety stops on 06b and fails the promotion rule. [Results and every configuration tried](#delay-mpc-results).
 - **All three alternatives beat pure pursuit in the simulator** on 15 held-out runs each (3 circuits × 5 seeds), with no wall contact. None of the margins is big:
   - **Stanley:** 1.6% better cross-track, 2.8% slower laps.
   - **LQR:** 1.6% faster laps, 3.5% worse cross-track.
@@ -41,7 +42,7 @@ Every tick, the race controller works out where the car is (from localization: t
 
 The steering law takes that and returns one number: the steering angle. That is all it does.
 
-Everything around it is shared by all five laws and does not change when you switch:
+Everything around it is shared by all six laws and does not change when you switch:
 
 - the **LB deadman** (no LB held → no driving),
 - the **watchdogs** that stop the car if localization goes stale or the car ends up too far off the line,
@@ -57,7 +58,7 @@ So a bad steering law can make the car track the line worse or lap slower. It ca
 
 If the deadman were turned off (`enable_deadman: false`), a law steering the wrong way would have nothing stopping the car short of someone catching it. That setting is never allowed on the car ([architecture.md](architecture.md#workspace-policy-the-lb-deadman-button-is-mandatory-for-every-node-that-can-move-the-car)).
 
-**Stanley, LQR, MPC and delay LQR have only been driven in the simulator. The first time any of them runs on the car, do it in this order:**
+**Stanley, LQR, MPC, delay LQR and delay MPC have only been driven in the simulator. The first time any of them runs on the car, do it in this order:**
 
 1. Static checks with no driver stack running: follow [Testing before it is on wheels](writing-your-own-node.md#testing-before-its-on-wheels).
 2. Wheels off the ground, full stack up, LB held: check steering direction and that releasing LB stops the wheels.
@@ -83,13 +84,13 @@ Leave `steering_law` off to load the selected car's layered default: `delay_lqr`
 **If it doesn't:**
 
 - An unknown name stops the node at startup with an error naming `steering_law`. That is deliberate: a typo must not quietly fall back to another law.
-- `mpc` without the `osqp` package installed also refuses to start. See [Installing osqp](#installing-osqp-for-mpc).
+- `mpc` and `delay_mpc` without the `osqp` package installed also refuse to start. See [Installing osqp](#installing-osqp-for-mpc).
 
 The law and its parameters are **launch-time only**. The dashboard cannot change them while driving, and the node refuses if anything tries. To change a law's gains, edit `pure_pursuit.yaml` and relaunch. (No rebuild needed — the workspace uses `--symlink-install`.)
 
 ## The laws
 
-The first four answer the same question. They differ in *what error they look at* and *how far ahead they look*. [Delay LQR](#delay-lqr), last in this section, predicts the delays out instead.
+The first four answer the same question. They differ in *what error they look at* and *how far ahead they look*. [Delay LQR](#delay-lqr) and [delay MPC](#delay-mpc) also predict the steering chain's delays.
 
 Two errors come up again and again:
 
@@ -165,9 +166,9 @@ MPC stands for *model predictive control*. Every tick it plans the next **second
 
 It plans *knowing* the servo's limits: never past the maximum angle, and never turning faster than the servo can. It applies the first move, throws the rest away, and plans again next tick.
 
-That makes it the only law that sees a bend coming precisely, and the only one that treats the steering rate as a hard limit rather than finding out afterwards.
+MPC and delay MPC see bends ahead and treat the steering rate as a hard limit rather than finding out afterwards.
 
-It is also the only law that can run out of time. Each plan is a small optimisation problem, solved with the `osqp` library. If a solve is late or fails, that is a **miss**:
+Both MPC laws can run out of time. Each plan is a small optimisation problem, solved with the `osqp` library. If a solve is late or fails, that is a **miss**:
 
 | What happens | What the car does | Decision state |
 |---|---|---|
@@ -259,6 +260,63 @@ The tests compare the gain table with a separate Riccati iteration, and check th
 `test_tracking_law_integration.py` runs the law through the same deadman and stale-joystick paths as the other laws, and checks that every `delay_lqr.*` value reaches the law.
 
 The law's tests were each seen to fail against a deliberate break of the code they cover.
+
+### Delay MPC
+
+**Experimental; it has not met the promotion rule.** Select it with `steering_law:=delay_mpc`. Car 2 continues to use delay LQR because delay MPC still triggers safety stops on 06b.
+
+Delay MPC combines the command-history prediction of delay LQR with MPC's constrained steering plan. It predicts where the car will be when a command reaches the servo, then plans 32 commands at 25 ms intervals: 0.8 s of steering.
+
+The prediction tracks lateral error, heading error and wheel angle. Each step samples the line's curvature and speed at the predicted arc position; the next position advances by that profile speed times the prediction interval.
+
+The command-angle and command-rate bounds are hard constraints. An additional constraint keeps the predicted servo velocity within `servo_rate`, so the optimiser cannot assume the wheels will turn faster than the model allows.
+
+Both delay laws use `DelayPredictor` for history, re-seeding after another path publishes a command, servo estimation, the settling-window check and pose rollout. Refactoring it left delay LQR's outputs exactly equal over a 500-tick comparison against `23b6a51`, including intervening commands.
+
+Delay MPC uses the same miss handling as MPC: a miss gives a one-tick pure-pursuit fallback; three consecutive misses latch a zero-speed stop until LB is released. Both retain the existing diagnostic states `mpc_fallback` and `mpc_miss_latched`.
+
+The shared `tracking_laws.DEADLINE_LAWS` definition controls fallback construction, [latch](glossary.md#latch) handling, timing reports and diagnostic plan replay in the node. The simulator uses it for fallback dispatch and result reporting too.
+
+<details>
+<summary><b>Parameters and prediction equations</b>: reference for tuning or changing the law; optional for running the comparison.</summary>
+
+All `delay_mpc.*` parameters are launch-time only. Defaults agree in `DelayMpcParams`, the node declarations and `pure_pursuit.yaml`.
+
+| Parameter suffix | Default | Meaning |
+|---|---|---|
+| `dt` | 0.025 s | prediction interval |
+| `horizon_steps` | 32 | number of commands; allowed range 2–60 |
+| `q_lateral` / `q_heading` | 4.0 / 4.0 | lateral and heading error weights |
+| `r_steer` / `r_rate` | 1.0 / 0.0 | command offset and command-rate cost weights |
+| `deadline_sec` | 0.008 s | whole-law wall-clock deadline, including QP assembly |
+| `max_iter` | 4000 | OSQP iteration ceiling |
+| `max_consecutive_misses` | 3 | consecutive misses that latch the stop |
+| `sensing_delay` / `actuation_delay` | 0.05 / 0.075 s | car 2's delay chain |
+| `servo_gain` / `servo_rate` | 15 /s / 2.5 rad/s | proportional response and physical slew ceiling |
+
+With state `[e, theta, delta]`, reference steering `ff = atan(L*kappa)`, and command `u`:
+
+```text
+e_next     = e + v*dt*theta
+theta_next = theta + v*dt/(L*cos(ff)^2) * (delta - ff)
+delta_next = delta + servo_gain*dt*(u - delta)
+```
+
+The servo update is the Euler model used by `ServoLqrGainTable`. The solver constrains `|servo_gain*(u-delta)| <= servo_rate` instead of letting this linear update enter saturation.
+
+Eliminating the predicted states leaves a QP in the commands, with tracking cost and a servo-model LQR terminal cost at the prediction interval. OSQP is constructed once with fixed sparsity and warm-started each tick, using absolute and relative tolerances of `1e-8`. The returned plan is projected onto exact command limits.
+
+</details>
+
+#### Limitations
+
+`PathContext` supplies geometry, speed and curvature but no local body-clearance margins. This implementation therefore has no soft wall-room constraint. A distance from the line alone would invent clearance that the law has not been given.
+
+The model is kinematic and does not predict the floor's grip-dependent understeer. At the first stop of a diagnostic 06b repeat, the predicted lateral error was −0.326 m and the heading error −0.253 rad. The next eight commands were all at 0.42 rad, while the reference needed 0.367 rad.
+
+That observation establishes exhausted steering reserve at the stop. Grip and prediction mismatch are possible contributors; their separate effects have not been isolated. The existing safety layers remain binding.
+
+Timing below comes from an x86-64 simulator host. It does not establish the Jetson Orin Nano's 40 Hz compute budget, and this law has no physical-car validation.
 
 ## Delay compensation and smoothing
 
@@ -512,6 +570,179 @@ The sweep ran on an earlier revision in which the feedforward lead was an explic
 
 </details>
 
+## Delay MPC results
+
+**2026-11-08: rejected for promotion.** Delay MPC had zero body-contact ticks in all 55 runs: 24 tuning runs, 30 comparison runs and one diagnostic repeat. It failed the zero-stop requirement on 06b. Car 2's default remains `delay_lqr`; the six-seed promotion gate was not attempted after the three-seed comparison failed.
+
+The comparison uses the supplied shipped lines, floor `sfu_course_2026_11_06`, car `rb2`, map safety, four requested laps, 0.42 rad steering and a 5 m/s speed ceiling. Seeds are 12345–12347. Flying laps are completed laps 2–4.
+
+`S4` is the final experimental `delay_mpc` configuration: 32 × 25 ms steps, weights `q_lateral=4`, `q_heading=4`, `r_steer=1`, `r_rate=0`. It was selected on tuning seed 1000 before the comparison. The initial `S0` configuration used `q_heading=1`, `r_rate=0.001` and is included below as a failed alternative.
+
+| Course | Law/config | Lateral ceiling (m/s²) | Four-lap runs | Flying median (range), s | Contact / stop ticks | Mean / max cross-track (m) | Timing p50 / p99 (ms) |
+|---|---|---:|---:|---|---:|---|---|
+| 06a | delay LQR | 2.7 | 3/3 | 11.425 (11.400–11.475) | 0 / 0 | 0.0897 / 0.2318 | 0.159 / 0.335 |
+| 06a | delay MPC S4 | 2.7 | 3/3 | 11.525 (11.450–11.575) | 0 / 0 | 0.0919 / 0.2603 | 2.831 / 6.236 |
+| 06a | delay MPC S4 | 2.9 | 3/3 | 11.425 (11.375–11.500) | 0 / 0 | 0.0974 / 0.2556 | 2.705 / 6.052 |
+| 06a | delay MPC S4 | 3.2 | 3/3 | 11.350 (11.325–11.375) | 0 / 1 | 0.1080 / 0.2629 | 2.652 / 6.298 |
+| 06b | delay LQR | 2.7 | 3/3 | 8.800 (8.750–8.875) | 0 / 0 | 0.0964 / 0.2862 | 0.167 / 0.338 |
+| 06b | delay MPC S4 | 2.7 | 3/3 | 9.125 (8.925–9.275) | 0 / 77 | 0.1069 / 0.3340 | 2.706 / 6.123 |
+| 06b | delay MPC S4 | 2.9 | 3/3 | 9.000 (8.875–9.200) | 0 / 94 | 0.1145 / 0.3455 | 2.860 / 6.853 |
+| 06b | delay MPC S4 | 3.2 | 1/3 | 9.238 (8.975–9.675), 6 laps only | 0 / 3797 | 0.2260 / 0.3629 | 2.559 / 5.860 |
+| 06a | delay MPC S0 | 2.7 | 3/3 | 11.425 (11.425–11.500) | 0 / 0 | 0.0822 / 0.2483 | 2.168 / 4.077 |
+| 06b | delay MPC S0 | 2.7 | 1/3 | 9.000 (8.950–9.425), 5 laps only | 0 / 4043 | 0.2164 / 0.3549 | 2.306 / 4.076 |
+
+Each complete row pools nine flying laps. Cross-track means average the three whole-run means; maxima are the largest run maximum. Timing reports the median of the three per-run p50 values and the largest per-run p99, **not pooled timing percentiles**. It includes QP assembly and any fallback work.
+
+S4 had 12 isolated solver misses across its 18 comparison runs, each answered by fallback; no run latched a miss stop. Safety stops account for the stop column. Both stalled S4 runs at 3.2 m/s² reached the 70 s limit, completing two and three laps respectively.
+
+The printed `finished True` field from `pure_course.py` only requires one lap. Use the number of returned lap times to check four-lap completion. Contact is always the harness's independent body check.
+
+### Reproduce the comparison
+
+**Any terminal at the workspace root**, with `rb` available and the simulator environment installed. The supplied CSV paths below are machine-local, read-only inputs. If they are unavailable, obtain the same shipped lines before comparing results.
+
+```bash
+ln -s /home/bryan/racerbot-ws/.sim .sim  # fresh worktree only
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb colcon build --symlink-install \
+    --packages-select racerbot_car drive_intent pure_pursuit
+
+for course in a b; do
+    for law in delay_lqr delay_mpc; do
+        lateral=2.7
+        if [ "$law" = delay_mpc ]; then lateral=2.7,2.9,3.2; fi
+        for seed in 12345 12346 12347; do
+            RB_NO_QUEUE=1 RACERBOT_CAR=rb2 RB_WS=$(pwd) rb env RACERBOT_CAR=rb2 \
+                python3 tools/f1tenth_sim/pure_course.py \
+                --track car2_course_2026_11_06${course}_scans \
+                --floor sfu_course_2026_11_06 \
+                --line /home/bryan/.claude/jobs/8e0da722/tmp/${course}06/raceline_profiled.csv \
+                --profiled --safety map --laps 4 --steering-limit 0.42 \
+                --speed 5.0 --lateral "$lateral" --seed "$seed" --timeout 70 --law "$law"
+        done
+    done
+done
+```
+
+**Working when:** each run prints contact, stop, cross-track and lap-time fields. This is a rejected candidate, so stops are expected on 06b. The loop uses one simulator process; never exceed two on the shared machine.
+
+**If it fails:** a missing CSV is an unavailable input, not a law failure. A missing simulator import means the environment is incomplete; follow the [simulator setup](../tools/f1tenth_sim/README.md). Host load can change deadline misses and subsequent laps, so small differences from this record are possible.
+
+To repeat S0, add `--set delay_mpc.q_heading=1 --set delay_mpc.r_rate=0.001` to a delay MPC command with `--lateral 2.7`.
+
+<details>
+<summary><b>Capture timing and the full result</b>: optional when reproducing the performance measurements.</summary>
+
+**Any terminal at the workspace root.** This wraps the same `pure_course` call and prints the returned measurement dictionary, including per-tick law timing percentiles and miss counts.
+
+```bash
+RB_NO_QUEUE=1 RACERBOT_CAR=rb2 RB_WS=$(pwd) rb env RACERBOT_CAR=rb2 python3 - <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path.cwd()
+sys.path[:0] = [str(root / 'tools/f1tenth_sim'), str(root / 'tools'),
+                str(root / 'src/pure_pursuit')]
+import pure_course
+
+run = pure_course.rv.run_pure_solo
+def report(*args, **kwargs):
+    result = run(*args, **kwargs)
+    print(json.dumps(result, indent=2))
+    return result
+pure_course.rv.run_pure_solo = report
+pure_course.main([
+    '--track', 'car2_course_2026_11_06b_scans',
+    '--floor', 'sfu_course_2026_11_06',
+    '--line', '/home/bryan/.claude/jobs/8e0da722/tmp/b06/raceline_profiled.csv',
+    '--profiled', '--safety', 'map', '--laps', '4', '--steering-limit', '0.42',
+    '--speed', '5.0', '--lateral', '2.7', '--seed', '12345', '--timeout', '70',
+    '--law', 'delay_mpc'])
+PY
+```
+
+**Working when:** the JSON includes `law_compute_ms_p50`, `law_compute_ms_p99`, `mpc_miss_steps` and `mpc_latched`. Repeat on the Jetson to measure its budget; the numbers here are host measurements.
+
+</details>
+
+### Every configuration tried
+
+All tuning rows used seed 1000 on both courses at 2.7 m/s² unless stated otherwise. Values below are flying medians; full per-run lap times, cross-track and captured timing are in [the measurement record](delay-mpc-comparison-2026-11-08.json). Every tuning run completed four laps with zero contact.
+
+| Config | Changes from S0 | 06a / 06b flying median (s) | 06a / 06b stop ticks |
+|---|---|---|---|
+| S0 | initial weights 4/1/1, rate cost 0.001, 32 steps | 11.425 / 9.025 | 0 / 16 |
+| S0, lateral 2.9 | online ceiling only | 11.350 / 9.025 | 1 / 52 |
+| S0, lateral 3.2 | online ceiling only | 11.250 / 9.200 | 0 / 56 |
+| Q1 | lateral weight 1, rate cost 0 | 11.500 / 8.900 | 0 / 3 |
+| Q8 | lateral weight 8, rate cost 0 | 11.550 / 9.050 | 0 / 1 |
+| Q16 | lateral weight 16, rate cost 0 | 11.675 / 9.150 | 2 / 10 |
+| H01 | heading weight 0.1, rate cost 0 | 11.500 / 9.075 | 0 / 1 |
+| S4 | heading weight 4, rate cost 0 | 11.550 / 8.975 | 0 / 0 |
+| H16 | heading weight 16, rate cost 0 | 11.625 / 9.000 | 7 / 2 |
+| N8 | Q1 with 8 steps | 11.475 / 9.000 | 0 / 30 |
+| N16 | Q1 with 16 steps | 11.500 / 8.900 | 0 / 4 |
+| N24 | Q1 with 24 steps | 11.500 / 8.900 | 1 / 1 |
+
+The comparison table lists every subsequent configuration: delay LQR at 2.7, S4 at all three ceilings, and S0 at 2.7. The diagnostic repeated S4, 06b, 2.7, seed 12345 once: zero contact, 24 stop ticks, flying laps 9.125 / 8.975 / 9.075 s.
+
+### Test break table
+
+The standard package pytest runner collects these tests. Each new or extended case was run against the stated deliberate implementation break, observed failing, then run green against restored code. Runtime mutations were confined to the test process.
+
+| Test or cases | Deliberate break | Observed result |
+|---|---|---|
+| `test_straight_zero_and_signed_offset` | replace `steer` with constant zero | failed signed correction |
+| `test_circle_equilibrium`, both directions | replace `steer` with zero | both failed feedforward |
+| `test_step_demand_activates_rate_and_angle_constraints` | zero stub; separately remove QP rate bounds | failed; raw optimizer plan exposes missing bounds |
+| `test_unconstrained_straight_matches_independent_servo_lqr` | increase QP lateral weight 10% | failed independent Riccati oracle |
+| `test_action_initial_state_matches_closed_form_rollout` | zero steering stub bypassing rollout | failed missing action state |
+| `test_servo_model_and_affine_curvature_match_euler_oracle` | negate lateral/heading dynamics coupling | failed Euler oracle |
+| `test_reference_advances_at_profile_speeds` | sample a constant arc throughout the horizon | failed profile-speed recurrence |
+| `test_nonfinite_input_is_a_law_error`, 15 cases | remove finite checks | all 15 failed |
+| `test_invalid_parameters_are_refused`, 15 cases | no-op constructor | all 15 failed |
+| `test_deadline_miss_discards_warm_start` | force a permissive deadline | failed expected miss |
+| `test_yaml_and_factory_cover_every_parameter` | drop `delay_mpc.q_heading` in factory | failed parameter equality |
+| `test_reset_forgets_plan_and_history` | no-op reset | failed retained warm start |
+| `test_yaml_mirrors_the_param_dataclasses` | change dataclass heading default 10% | failed YAML equality |
+| `test_lb_held_on_line_steers_toward_it[delay_mpc]` | constant-zero steering stub | failed steering direction |
+| released / never-received / stale LB cases for delay MPC | bypass `_deadman_status` | all three failed published-speed assertions |
+| miss fallback / repeated-miss latch / LB latch-clear cases for delay MPC | remove `delay_mpc` from `DEADLINE_LAWS` | all three failed |
+| fallback live tune / intent solver exclusion cases for delay MPC | remove `delay_mpc` from `DEADLINE_LAWS` | both failed |
+| `test_delay_mpc_success_records_timing_and_replays_plan` | remove `delay_mpc` from `DEADLINE_LAWS` | failed timing dispatch |
+| `test_delay_mpc_parameters_reach_node_and_are_launch_only` | drop heading parameter from node collection | failed received-parameter equality |
+| `test_delay_mpc_node_defaults_match_dataclass` | change node heading default 10% | failed defaults equality |
+
+The initial rate-activity test also exposed a 0.000000565 rad interior error with OSQP's `1e-5` tolerances. The implementation now solves at `1e-8`; the test tolerance was retained.
+
+### Suite verification
+
+Run one suite per pytest invocation, with ROS sourced through `rb` and an isolated ROS domain. **Any terminal at the workspace root:**
+
+```bash
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb env ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+    python3 -m pytest src/pure_pursuit/test/ -q
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb env ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+    python3 -m pytest tools/f1tenth_sim/tests/ -q
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb env ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+    python3 -m pytest src/racerbot_car/test/ -q
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb env ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+    python3 -m pytest src/racerbot_launch/test/ -q
+```
+
+**Working when:** the results match the table below. The pure pursuit suite takes about 12 minutes on this host because it rebuilds minimum-time lines.
+
+| Suite | Result, 2026-11-08 |
+|---|---|
+| `src/pure_pursuit/test/` | 1029 passed, 11 existing skips, one known failure |
+| `tools/f1tenth_sim/tests/` | 636 passed |
+| `src/racerbot_car/test/` | 231 passed |
+| `src/racerbot_launch/test/` | 312 passed |
+
+The known failure is `test_raceline_optimizer.py::test_the_trust_region_bounds_a_single_pass`: maximum radius 5.250001622 m against a 5.250001 m bound. The test and optimiser were left intact.
+
+**If collection fails:** initialise the pinned `particle_filter` and `web_dashboards` submodules and build the launch-test dependencies. This fresh worktree initially lacked `race_diagnostics`, `gap_follow` and dashboard packages. After building those and the launch packages, both configuration suites passed. No collection errors were bypassed.
+
 ## Installing osqp for MPC
 
 MPC needs the `osqp` solver in the same Python that ROS uses. On the car it was installed with:
@@ -536,7 +767,7 @@ To re-measure the solve time on the Jetson, use `python3 tools/mpc_benchmark/ben
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Node exits at startup naming `steering_law` | the name is misspelt | use one of `pure_pursuit`, `stanley`, `lqr`, `mpc`, `delay_lqr` |
+| Node exits at startup naming `steering_law` | the name is misspelt | use one of `pure_pursuit`, `stanley`, `lqr`, `mpc`, `delay_lqr`, `delay_mpc` |
 | `steering_law 'mpc' needs the 'osqp' package` | osqp not installed for this user's Python | [Installing osqp](#installing-osqp-for-mpc) |
 | Decision state `mpc_miss_latched`, car stopped | three late or failed MPC solves in a row | release LB and press it again to re-arm. If it repeats, something else is loading the CPU: check `top`, and consider `pure_pursuit` for this session |
 | A dashboard tune of `stanley.gain` (etc.) is refused | law parameters are launch-time only | edit `pure_pursuit.yaml` and relaunch |
