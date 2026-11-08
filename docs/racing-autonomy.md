@@ -176,7 +176,7 @@ The opponent types are another map racer with its profile multiplied by 0.8 or 0
 
 An **attempt** starts when the controller commits to its offset target. A **completed pass** requires ground-truth progress at least 1 m ahead for 0.5 s. That independent check prevents a mistaken controller completion from counting as a pass.
 
-**Stuck time** counts ticks within 3 m behind the opponent while commanding at least 0.3 m/s below the normal profile. It stops accumulating when the run ends, so it is a censored measurement, not the eventual time a stalled car would lose.
+**Stuck time** counts ticks within 3 m behind the opponent while commanding more than 0.3 m/s below the normal profile. It stops accumulating when the run ends, so it is a censored measurement, not the eventual time a stalled car would lose.
 
 | Course | Opponent | Attempts / completed / abandoned | Stuck median (range), s | Car / wall contact runs | Emergency stop ticks | Four-lap finishes |
 |---|---|---|---|---|---|---|
@@ -217,6 +217,8 @@ The emergency layers do execute and command zero or 0.25 m/s escape. They do not
 
 The mapped forward-cone pass cap also has an implementation hazard. `_reactive_override` returns a ceiling, but `control_step` assigns it as the new target rather than taking the minimum with the profile. The online curvature ceiling can hide this, so its contribution needs a controlled trial before changing the node.
 
+That cap uses `max_braking_decel: 8.0`, the command-slew limit, as a physical braking assumption. At 1.59 m mapped clearance and a 0.35 m reserve, it permits about 4.45 m/s. Assuming 3 m/s² physical braking permits only 2.73 m/s before allowing for delay. A passing planner needs a measured braking bound separate from command slew.
+
 ### Screened corrections: no driving change promoted
 
 Two harness-only trials used seed 12345 on all eight course/opponent combinations. `--cap-only` makes the mapped pass ceiling lower the profile target without replacing it. `--pass-lookahead 1.5 --cap-only` also shortens the passing preview from 4.0 m to 1.5 m.
@@ -238,11 +240,129 @@ Results and transition traces are archived as [`race_two_cap_only_2026_11_08.jso
 
 The ordinary path follower and command shaper remain `run_validation.py` mirrors. Off-line recovery is mirrored separately. Node startup, live map handover and ROS [watchdog](glossary.md#watchdog) scheduling are outside this scenario; the static map is settled before the simulated start.
 
-`run_validation.run_pure_traffic` remains a legacy fixture: it omits the confirmation gate and stall/duration/retry rules, uses the older fallback safety, and follows the track's own line against a scripted 2 m/s opponent. Use the new harness for these course comparisons.
+`run_validation.run_pure_traffic` remains a legacy fixture. It omits confirmation and pass give-up/retry, uses older fallback safety, and follows the track's own line against a scripted 2 m/s opponent. Use the new harness for these course comparisons.
 
 Per-seed results, source/input hashes and decision transitions are stored in [`race_two_2026_11_08.json`](../tools/f1tenth_sim/race_two_2026_11_08.json). Full 40 Hz traces are written by each reproducible run.
 
 Contact verdicts use `FidelityPlant._wall_contact` and `_chassis_contact`, including the closed contact-wall map, never Gym's flag.
+
+### Reproduce the tables
+
+Use a development terminal at the [workspace](glossary.md#workspace) root, with `rb` and the shared simulator installed. The read-only input files for this measurement are under `/home/bryan/.claude/jobs/8e0da722/tmp/`, in `a06/` and `b06/`. On another machine, set `LINES` to a copy containing those folders and verify the line hashes in the archived results.
+
+For a fresh worktree, create the simulator link once:
+
+```bash
+ln -s /home/bryan/racerbot-ws/.sim .sim
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb colcon build --symlink-install --packages-select racerbot_car drive_intent pure_pursuit gap_follow
+```
+
+**Working when:** the four packages finish building. If `gap_follow` reports a missing `imu_bridge/package.sh`, build `imu_bridge` with the same flags first, then repeat the command.
+
+In the same development terminal, run the matrix serially. This uses one simulator process; keep the shared machine below two simultaneous simulator processes.
+
+```bash
+export RB_NO_QUEUE=1 RACERBOT_CAR=rb2 RB_WS="$PWD"
+LINES=/home/bryan/.claude/jobs/8e0da722/tmp
+OUT=/tmp/opencode/race-two-reproduce
+for course in a b; do
+  for opponent in map80 map90 gap blocker solo; do
+    rb env RACERBOT_CAR=rb2 python3 tools/f1tenth_sim/race_two.py \
+      --track "car2_course_2026_11_06${course}_scans" \
+      --line "$LINES/${course}06/raceline_profiled.csv" \
+      --opponent "$opponent" --laps 4 --timeout 100 \
+      --seeds 12345,12346,12347,12348,12349,12350 \
+      --output "$OUT/06${course}/$opponent"
+  done
+done
+python3 tools/f1tenth_sim/race_two_report.py "$OUT" \
+  --output "$OUT/summary.json" --diagnose-seed 12345
+```
+
+**Working when:** each scenario folder contains `results.json` and six seed CSV traces; the report prints ten rows including the solo controls. Failed races are recorded results, so the simulator command exits successfully even when body contact ends a run.
+
+`--head-start 2`, `3` or `4` changes the grid spacing; this table uses the default 3 m. Spacing is rounded up to a waypoint, giving measured arc gaps of 3.1461 m on 06a and 3.1414 m on 06b.
+
+To reproduce a rejected correction in the same terminal, add `--seeds 12345 --cap-only --pass-lookahead 4.0`, or `--seeds 12345 --cap-only --pass-lookahead 1.5`, to each two-car command. Use a separate output root for each trial. A clean result needs zero independent car and wall contact; a printed controller completion is insufficient.
+
+### Proposed local passing planner
+
+The next controller needs a **local passing planner**, which selects a short collision-checked path and speed plan around the opponent. The proposal below is not implemented.
+
+Start with candidates that shift sideways from the racing line smoothly over distance, plus an explicit follow/brake candidate. Each candidate must include the entry, time alongside and return to the racing line; selecting a point on the far side of a corner is insufficient.
+
+The planner would need:
+
+- **A bounded prediction horizon.** Roll out both cars through the measured pose, transport, servo and speed-loop delays. Inflate the opponent's predicted footprint as uncertainty grows or sightings are lost. Retain the existing confirmation thresholds before authorising a pass.
+- **Swept-body feasibility.** Check the complete chassis along each candidate against the closed contact-wall map and the opponent's predicted body. Allow for tracking error, not just waypoint clearance. Enforce the steering, steering-rate, lateral acceleration and measured braking limits.
+- **A feasible stop at every update.** Speed must permit braking within the free distance along the selected path. The raw forward cone alone cannot establish that a curved passing path is clear. An infeasible candidate must yield a follow or braking command before the emergency layer becomes the only remaining action.
+- **Stable commitment and return.** Keep a chosen side while alongside, but recheck its future feasibility every tick. Return only after the lower bound on ego's lead clears the opponent's whole body and the configured margin. Preserve the existing give-up and retry timers; a lost detection must not manufacture a clear lead.
+- **Bounded compute and independent safety.** A missed computation deadline must retain a still-valid braking trajectory or stop. The existing LB gate, TTC where applicable, body-contact, arc, emergency and stale-input checks keep final authority.
+
+Tests should begin with ROS-free geometry and prediction. Cover seam wrapping, left/right signs, delayed braking, uncertain or lost opponents, and corridors where only following fits.
+
+Include rigid-[frame](glossary.md#tf--transform--frame) invariance: translating or rotating the whole scene must preserve the result. Deliberately break each computation and show the tests fail before trusting them.
+
+Then run the eight baseline scenarios over six seeds, with grid gaps of 2, 3 and 4 m, plus a stopped blocker at the 06b hairpin.
+
+Add alongside loss of sight, an opponent braking during the pass, and a rejected map-wall phantom. Score completed passes from truth, stopping distance, race time, deadline misses and each car's independent wall/car contacts.
+
+Promotion requires zero contact across that matrix, successful passes where two bodies fit, and controlled following where they do not. Re-run the solo controls to measure the cost. Full ROS wiring tests, wheels-off-the-ground checks and low-speed supervised floor trials with LB held remain separate requirements.
+
+### Harness test break table
+
+The normal runner is `python3 -m pytest tools/f1tenth_sim/tests/ -q`. The new file has nine parametrised cases, collected as 18 tests by the workspace's two-car fixture (test setup).
+
+| Coverage | Deliberate break observed | Outcome after restoring |
+|---|---|---|
+| Truth progress, seam and reverse motion | Replace `Progress.update` with `NotImplementedError`; separately negate its signed arc increment | Both car cases fail under each break; pass restored |
+| Physical-pass persistence | Stub `race_metrics`; separately raise the 0.50 s threshold by 10% | Both car cases fail under each break; pass restored |
+| Common finish line, contacts, stuck time, abandonment | Stub `race_metrics` | Both car cases fail; pass restored |
+| Confirmation gate, wall rejection, target geometry | Replace loaded decision bodies with `NotImplementedError`; separately negate the lateral offset | Both car cases fail under each break; pass restored |
+| Stall give-up and retry | Replace loaded decision bodies with `NotImplementedError` | Both car cases fail; pass restored |
+| Off-line recovery, timeout and reset | Stub `base_command` | Both car cases fail; pass restored |
+| Missing scan, stale scan and flank contact refusal | Replace loaded reactive decision body with `NotImplementedError` | All six cases fail; pass restored |
+
+The combined stub run failed all 18 tests. The numerical/sign mutations failed all six selected cases. Restoration passed all 18, and the full simulator-tools suite passed 654 tests.
+
+### Run the package suites
+
+In a fresh worktree, initialise the dashboard and transport dependencies before building the launch-test prerequisites. These commands build [packages](glossary.md#package); they do not start drivers.
+
+```bash
+git submodule update --init src/web_dashboards src/transport_drivers
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb colcon build --symlink-install --packages-up-to racerbot_sim --parallel-workers 2 --cmake-clean-cache
+```
+
+**Working when:** the build finishes for all 21 selected packages. The clean-cache flag also resolves a stale `serial_driver` include path if a build was attempted before its submodule was initialised.
+
+In the same development terminal, run each package separately on an isolated ROS domain, so test messages cannot join a car's driving graph:
+
+```bash
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb env RACERBOT_CAR=rb2 ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST python3 -m pytest tools/f1tenth_sim/tests/ -q --tb=short
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 RACERBOT_CAR=rb2 ROS_DOMAIN_ID=80 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST python3 -m pytest src/pure_pursuit/test/ -q --tb=short
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 RACERBOT_CAR=rb2 ROS_DOMAIN_ID=81 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST python3 -m pytest src/racerbot_launch/test/ -q --tb=short
+```
+
+**Working when:** collection succeeds for each complete suite. The known `test_raceline_optimizer.py::test_the_trust_region_bounds_a_single_pass` failure remains a finding; retain its tolerance and assertion. The pure-pursuit suite takes about 11 minutes on this shared development machine.
+
+Verification after installing those prerequisites:
+
+| Suite | Result |
+|---|---|
+| `tools/f1tenth_sim/tests/` | 654 passed in 48.97 s |
+| `src/pure_pursuit/test/` | 976 passed, 11 existing `range_libc` dependency skips, 1 known trust-region failure in 670.63 s |
+| `src/racerbot_launch/test/` | 312 passed in 15.70 s |
+
+The initial fresh-worktree runs found missing dashboard imports and launch-package installations. Initialising the pinned submodules and building the prerequisites resolved those failures; no test assertions or tolerances were changed.
+
+### Limitations of this measurement
+
+These results cover one starting location and an approximately 3 m head start, with standing starts and the 6 Nov floor model. They do not establish behaviour at every race grid position, under a live map handover, or against a defending human driver.
+
+The blocker uses a map-following car capped at 1.5 m/s, including its safety and actuator response; it is not forced to travel at exactly 1.5 m/s through an obstruction. The two faster map rivals scale their profiles, not their physical plant.
+
+The source adapter removes opponent/reactive mirror drift, while `PathFollower`, `CommandShaper`, simulated sensing and off-line recovery still need parity with the real node. ROS scheduling and physical-car validation remain outside this no-ROS result.
 
 ## The fast path: map and race from one launch
 

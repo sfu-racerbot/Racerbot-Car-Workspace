@@ -11,7 +11,18 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-08 (latest): car 2 map racer beats the shipped gap_follow reference
+## 2026-11-08 (latest): measure car 2 racing in traffic
+
+### No-ROS simulator
+
+- Add `tools/f1tenth_sim/race_two.py`: shipped car 2 lines and `delay_lqr` against map racers at ×0.8/×0.9 profile speed, shipped `gap_follow`, or a 1.5 m/s blocker. Results include independent passes, stuck time, emergency stops, body contacts and four-lap race time.
+- Execute the [node](docs/glossary.md#node)'s opponent and reactive method bodies without ROS through an explicit source adapter. This includes the real confirmation gate and pass give-up/retry rules missing from the legacy `run_pure_traffic` mirror.
+- Archive six seeds for eight two-car scenarios and two solo controls on the 6 Nov floor. All 48 traffic runs end in body contact with no physical pass; all 12 solo controls finish without contact. The solo speed advantage does not establish traffic performance.
+- Screen a cap-only correction and a 1.5 m passing preview in the harness. Neither meets zero-contact promotion: 0/8 and 2/8 clean runs respectively, with no completed physical pass. Driving-node behaviour and gate thresholds retain the baseline.
+- Add 18 collected harness tests, each seen failing under a deliberate stub; signed progress, lateral direction and persistence thresholds also fail under numerical mutations. Document traces, commands, break evidence and a proposed collision-checked passing planner in [Racing autonomy](docs/racing-autonomy.md#two-car-racing-on-the-6-nov-courses-2026-11-08).
+- Verification: simulator tools 654 passed; pure pursuit 976 passed, 11 existing dependency skips and the known trust-region failure; launch 312 passed. Fresh-worktree dashboard/launch dependency failures were resolved by initialising pinned submodules and building prerequisites.
+
+## 2026-11-08: car 2 map racer beats the shipped gap_follow reference
 
 **Simulator-validated only, not driven on the car.**
 
