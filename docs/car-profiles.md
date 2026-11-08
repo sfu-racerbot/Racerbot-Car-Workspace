@@ -77,9 +77,10 @@ Replace `ID` with `rb1` or `rb2` in the paths below. Device fields are validated
 | `calibration/sensors.yaml` | LiDAR serial port or Ethernet IP and port. |
 | `calibration/joy_teleop.yaml` | Full-stick steering scale for manual driving. |
 | `calibration/gap_follow.yaml` | Maximum steering angle and arc-guard correction limit. |
-| `calibration/pure_pursuit.yaml`, `calibration/neural_racer.yaml` | Each controller's maximum steering angle. |
+| `calibration/pure_pursuit.yaml`, `calibration/neural_racer.yaml` | Controller steering limits; car 2's `pure_pursuit` also sets its 2.7 m/s² online lateral ceiling. |
+| `calibration/auto_map_race.yaml` | Car 2's planning physics, including 3.2 m/s² lateral acceleration and 0.22 s speed delay. |
 | `calibration/odom_calibration.yaml` | Vehicle label, steering bound and fallback calibration values used by the wizard. |
-| `tuning/CONFIG.yaml` | Justified per-car algorithm exceptions. Neither car currently has a tuning YAML file. |
+| `tuning/CONFIG.yaml` | Justified per-car algorithm exceptions. Car 2 has `tuning/pure_pursuit.yaml`; car 1 has none. |
 | `imu/car.yaml`, `imu/calib/*.json` | IMU (rotation and acceleration sensor) mount and calibration files. |
 
 The two existing profiles are [`rb1/`](../src/racerbot_car/cars/rb1/) and [`rb2/`](../src/racerbot_car/cars/rb2/). The IMU launch selects `imu/car.yaml` in [`vehicle_state_launch.py`](../src/imu_bridge/launch/vehicle_state_launch.py); the [IMU tools guide](../tools/imu_calibration/README.md) covers calibration.
@@ -119,6 +120,16 @@ Sources: [`calibration_node.py`](../src/odom_calibration/odom_calibration/calibr
 **Retain the LB deadman and the test order: static checks, wheels off the ground, then low-speed floor testing.** A correct YAML file does not establish that a new calibration drives correctly. Follow [Testing before it is on wheels](writing-your-own-node.md#testing-before-its-on-wheels).
 
 ## Add a tuning override
+
+### Car 2's first tuning overlay
+
+[`rb2/tuning/pure_pursuit.yaml`](../src/racerbot_car/cars/rb2/tuning/pure_pursuit.yaml) sets `steering_law: delay_lqr`. Shared settings load first, then car 2's calibration, then this tuning file, making delay LQR car 2's default race steering law.
+
+The `# why:` comment cites car 2's measured steering delays: pure pursuit weaves at race speed, while delay LQR predicts through those delays. Car 1's steering chain has not been measured, so it retains the shared `pure_pursuit` default.
+
+**Simulator-validated only, not driven.** The shipped builder and six seeds per course gave 11.40–11.47 s on 06a and 8.75–8.87 s on 06b, with zero contact and stop ticks. See [the results and calibration rationale](racing-autonomy.md#how-the-map-racer-beats-gap_follow-on-car-2).
+
+### Create another override
 
 Keep algorithm tuning shared unless there is a reason for a per-car exception. For example, a lower speed cap belongs in `tuning/gap_follow.yaml`, while a measured servo gain belongs in `calibration/vesc.yaml`.
 

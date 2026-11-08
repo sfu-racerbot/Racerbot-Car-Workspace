@@ -5,7 +5,9 @@
 > **You'll be able to:** pick a steering law at launch, explain what each one does, tune one in the simulator, and judge it fairly against pure pursuit.
 > **Time:** 25 minutes to read. A tuning run in the simulator takes about a minute; a full judging run about 40 minutes.
 
-The race controller follows a recorded racing line. Each tick (40 times a second) something has to decide **how far to turn the wheels** to stay on that line. That something is the *steering law*. There are five to choose from, and you pick one when you launch. Pure pursuit is the default. `delay_lqr` is a simulator-only experiment, [described below](#delay-lqr).
+The race controller follows a recorded racing line. Each tick (40 times a second) a *steering law* decides **how far to turn the wheels** to stay on that line. There are five to choose from at launch.
+
+Car 2 defaults to `delay_lqr` through its tuning overlay; car 1 retains `pure_pursuit`. Delay LQR has simulator validation only, not physical-car validation; [results below](#delay-lqr-results).
 
 ## Contents
 
@@ -23,7 +25,7 @@ The race controller follows a recorded racing line. Each tick (40 times a second
 
 ## Highlights
 
-- **Five laws, one switch.** `steering_law:=pure_pursuit | stanley | lqr | mpc | delay_lqr` on the launch command. `delay_lqr` is simulator-only and did not reach zero contact on the 2026-11-06 floor ([results](#delay-lqr-results)). Nothing else in the controller changes: deadman, watchdogs, safety net, overtaking and speed caps all stay the same.
+- **Five laws, one switch.** Choose `steering_law:=pure_pursuit | stanley | lqr | mpc | delay_lqr` at launch. Car 2's default is delay LQR; deadman, watchdogs, safety net, overtaking and speed caps apply to every law.
 - **All three alternatives beat pure pursuit in the simulator** on 15 held-out runs each (3 circuits × 5 seeds), with no wall contact. None of the margins is big:
   - **Stanley:** 1.6% better cross-track, 2.8% slower laps.
   - **LQR:** 1.6% faster laps, 3.5% worse cross-track.
@@ -31,7 +33,7 @@ The race controller follows a recorded racing line. Each tick (40 times a second
 - **Tuned and judged on different seeds**, so a law cannot pass by being fitted to the runs it is judged on. The promotion rule was never changed to make a law pass.
 - **MPC solves in 1.9 ms typical, 3.5 ms at the 99.9th percentile** on the Jetson, with the full simulated race stack running beside it. The budget is 8 ms. A late solve falls back to pure pursuit for that one tick.
 - **Laws only steer.** None of them can raise the speed. Speed always comes from the racing line's speed profile and the controller's caps.
-- **Simulator only so far.** No alternative law has driven the real car. Pure pursuit stays the default.
+- **Simulator only so far.** No alternative law has driven the real car. Car 2's shipped delay LQR path completed six seeds per course with zero contact and stop ticks ([results](#delay-lqr-results)).
 
 ## What a steering law is, and what it isn't
 
@@ -39,7 +41,7 @@ Every tick, the race controller works out where the car is (from localization: t
 
 The steering law takes that and returns one number: the steering angle. That is all it does.
 
-Everything around it is shared by all four laws and does not change when you switch:
+Everything around it is shared by all five laws and does not change when you switch:
 
 - the **LB deadman** (no LB held → no driving),
 - the **watchdogs** that stop the car if localization goes stale or the car ends up too far off the line,
@@ -57,9 +59,10 @@ If the deadman were turned off (`enable_deadman: false`), a law steering the wro
 
 **Stanley, LQR, MPC and delay LQR have only been driven in the simulator. The first time any of them runs on the car, do it in this order:**
 
-1. Wheels off the ground, full stack up, LB held: check the wheels turn the right way as you move the car by hand around the line.
-2. On the floor at low speed (`max_speed` around 1 m/s, which is live-tunable from the dashboard).
-3. Race speed only after that looks right.
+1. Static checks with no driver stack running: follow [Testing before it is on wheels](writing-your-own-node.md#testing-before-its-on-wheels).
+2. Wheels off the ground, full stack up, LB held: check steering direction and that releasing LB stops the wheels.
+3. On the floor at low speed in open space. Use `raceline_floor_test.csv` for the capped 1.5 m/s line, or a lower dashboard `max_speed`.
+4. Race speed only after that looks right.
 
 The simulator's position noise and delay are estimates of this car's. Stanley and LQR respond strongly to both (see [Delay compensation and smoothing](#delay-compensation-and-smoothing)), so a law that is smooth in the simulator may weave on the car.
 
@@ -73,7 +76,7 @@ ros2 launch pure_pursuit pure_pursuit_launch.py steering_law:=stanley
 ros2 launch racerbot_launch race_launch.py steering_law:=lqr
 ```
 
-Leave `steering_law` off to get the default from `src/pure_pursuit/config/pure_pursuit.yaml`, which is `pure_pursuit`.
+Leave `steering_law` off to load the selected car's layered default: `delay_lqr` on car 2, from `src/racerbot_car/cars/rb2/tuning/pure_pursuit.yaml`; `pure_pursuit` on car 1, from the shared configuration.
 
 **Working when:** the node's startup log has a line like `steering law: stanley StanleyParams(gain=5.0, ...)` with the values it loaded. Once you hold LB, the decision state on the dashboard (or in `/drive_intent`) reads `stanley`, `lqr`, `mpc` or `delay_lqr` while it is steering.
 
@@ -95,7 +98,7 @@ Two errors come up again and again:
 
 ### Pure pursuit
 
-The default, and the baseline every other law has to beat.
+The shared default, car 1's default, and the baseline for the earlier law comparisons.
 
 Pick a point on the line some distance ahead (the *lookahead*, 0.6–1.5 m depending on speed). Steer along the circle that passes through that point.
 
@@ -198,7 +201,7 @@ OSQP meets constraints only to about 1e-5. So a solution up to 1e-4 rad past a b
 
 ### Delay LQR
 
-**Simulator only, and not the default.** Select it with `steering_law:=delay_lqr`. On the 2026-11-06 floor it did not reach zero wall contact in any configuration tried, so pure pursuit stays the default. The numbers are in [Delay LQR results](#delay-lqr-results).
+**Car 2's default via its tuning overlay; simulator-validated only, not driven.** Select it explicitly with `steering_law:=delay_lqr`. With the updated builder, braking and car 2 calibration, it completed all 12 shipped-path runs with zero contact and stop ticks. See [Delay LQR results](#delay-lqr-results).
 
 **Why it exists.** Pure pursuit hides the delay by aiming a metre ahead. Stanley and LQR use one fixed prediction, `delay_compensation`, that assumes the steering holds still.
 
@@ -361,7 +364,7 @@ A REJECT means the law doesn't ship. It never means the rule gets relaxed.
 
 No run of any law touched a wall.
 
-PROMOTE means a law **may** be selected on the car. It does not make it the default. Every margin is under 5%, all in a simulator. **Pure pursuit stays the default** until one of these has been tried on the real car in the order under [Safety](#safety).
+PROMOTE meant a law **could** be selected; the 2026-10-19 comparison did not change the default. Car 1 still uses pure pursuit. Car 2 now selects delay LQR based on the later combined changes and verification below. Every alternative still needs the physical test order under [Safety](#safety).
 
 <details>
 <summary><b>Why lap times differ at all, when laws only steer</b> — click to expand. Optional.</summary>
@@ -379,7 +382,23 @@ That is most of the lap-time difference between the laws. It is also why Silvers
 
 ### Delay LQR results
 
-**What was run.** Every run used the same settings, so the rows compare directly.
+**Current shipped path, verified 2026-11-08.** The CLI built both lines using car 2's layered configuration. Each line ran for four laps on six seeds (12345–12350), with floor `sfu_course_2026_11_06`, map safety, 0.42 rad steering, 5.0 m/s speed ceiling and 2.7 m/s² online lateral ceiling.
+
+| Course | Flying median | Flying range, laps 2–4 | Contact ticks | Stop ticks | Max / mean cross-track |
+|---|---|---|---|---|---|
+| 06a | 11.42 s | 11.40–11.47 s | 0 | 0 | 0.2318 / 0.0897 m |
+| 06b | 8.82 s | 8.75–8.87 s | 0 | 0 | 0.2922 / 0.0964 m |
+
+All 12 runs completed. Each row pools 18 flying laps; cross-track gives the largest run maximum and the average run mean. The supplied `gap_follow` reference at its shipped 5 m/s ceiling is 11.77 / 8.91 s. The map racer is about 3% / 1% faster; `gap_follow` at 3.5 m/s remains about 3% faster on 06b alone.
+
+The result depends on the braking-ramp fix, corner-scaled line clearance and car 2 calibration as well as the steering law. See [the builder verdicts, reproduction settings and probe comparison](racing-autonomy.md#how-the-map-racer-beats-gap_follow-on-car-2). This is simulator evidence, not a driven-car result.
+
+**History.** The initial merged-code judging run contacted on all six delay LQR trials, using the older lines and 2.9 m/s² online ceiling. That result remains useful context, but it does not describe the current shipped path. The detailed record follows for comparison.
+
+<details>
+<summary><b>Initial experiment and failed judging runs</b>: optional history; skip this for the current settings.</summary>
+
+**Historical conditions.** Every run in this record used the older settings below.
 
 - **Floor and courses:** car 2's 2026-11-06 floor (`sfu_course_2026_11_06`), courses 06a and 06b.
 - **Lines:** the minimum-time racing lines in `tools/f1tenth_sim/lines/`, driven as profiled lines, so the speeds come from the line. The `v29` in each file name matches car 2's 2.9 m/s² lateral limit. TODO(verify): the planner command that made the two files was not saved with them.
@@ -432,14 +451,14 @@ Once was before the merge. Once was after it, and that is the run that counts, b
 
 The cross-track columns give the range over the three seeds.
 
-**Result: not met.** The delay law contacted the wall in all six runs. Pure pursuit contacted in three, all on 06a. The default stays `pure_pursuit`. gap_follow was not re-measured on the merged code, so the lap-time half of the rule was not tested.
+**Historical result: not met.** The delay law contacted the wall in all six runs. Pure pursuit contacted in three, all on 06a. The default remained `pure_pursuit` at that stage. gap_follow was not re-measured on that merged code, so the lap-time half of the rule was not tested.
 
 **What the merge changed.** Before the merge (origin/main 916d8af), the same judging runs gave:
 
 - Pure pursuit: 06a contacted in all three runs, before and after the merge. On 06b it had no contact either time.
 - Delay LQR: 06a contacted in all three runs. On 06b there was no contact, but the map safety layer held the car stopped for about 68 of the 70 seconds.
 
-After the merge, the delay law's 06b runs contact the wall after 29–34 ticks of safety stop. A stop is the safer outcome, so this matters. PR #33's owners should look at it. I have not isolated which part of the merge causes it.
+After that merge, the delay law's 06b runs contacted the wall after 29–34 ticks of safety stop. The initial investigation did not isolate which part of the merge caused the change.
 
 **Tuning seeds, merged code.** This is context only and does not count toward the rule. Pure pursuit contacted in 3 of 6 runs, all on 06a. Delay LQR contacted in 4 of 6. One 06a run (seed 1000) finished four laps with no contact, with a flying median of 11.25 s over three laps.
 
@@ -449,9 +468,9 @@ After the merge, the delay law's 06b runs contact the wall after 29–34 ticks o
 - **Changing the law's settings did not remove contact.** Every setting in the sweep left three to five contacts in six tuning runs, before the merge. The merged tuning run had four.
 - **A lower cornering ceiling did not remove contact either.** With the online lateral ceiling at 2.5 m/s² instead of 2.9 (a diagnostic, not a proposed setting), pure pursuit contacted in five of six judged runs and the delay law in six of six. So the ceiling is not the whole cause.
 - **The floor gives less lateral acceleration than the car asks for.** The floor's `grip_curve` (in `sfu_course_2026_11_06`, in `tools/f1tenth_sim/sim_fidelity/calibration.py`) delivers 2.56 m/s² when 2.75 is asked. At 2.9 asked it delivers about 2.6 m/s², and at 2.5 about 2.4 m/s² (both interpolated).
-- **That is a likely part of the cause.** Car 2's calibrated limit is 2.9 m/s² (`max_lateral_accel`), so the line's corners ask for more grip than the floor gives. I have not isolated the rest of the cause.
+- **That was a likely part of the cause.** Car 2's calibrated limit was then 2.9 m/s² (`max_lateral_accel`), so the line's corners asked for more grip than the floor gave. The initial investigation did not isolate the rest of the cause.
 
-**Not known yet.**
+**Limits of the initial investigation.** These describe that experiment, not the current verification above.
 
 - The cause of the 06a contacts, for both laws, is not isolated.
 - gap_follow was not re-measured on the merged code, so the lap-time half of the rule is still open.
@@ -460,8 +479,7 @@ After the merge, the delay law's 06b runs contact the wall after 29–34 ticks o
 - Car 1 has no numbers for this law.
 - Nothing here has been driven on the car.
 
-<details>
-<summary><b>Every configuration tried, with its numbers</b> — click to expand. Skip it unless you are checking how the result was reached.</summary>
+#### Every initial configuration tried
 
 "Pre-merge" is origin/main 916d8af. "Merged" is origin/main 2fb626e with this branch. Contacts are counted over six runs (three seeds on each course).
 
@@ -510,7 +528,7 @@ pip install --user --break-system-packages osqp==1.1.3
 
 `--break-system-packages` is needed because Ubuntu 24.04 protects the system Python. `--user` keeps the package in your home directory, so it cannot break anything apt installed.
 
-The other three laws never import osqp, so they work without it.
+The other four laws never import osqp, so they work without it.
 
 To re-measure the solve time on the Jetson, use `python3 tools/mpc_benchmark/benchmark_mpc.py --steps 20000`. The 2026-10-19 numbers are in [mpc-benchmark-2026-10-19.json](mpc-benchmark-2026-10-19.json).
 

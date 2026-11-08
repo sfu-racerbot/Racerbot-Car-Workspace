@@ -74,11 +74,13 @@ Configuration loads shared `auto_map_race.yaml`, then the selected car's calibra
 | Planning value | Car 1 | Car 2 |
 |---|---|---|
 | Steering limit | 0.30 rad | 0.38 rad, below its 0.42 rad controller cap |
-| Lateral acceleration, left and right | 2.5 m/s² | 2.9 m/s² |
+| Lateral acceleration, left and right | 2.5 m/s² | 3.2 m/s² |
 | Acceleration / braking | 6.0 / 3.0 m/s² | 4.0 / 3.0 m/s² |
 | Wheel angle / commanded angle | 1.0 | 0.99 |
 
-Both use a 5.0 m/s speed ceiling, a 1.0 rad/s steering-rate limit and 0.10 s steering and speed delays. Shared settings are a 0.15 m optimization wall margin, a 0.10 m forward-cone margin and a 0.08 m final body-clearance floor.
+Both use a 5.0 m/s speed ceiling, a 1.0 rad/s steering-rate limit and a 0.10 s steering delay. Planned speed delay is 0.10 s on car 1 and 0.22 s on car 2.
+
+Shared margins are 0.15 m for optimization walls and 0.10 m for the forward cone. The body-clearance floor rises from 0.22 m to 0.30 m near tight corners; see [the car 2 results](#how-the-map-racer-beats-gap_follow-on-car-2).
 
 Car 2's calibration cites `car_measure.py` over runs `20261106-163633`, `170803` and `171030`; see [Hardware reference](hardware-reference.md).
 
@@ -98,13 +100,71 @@ python3 -m pure_pursuit.race_line --run-dir "$RUN_DIR"
 
 ### Limitations
 
-This chooses the lowest estimated time among the accepted candidates, not a proven global optimum. Car 2's 6 Nov simulator courses, three seeds each, gave flying laps of 10.97–11.10 s on 06a and 9.15–9.40 s on 06b at 2.9 m/s² and 0.38 rad, with no contact.
+This chooses the lowest estimated time among the accepted candidates, not a proven global optimum. Earlier car 2 trials at 2.9 m/s² and 0.38 rad gave 10.97–11.10 s on 06a and 9.15–9.40 s on 06b, three seeds each with no contact.
 
-The corresponding `gap_follow` times were 11.35 s and 8.46 s, so the mapped line was not faster on both courses. Planning at 0.42 rad caused contact or wedging.
+Those earlier trials did not beat the corresponding `gap_follow` times of 11.35 / 8.46 s on both courses. Planning at 0.42 rad caused contact or wedging. The current comparison below uses the measured 6 Nov floor and the 0.42 rad controller cap, with planning still limited to 0.38 rad.
 
 **Follow the static checks, wheels-off-the-ground check and capped floor test before using the default-speed line. Keep LB held to drive.** These defaults have simulator evidence only.
 
 The driving supervisor still writes its own profile; minimum-time optimization never runs inside a driving node. The continuous map-and-race launch below therefore uses the supervisor's existing profiling path.
+
+## How the map racer beats gap_follow on car 2
+
+**Simulator-validated only, not driven on the car.** With the shipped builder and car 2 settings, the map racer beats the supplied `gap_follow` reference at its shipped 5 m/s ceiling on both 6 Nov courses.
+
+Four changes work together. Selecting a different steering law alone did not solve the earlier contacts:
+
+1. **Predict steering delay to remove the weave.** Car 2 now selects `delay_lqr` through `cars/rb2/tuning/pure_pursuit.yaml`. It predicts through the old position estimate, command transport and servo lag instead of correcting an error the car has already passed. Car 1 keeps `pure_pursuit`.
+2. **Let the braking ramp follow a falling target.** The old ramp basis used measured speed even when the profile asked for less. Each command stayed only one slew step below that speed, giving about 1.4 m/s² braking where the plan expected 3.0 m/s².
+
+   The node and simulator now cap the basis at the target, so falling commands ramp down from the last command without being held up by measured speed.
+3. **Leave room for tracking error near walls.** `race_line_body_floor` is 0.22 m and `race_line_body_floor_tight` is 0.30 m. `min_time_line.body_floor_at` raises the required room as curvature approaches the planning steering limit and holds that requirement for 0.6 m either side. A line that clears a wall exactly can still hit it when the car tracks slightly wide.
+4. **Separate planning grip from the tight-corner ceiling.** Car 2 plans with 3.2 m/s² lateral acceleration and `profile_speed_delay: 0.22` s, allowing for command transport and speed-loop response.
+
+   The controller's `max_lateral_accel: 2.7` m/s² slows full-lock turns; 2.9 m/s² wedged at the 06b hairpin. The planning value is a floor-model fit, not a claim that the car achieves 3.2 m/s² in every corner.
+
+### Shipped-path verification, 2026-11-08
+
+The inputs were read-only copies of `map.yaml`, `map.pgm` and `raceline_raw.csv` from car 2's rebuilt runs `20261106-164002-rebuilt` (06a) and `20261106-184753-rebuilt` (06b).
+
+The shipped `python3 -m pure_pursuit.race_line --run-dir "$RUN_DIR" --car rb2` built each copy. Its `race_line.json` reported these candidates; estimates are planning costs, not measured lap times:
+
+| Course | Recorded estimate / verdict | Minimum-curvature estimate / verdict | Minimum-time estimate / verdict | Choice / minimum body clearance |
+|---|---|---|---|---|
+| 06a | 11.595 s / refused: body | 10.530 s / refused: cone and body | 10.581 s / accepted | `min_time` / 0.2500 m |
+| 06b | 8.682 s / refused: body and curvature | 8.818 s / refused: cone and body | 8.039 s / accepted | `min_time` / 0.2500 m |
+
+The first shipped-path check refused every 06b candidate: its minimum-time line missed the body floor by 0.0138 m at the final 0.15 m waypoints.
+
+Commit `b5f6427` allows up to four retries after the first attempt, asking for 0.01 m more body room and 0.03 m more cone margin per retry. Final checks retain the configured limits.
+
+The optimizer's own stations are 0.25 m apart, so passing there does not guarantee passing the denser final check.
+
+Each selected `raceline_profiled.csv` ran on `sfu_course_2026_11_06`, using tracks `car2_course_2026_11_06a_scans` and `car2_course_2026_11_06b_scans`. Settings were `--profiled --safety map --laps 4 --steering-limit 0.42 --speed 5.0 --lateral 2.7 --timeout 70 --law delay_lqr`, with `RACERBOT_CAR=rb2` and seeds 12345–12350.
+
+A **flying lap** is lap 2, 3 or 4, after the standing start. Each row pools 18 flying laps. Contact and stop ticks cover all four laps; cross-track error is distance sideways from the line. The last column gives the largest run maximum and the average of the six run means.
+
+| Course | Flying median | Flying range | Contact ticks | Stop ticks | Max / mean cross-track |
+|---|---|---|---|---|---|
+| 06a | 11.42 s | 11.40–11.47 s | 0 | 0 | 0.2318 / 0.0897 m |
+| 06b | 8.82 s | 8.75–8.87 s | 0 | 0 | 0.2922 / 0.0964 m |
+
+All 12 runs completed four laps. Contact uses the independent chassis-to-map check, not Gym's collision flag. The 06a result is retained from `582c94d`; its first builder attempt passes, so the retry fix does not affect it. The 06b result was rebuilt and raced at `b5f6427`.
+
+### Comparison and limitations
+
+The `gap_follow` figures below are supplied reference results on the same floor, not new measurements in this verification:
+
+| Course | Map racer, shipped-path median | gap_follow, shipped 5 m/s ceiling | gap_follow, 3.5 m/s ceiling |
+|---|---|---|---|
+| 06a | 11.42 s | 11.77 s | 11.85 s |
+| 06b | 8.82 s | 8.91 s | 8.58 s |
+
+Against the shipped 5 m/s `gap_follow` reference, the map racer is about 3% faster on 06a and 1% faster on 06b. Capping `gap_follow` at 3.5 m/s still makes it about 3% faster on 06b alone; it is slower on 06a at 11.85 s.
+
+The earlier probe-built lines gave 11.40–11.47 s on 06a and 8.67–8.77 s on 06b, nine seeds each with zero contact and stop ticks. The probe-built 06b line was about 0.1 s faster because it skipped the final dense check. The accepted shipped line gives up that time to pass the final clearance requirement.
+
+These are no-ROS simulator runs of the shipped line and controller math, not a full ROS launch or physical-car validation. **Before driving: static checks, wheels off the ground, then the capped low-speed floor test. Hold LB whenever the car should move.**
 
 ## The fast path: map and race from one launch
 
@@ -494,7 +554,7 @@ Exactly like every other speed parameter on this car: **start conservative, rais
 
 `a_lat_max` / `a_accel_max` / `a_brake_max` / `v_max` shape the *recorded speed profile*. Changing them means regenerating that profile — a rerun of [Phase 4](#phase-4-generate-the-velocity-profile).
 
-`pure_pursuit_node`'s `max_speed`, `max_lateral_accel` and friends are online ceilings applied on top of whatever profile is loaded. Those you can change on a *running* node from the dashboard's [live tuning panel](../src/web_dashboards/car/docs/web-dashboard.md#live-parameter-tuning), which is the fast way to answer "is it the profile or the controller?" between runs.
+`pure_pursuit_node`'s `max_speed`, `max_lateral_accel` and friends are online ceilings applied on top of whatever profile is loaded. Those you can change on a *running* node from the dashboard's [live tuning panel](web-dashboard.md#live-tuning-and-the-contract-with-the-driving-nodes), which is the fast way to answer "is it the profile or the controller?" between runs.
 
 Lowering `max_speed` there clips the whole profile without re-recording anything.
 
@@ -1157,9 +1217,9 @@ steering slew and curvature speed caps — is **unchanged** by the choice. The l
 is swapped in *between* those, and only ever picks a steering angle; speed stays
 with the profile and the node's caps no matter what is selected.
 
-The four laws, in plain words:
+The five laws, in plain words:
 
-- **`pure_pursuit`** (the default) steers toward a point some distance ahead on the
+- **`pure_pursuit`** (car 1's default) steers toward a point some distance ahead on the
   line. Simple, robust, and the baseline every other law must beat.
 - **`stanley`** looks at the *front axle* instead: how far it is to the side of the
   line and which way the car is pointing. It corrects sideways error directly and
@@ -1174,11 +1234,14 @@ The four laws, in plain words:
   only law that sees a bend coming precisely and respects the steering rate as a
   hard limit. It needs the `osqp` solver
   ([install](steering-laws.md#installing-osqp-for-mpc)).
+- **`delay_lqr`** (car 2's default via its tuning overlay) predicts through position,
+  command and servo delays before correcting the error from the line.
 
 How each law works, its parameters, how they were tuned, and the judged results
-are in **[steering-laws.md](steering-laws.md)**. In short: all three alternatives
-beat pure pursuit narrowly in the simulator (2026-10-19), none has driven the real
-car yet, and pure pursuit stays the default.
+are in **[steering-laws.md](steering-laws.md)**. Stanley, LQR and MPC beat pure
+pursuit narrowly in the earlier simulator comparison (2026-10-19). Delay LQR
+is now car 2's default after the combined changes and shipped-path verification
+above. None of the alternative laws has driven the real car yet.
 
 **A law is only selected on the car after it has beaten pure pursuit in the
 simulator comparison harness** — selecting a law is never evidence it is better.

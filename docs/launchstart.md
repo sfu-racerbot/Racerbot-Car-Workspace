@@ -327,9 +327,11 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 
 The race launch matches the car's LiDAR scans (sweeps of distance readings, see [glossary](glossary.md)) against the whole saved map to find it, then starts the localizer there. Tested on recorded scans and in the simulator only; not yet driven.
 
+**Car 2 races with `delay_lqr` by default**, selected by its `tuning/pure_pursuit.yaml` overlay, while car 1 keeps `pure_pursuit`. These new steering and line settings are simulator-validated only, not driven; [measured results](racing-autonomy.md#how-the-map-racer-beats-gap_follow-on-car-2).
+
 **Terminal 1:** the `bringup_launch.py` from mapping, still running. Start it again if you closed it.
 
-**First check with the wheels off the ground, then use the capped floor-test profile in open space. Hold LB whenever the car should move; releasing it stops the car.** The new line physics have simulator evidence, not floor validation.
+**Test in order: static checks, wheels off the ground, then the capped floor-test profile in open space.** Verify steering direction and LB release on the stand before floor testing. Hold LB whenever the car should move; releasing it stops the car. The new line physics have simulator evidence, not floor validation.
 
 **Terminal 2:** set `RUN_DIR` to the `Saved in:` folder printed after mapping. In this car 2 example, replace `YOUR_RUN` with that folder's name; use `rb1` instead of `rb2` for car 1. The end-of-mapping commands already contain the full path.
 
@@ -343,7 +345,7 @@ ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR" profile:=raceline
 **After the floor test passes:** stop that launch with `Ctrl+C`. In the same Terminal 2, pick one default-speed command:
 
 ```bash
-# pure pursuit (the default racing controller)
+# default steering law: delay_lqr on car 2, pure_pursuit on car 1
 ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR"
 # Stanley
 ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR" steering_law:=stanley
