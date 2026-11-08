@@ -20,7 +20,7 @@ def _scan_at(angle, distance):
 
 def test_apply_map_safety_stops_only_inside_raw_emergency_cone():
     steering, speed = 0.12, 2.4
-    # pure_pursuit.yaml sets emergency_stop_distance to 0.35 m.
+    # Since 2026-11-07 Tier 1 is the swept arc: straight ahead, 0.35 m raw is 0.14 m from the front edge.
     assert rv.apply_map_safety(_scan_at(0.0, 0.30), steering, speed, "rb2") == (
         steering, 0.0, "stop")
     assert rv.apply_map_safety(_scan_at(0.0, 0.40), steering, speed, "rb2") == (

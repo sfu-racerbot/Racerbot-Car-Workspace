@@ -6,7 +6,64 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): measured November 6 simulator floor for car 2
+## 2026-11-07 (latest): arc-aware Tier 1 emergency check
+
+**Behavior change. Simulator-validated only, not yet driven on the car.** Simulator validation has one
+line that contacts (06a, seed 12345), and the same contact happens on the code before this change.
+
+### pure_pursuit
+
+- Tier 1 (the emergency stop) trips when the body's swept path is blocked within `emergency_arc_clearance`
+  (0.14 m, measured from the body's front edge), or when a return sits inside `emergency_hard_stop_distance`
+  (0.25 m) in the 60deg cone at any steering. It replaces the raw 0.35 m cone rule, which stopped a car on a
+  full-lock turn whose path was clear. Straight ahead, 0.14 m is the old 0.35 m rule shifted by the 0.21 m from
+  the LiDAR to the front edge. See [The emergency swept-path check](docs/racing-autonomy.md#the-emergency-swept-path-check-2026-11-07).
+- The arc is the rack's last commanded steering and this tick's steering, over the same +/-90deg window as the
+  footprint check. Returns behind the sensor are not read.
+- New parameters: `emergency_arc_clearance` (0.14), `emergency_arc_length` (1.0, at least the clearance),
+  `emergency_hard_stop_distance` (0.25). `emergency_stop_distance` (0.35) keeps the avoidance brake reserve and
+  the committed-pass speed cap; it no longer stops the car in Tier 1.
+- The node refuses to start with a non-finite or negative threshold, or a horizon that is not positive or is
+  shorter than the clearance.
+- `racing_math.tier1_arc_clearance` and `swept_path_clearance` are the single source. `swept_path_clearance` is
+  a verbatim port of gap_follow's `gap_logic.py`, and a test fails if the two texts drift.
+
+### racerbot_car
+
+- The three new keys are in `SAFETY_FLOOR`: a car's tuning overlay may raise them and may not lower them.
+
+### No-ROS simulator
+
+- `tools/f1tenth_sim/run_validation.py` applies the same arc and backstop in `apply_map_safety`. `run_pure_solo`
+  passes the rack's last command as `applied_steering` on the map path.
+
+### race_diagnostics and run analysis
+
+- New `tools/run_analysis/tier1_replay.py`: replays the old and new triggers over recorded runs and classifies the
+  new-only trips (mapped wall, persistent, transient, isolated).
+
+### Measured (2026-11-07)
+
+- Replay: 15,387 scans on three car 2 runs. The old rule trips 2 times, the new rule 3 times, and the one
+  new-only trip is a persistent surface, not noise. The 06b run has a pose and map, and the map check
+  puts 92% of returns on the map (51% with the pose shifted 0.5 m). Table in `docs/racing-autonomy.md`.
+- Backstop: on 856 in-cone returns per car, at 25 steering pairs, the arc always trips before the backstop does.
+- Simulator, six lines: 06b contact 0 on three seeds; 06a seeds 12346 and 12347 contact 0; **06a seed 12345
+  contacts the right rear flank** (blind spot: returns beyond +/-90deg). The HEAD code makes the same contact on
+  that seed. Fixing it needs a rear window and is a separate decision.
+
+### Tests
+
+- `test_tier1_arc.py` (new): 54 node test items, each run for both cars, and the control-loop command that reaches
+  the drive topic. `test_racing_math.py`: the port's text parity and the brute-force contact oracle.
+- `test_map_safety_escape.py` and `test_pure_solo_map_safety.py` (simulator): the escape rows use the arc
+  threshold, and the rack-only and backstop cases are checked.
+- `test_guards_tuning.py`: a lower value for each new key is refused, and removing them from `SAFETY_FLOOR` fails.
+- Mutation checks: 21 mutants against the node, racing_math and config (20 caught; the survivor is the
+  call-site argument swap, which no direct test can separate), 4 simulator mutants (4 caught), and the guard
+  mutant (3 of 3 refusal tests fail when the keys are removed).
+
+## 2026-11-07: measured November 6 simulator floor for car 2
 
 ### No-ROS simulator
 

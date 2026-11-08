@@ -346,7 +346,7 @@ does. If you change one, change both.
 
 Too low and the car cannot rebuild speed between safety stops, so it stalls
 behind a slower car. **Too high and it arrives behind that slower car too fast
-for the overtake to commit**, hard-stops inside `emergency_stop_distance`,
+for the overtake to commit**, hard-stops on the swept path (`emergency_arc_clearance`) or inside the raw backstop (`emergency_hard_stop_distance`),
 and enters a stop-go cycle it never leaves. The upper bound is a real dynamic,
 not a simulator quirk — arriving hot behind traffic defeats the pass — so
 solo lap time cannot simply be bought by raising this. `6.0` passes across

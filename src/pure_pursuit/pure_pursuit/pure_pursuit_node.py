@@ -235,6 +235,15 @@ class PurePursuitNode(Node):
         self.declare_parameter('enable_lidar_safety', True)
         self.declare_parameter('safety_fov_deg', 60.0)
         self.declare_parameter('emergency_stop_distance', 0.35)
+        # --- Tier 1 arc check (2026-11-07; see _reactive_override) ---
+        # Tier 1 used to be a raw range inside the 60deg cone. In a full-lock
+        # turn that cone points at the wall the car is turning away from, so
+        # the car stopped while its path was clear. It now asks whether the
+        # body's own swept path is clear (racing_math.tier1_arc_clearance),
+        # and keeps a raw backstop for the cone.
+        self.declare_parameter('emergency_arc_clearance', 0.14)
+        self.declare_parameter('emergency_arc_length', 1.0)
+        self.declare_parameter('emergency_hard_stop_distance', 0.25)
         # --- Escape from the hard stop (see _reactive_override tier 1) ---
         # A hard stop with no way out is not a safe state, it is a stuck one:
         # at zero speed nothing about the scene changes, so the obstacle that
@@ -449,6 +458,10 @@ class PurePursuitNode(Node):
         self.enable_lidar_safety = bool(self.get_parameter('enable_lidar_safety').value)
         self.safety_fov_deg = float(self.get_parameter('safety_fov_deg').value)
         self.emergency_stop_distance = float(self.get_parameter('emergency_stop_distance').value)
+        self.emergency_arc_clearance = float(self.get_parameter('emergency_arc_clearance').value)
+        self.emergency_arc_length = float(self.get_parameter('emergency_arc_length').value)
+        self.emergency_hard_stop_distance = float(
+            self.get_parameter('emergency_hard_stop_distance').value)
         self.emergency_escape_speed = float(
             self.get_parameter('emergency_escape_speed').value)
         self.emergency_escape_min_gap = float(
@@ -574,6 +587,23 @@ class PurePursuitNode(Node):
                 and self.emergency_stop_clearance >= 0.0):
             raise RuntimeError(
                 'pure_pursuit_node: emergency_stop_clearance must be finite and non-negative.')
+        # The arc horizon must be positive: swept_path_clearance raises for
+        # max_length <= 0, and that would surface inside the control loop.
+        if not (math.isfinite(self.emergency_arc_length) and self.emergency_arc_length > 0.0):
+            raise RuntimeError(
+                'pure_pursuit_node: emergency_arc_length must be finite and > 0.')
+        # A horizon shorter than the trip distance leaves the band between them unmeasured:
+        # swept_path_clearance returns inf beyond max_length, so a blocked arc there never trips.
+        if self.emergency_arc_length < self.emergency_arc_clearance:
+            raise RuntimeError(
+                'pure_pursuit_node: emergency_arc_length must be at least '
+                'emergency_arc_clearance, or the arc is not measured up to the trip distance.')
+        if not (math.isfinite(self.emergency_arc_clearance) and self.emergency_arc_clearance >= 0.0
+                and math.isfinite(self.emergency_hard_stop_distance)
+                and self.emergency_hard_stop_distance >= 0.0):
+            raise RuntimeError(
+                'pure_pursuit_node: emergency_arc_clearance and emergency_hard_stop_distance '
+                'must be finite and non-negative.')
         if not all(math.isfinite(value) and value > 0.0 for value in (
                 self.pose_frozen_timeout_sec, self.pose_frozen_min_speed,
                 self.pose_frozen_min_travel)):
@@ -1641,8 +1671,11 @@ class PurePursuitNode(Node):
             # Emergency stopping always remains active. During a committed
             # pass, however, generic gap avoidance must not cap us below the
             # opponent's speed and make the pass mathematically impossible.
+            # steering_angle here is this tick's steering before the override:
+            # Tier 1's arc check needs it as the arc the car is being steered onto.
             steering_override, speed_override, reactive_state, reactive_detail = self._reactive_override(
-                allow_avoidance=not self.overtake_active)
+                allow_avoidance=not self.overtake_active,
+                desired_steering=steering_angle)
             if steering_override is not None:
                 steering_angle = steering_override
             if speed_override is not None:
@@ -1932,6 +1965,33 @@ class PurePursuitNode(Node):
         valid = np.isfinite(window) & (window > 0.0) & (window >= scan.range_min)
         return racing_math.minimum_footprint_clearance(window, valid, boundaries)
 
+    def _arc_clearance(self, scan: LaserScan, desired_steering: float) -> float:
+        """Free distance along the body's swept path, for Tier 1.
+
+        The arc the car is on (the rack's last commanded angle, steering_basis)
+        and the arc it is being steered onto (desired_steering, this tick before
+        the override) are both checked; the smaller free distance counts. See
+        racing_math.tier1_arc_clearance and racing_math.swept_path_clearance.
+
+        The beams are the same +/-body_clearance_fov_deg window
+        _footprint_clearance uses, and not the whole scan. Blind spot, on
+        purpose: a return behind the sensor is often the car's own chassis, which
+        lies inside the body, and swept_path_clearance reports that as 0.0 on
+        every tick. On car 2's 2026-10-30 run the full 270deg scan trips on 100%
+        of scans and this window on 0.2% (docs/racing-autonomy.md, reactive
+        safety). The price is that a contact behind the sensor is not seen here;
+        _footprint_clearance does not see it either.
+        """
+        lo_idx, hi_idx = self._fov_indices(scan, self.body_clearance_fov_deg)
+        if hi_idx <= lo_idx:
+            return math.inf
+        angles = scan.angle_min + np.arange(lo_idx, hi_idx + 1) * scan.angle_increment
+        return racing_math.tier1_arc_clearance(
+            scan.ranges[lo_idx:hi_idx + 1], scan.range_min, angles,
+            (self.steering_basis, desired_steering), self.car_width / 2.0,
+            self.car_length, self.wheelbase, self.laser_offset_x,
+            self.laser_offset_y, self.emergency_arc_length)
+
     def _forward_body_clearance(self, scan: LaserScan) -> float:
         """Smallest body clearance inside avoidance_fov_deg's forward cone.
 
@@ -2105,7 +2165,8 @@ class PurePursuitNode(Node):
             f"{self.emergency_escape_speed:.2f}m/s rather than latching stopped",
         )
 
-    def _reactive_override(self, allow_avoidance: bool = True):
+    def _reactive_override(self, allow_avoidance: bool = True, *,
+                           desired_steering: float):
         """The reactive LIDAR safety net -- independent of the racing
         line and the overtake logic above, and always has the final say.
         Returns (steering_override, speed_override, decision_state,
@@ -2113,16 +2174,31 @@ class PurePursuitNode(Node):
         already-computed plan should be left alone; decision_state is None
         when the racing-line/overtake plan remains in control.
 
+        desired_steering is this tick's steering before this override. Tier 1
+        checks the arc the car is on and the arc it is being steered onto.
+
         Two tiers, most urgent first:
-          1. Something is inside emergency_stop_distance in a narrow
-             forward cone, or the scan feed itself is stale/missing
-             (treated the same as "too close" -- a safety net that's
-             gone blind isn't a safety net) -- hard stop, steering left
-             alone so the wheels stay pointed to resume the line once
-             clear. If the body still has room and there is a real
-             opening to aim at, _emergency_escape crawls out of it
-             instead: a stopped car cannot clear its own cone, so the
-             hard stop on its own ends the run wherever it fires.
+          1. The body's swept path is blocked (_arc_clearance: the free
+             distance along the arc is under emergency_arc_clearance), or a
+             return sits inside emergency_hard_stop_distance in the forward
+             cone, or the scan feed itself is stale/missing (treated the same
+             as "blocked" -- a safety net that's gone blind isn't a safety net)
+             -- hard stop, steering left alone so the wheels stay pointed to
+             resume the line once clear. If the body still has room and there
+             is a real opening to aim at, _emergency_escape crawls out of it
+             instead: a stopped car cannot clear its own cone, so the hard stop
+             on its own ends the run wherever it fires.
+
+             Why an arc and not the cone: in a full-lock turn the 60deg cone
+             points at the wall the car is turning away from, so the old
+             range-in-cone check stopped a car whose path was clear. The arc
+             check trips on the wall the body would actually reach. Straight
+             ahead it is the old check at 0.35m raw: the body's front edge is
+             0.21m ahead of the LiDAR, and 0.35 - 0.21 = 0.14m.
+
+             Blind spot, on purpose: the arc is taken over the same
+             +/-body_clearance_fov_deg window as the footprint check, so a
+             contact behind the sensor is not seen here (see _arc_clearance).
           2. Something is inside avoidance_trigger_distance in a wider
              cone (but outside the hard-stop distance) -- steer at the
              best gap instead of stopping, at a capped cautious speed,
@@ -2192,12 +2268,25 @@ class PurePursuitNode(Node):
                     return escape
             return (None, 0.0, 'body_contact', body_contact_detail)
 
+        # Tier 1 (2026-11-07): the body's swept path, or the raw cone backstop.
+        arc_clear = self._arc_clearance(scan, desired_steering)
         emergency_closest = self._closest_in_cone(scan, self.safety_fov_deg)
-        if emergency_closest < self.emergency_stop_distance:
-            emergency_detail = (
-                f"closest valid return in the {self.safety_fov_deg:.1f}deg safety cone is "
-                f"{emergency_closest:.2f}m, inside the "
-                f"{self.emergency_stop_distance:.2f}m emergency threshold")
+        arc_trip = arc_clear < self.emergency_arc_clearance
+        cone_trip = emergency_closest < self.emergency_hard_stop_distance
+        if arc_trip or cone_trip:
+            fired = []
+            if arc_trip:
+                fired.append(
+                    f"swept body path is blocked: free distance along the arc is "
+                    f"{arc_clear:.3f}m, inside the {self.emergency_arc_clearance:.2f}m "
+                    f"arc clearance (the rack's and the commanded steering's arcs, "
+                    f"measured from the body's front edge)")
+            if cone_trip:
+                fired.append(
+                    f"closest valid return in the {self.safety_fov_deg:.1f}deg safety cone "
+                    f"is {emergency_closest:.2f}m, inside the "
+                    f"{self.emergency_hard_stop_distance:.2f}m hard-stop backstop")
+            emergency_detail = '; '.join(fired)
             escape = self._emergency_escape(
                 scan, body_clearance, emergency_detail,
                 clearance_floor=self.emergency_escape_clearance,

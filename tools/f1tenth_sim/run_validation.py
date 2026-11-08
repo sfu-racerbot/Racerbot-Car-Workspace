@@ -298,7 +298,26 @@ def _emergency_escape(scan, body_clearance: float, clearance_floor: float, param
     return steering, escape_speed
 
 
-def apply_map_safety(scan, steering: float, speed: float, car_id=None) -> tuple[float, float, str]:
+def _arc_clearance(scan, steering: float, applied_steering: float, params) -> float:
+    """pure_pursuit_node._arc_clearance: Tier 1's swept-path free distance.
+
+    Taken over the same body_clearance_fov_deg window as _footprint_clearance, on the arc
+    the car is on (applied_steering, the rack's last commanded angle) and the arc it is
+    being steered onto (steering). The smaller free distance counts.
+    """
+    lo, hi = cone_indices(math.radians(float(params['body_clearance_fov_deg'])) / 2.0, _CAR_ID)
+    if hi <= lo:
+        return math.inf
+    return racing_math.tier1_arc_clearance(
+        np.asarray(scan[lo:hi + 1], dtype=float), _lidar().range_min, _beam_angles(lo, hi),
+        (applied_steering, steering), float(params['car_width']) / 2.0,
+        float(params['car_length']), float(params['wheelbase']),
+        float(params['laser_offset_x']), float(params['laser_offset_y']),
+        float(params['emergency_arc_length']))
+
+
+def apply_map_safety(scan, steering: float, speed: float, car_id=None, *,
+                     applied_steering=None) -> tuple[float, float, str]:
     """The emergency tiers of pure_pursuit_node._reactive_override, on the car's own map.
 
     Walls do not trigger avoidance here (the map explains them), so only the emergency
@@ -307,10 +326,15 @@ def apply_map_safety(scan, steering: float, speed: float, car_id=None) -> tuple[
     * "escape": the node would crawl out (_emergency_escape): steering toward the best
       opening at emergency_escape_speed, because the whole body still has room.
     * "stop": the node would hard-stop. Tier 0 (body contact within emergency_stop_clearance)
-      stops unless the contact is dead ahead and a gap exists to crawl into; tier 1 (a return
-      inside emergency_stop_distance in the safety cone) stops unless the body clears
+      stops unless the contact is dead ahead and a gap exists to crawl into; tier 1 (the
+      swept path is blocked within emergency_arc_clearance, or a return sits inside
+      emergency_hard_stop_distance in the safety cone) stops unless the body clears
       emergency_escape_clearance and a gap exists.
     * "none": nothing is inside the emergency tiers, and the command passes through.
+
+    ``steering`` is this tick's steering before the override: the arc the car is being steered
+    onto. ``applied_steering`` is the rack's last commanded angle, the arc the car is on, which
+    pure_pursuit_node reads from steering_basis. None means the same as ``steering``.
     """
     _ensure_config(car_id)
     params = PURE_PURSUIT_PARAMS
@@ -325,10 +349,13 @@ def apply_map_safety(scan, steering: float, speed: float, car_id=None) -> tuple[
             if crawl is not None:
                 return crawl[0], crawl[1], "escape"
         return steering, 0.0, "stop"
-    # Tier 1: a return inside emergency_stop_distance in the safety cone.
+    # Tier 1: the swept path on both arcs, or a return inside the raw cone backstop.
+    applied = steering if applied_steering is None else applied_steering
+    arc = _arc_clearance(scan, steering, applied, params)
     distance = closest_valid(
         scan, math.radians(float(params['safety_fov_deg']) / 2.0), _CAR_ID)
-    if distance < float(params['emergency_stop_distance']):
+    if (arc < float(params['emergency_arc_clearance'])
+            or distance < float(params['emergency_hard_stop_distance'])):
         crawl = _emergency_escape(scan, body, float(params['emergency_escape_clearance']), params)
         if crawl is not None:
             return crawl[0], crawl[1], "escape"
@@ -999,9 +1026,15 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             min_scan = min(
                 min_scan, closest_valid(ego["scan"], math.radians(30.0), car_id)
             )
-            safety_function = apply_map_safety if safety == "map" else apply_fallback_safety
-            steering, speed, safety_result = safety_function(
-                ego["scan"], steering, speed, car_id=car_id)
+            if safety == "map":
+                # The rack's last commanded angle is the arc the car is on (the node's
+                # steering_basis, read before _shape_normal_command this tick).
+                steering, speed, safety_result = apply_map_safety(
+                    ego["scan"], steering, speed, car_id=car_id,
+                    applied_steering=command_shaper.previous_steering)
+            else:
+                steering, speed, safety_result = apply_fallback_safety(
+                    ego["scan"], steering, speed, car_id=car_id)
             avoid_steps += int(safety_result == "avoid")
             stop_steps += int(safety_result == "stop")
             escape_steps += int(safety_result == "escape")

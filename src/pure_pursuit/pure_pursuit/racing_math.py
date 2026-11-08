@@ -23,6 +23,7 @@ diagrams. Short version of what lives in each section below:
   5. CSV I/O              -- reading/writing waypoint files
   6. Reactive avoidance   -- gap-finding, for anything not in the map
   7. Opponent racing      -- detect another car, track it, decide/steer an overtake
+  8. Swept-path clearance -- the arc check behind the Tier 1 emergency stop
 """
 
 import csv
@@ -1306,3 +1307,152 @@ def minimum_footprint_clearance_in_cone(
     inside_cone = np.abs(beam_angles) <= cone_width_rad / 2.0
     return minimum_footprint_clearance(
         measured[inside_cone], validity[inside_cone], boundaries[inside_cone])
+
+
+# ============================================================================
+# 8. Swept-path clearance -- the arc check behind pure_pursuit_node's Tier 1
+# ============================================================================
+#
+# Deliberately duplicated from gap_follow's gap_logic.py rather than imported
+# (see vehicle_boundary_distances above for why). gap_logic.swept_path_clearance
+# is the reference implementation: the function below must stay byte-identical
+# to it, and test_racing_math.py compares the two files' text to hold that.
+# pure_pursuit_node passes the same +/-body_clearance_fov_deg window that
+# _footprint_clearance uses, never the whole scan: a return behind the sensor
+# can be the car's own chassis, which reads as "alongside the body" (0.0) on
+# every tick. See docs/racing-autonomy.md, reactive safety.
+
+
+def swept_path_clearance(clean: np.ndarray, valid: np.ndarray,
+                         angles: np.ndarray, curvature: float,
+                         half_width: float, car_length: float,
+                         wheelbase: float, laser_offset_x: float,
+                         laser_offset_y: float = 0.0,
+                         max_length: float = 3.0) -> float:
+    """How far the car can drive along a constant-curvature arc before its
+    body reaches a scanned obstacle, or ``inf`` if nothing is in the way
+    within ``max_length``.
+
+    This is the question the forward-cone clearance was standing in for, and
+    on a narrow corridor the cone answers it badly. The cone takes the
+    *minimum* range over +/-30deg, and in a 1.5m hallway the beams at +/-30deg
+    land on the side walls ~1.25m away -- so "forward clearance" there is
+    really side-wall distance, which a car driving straight down the hallway
+    will never hit. That number capped the car at ~2.4m/s on straights with
+    nothing ahead of it (docs/gap-follow-improvement-plan.md section 3.2).
+
+    Here only obstacles inside the band the body actually sweeps count, and
+    the distance is measured *along* the arc. ``base_link`` is the rear axle
+    (the bicycle model turns about it), so the arc is the rear axle's path,
+    and the band is the region the rectangular body covers as it follows
+    it: for a turn of radius R the body spans radii ``R - half_width`` (the
+    inner side, alongside the rear axle) out to
+    ``hypot(front, R + half_width)`` (the outer front corner). The inner
+    edge is what models off-tracking -- the rear of the car cuts inside the
+    path the LiDAR traces, which is how a car aimed past an inner corner
+    still clips it with its flank.
+
+    ``half_width`` is half the car's width plus whatever margin the caller
+    wants (the node passes ``car_width/2 + safety_margin``, the same swept
+    width the TTC brake uses). Returns the free distance from the body's
+    front edge, so 0.0 means an obstacle is already inside the band
+    alongside the body.
+
+    Sign convention REP-103: positive curvature turns left. Invalid beams
+    are unknown, not obstacles, as everywhere else in this file.
+    """
+    ranges = np.asarray(clean, dtype=np.float64)
+    validity = np.asarray(valid, dtype=bool)
+    beam_angles = np.asarray(angles, dtype=np.float64)
+    if not (ranges.shape == validity.shape == beam_angles.shape):
+        raise ValueError('ranges, validity, and angles must have matching shapes')
+    for name, value in (('curvature', curvature), ('half_width', half_width),
+                        ('car_length', car_length), ('wheelbase', wheelbase),
+                        ('laser_offset_x', laser_offset_x),
+                        ('laser_offset_y', laser_offset_y),
+                        ('max_length', max_length)):
+        if not math.isfinite(value):
+            raise ValueError(f'{name} must be finite')
+    if half_width <= 0.0 or car_length <= 0.0 or wheelbase <= 0.0 or max_length <= 0.0:
+        raise ValueError('half_width, car_length, wheelbase and max_length must be positive')
+
+    # Body extent along base_link's x axis (same model as
+    # vehicle_boundary_distances: centred halfway along the wheelbase).
+    front = wheelbase / 2.0 + car_length / 2.0
+    rear = wheelbase / 2.0 - car_length / 2.0
+
+    x = ranges * np.cos(beam_angles) + laser_offset_x
+    y = ranges * np.sin(beam_angles) + laser_offset_y
+    usable = validity & (ranges > 0.0)
+
+    if abs(curvature) < 1e-6:
+        in_band = usable & (np.abs(y) <= half_width) & (x >= rear)
+        along = x - front
+    else:
+        radius = 1.0 / curvature
+        abs_radius = abs(radius)
+        if abs_radius <= half_width:
+            raise ValueError('turn radius must exceed half_width')
+        rho = np.hypot(x, y - radius)
+        inner = abs_radius - half_width
+        outer = math.hypot(front, abs_radius + half_width)
+        # Angle swept about the turn centre, in the direction of travel,
+        # starting from the rear axle (which sits at angle -pi/2 from a
+        # left-turn centre, +pi/2 from a right-turn one).
+        start = -math.pi / 2.0 if radius > 0.0 else math.pi / 2.0
+        theta = np.arctan2(y - radius, x)
+        swept = np.mod(math.copysign(1.0, radius) * (theta - start), 2.0 * math.pi)
+        # Points just behind the rear axle wrap to ~2*pi; anything beyond
+        # the horizon is ignored anyway, so cap the sweep below a full turn.
+        max_sweep = min(max_length + front, 1.9 * math.pi * abs_radius) / abs_radius
+        in_band = usable & (rho >= inner) & (rho <= outer) & (swept <= max_sweep)
+        along = swept * abs_radius - front
+
+    along = np.where(in_band, along, np.inf)
+    nearest = float(np.min(along)) if along.size else math.inf
+    if nearest > max_length:
+        return math.inf
+    return max(0.0, nearest)
+
+
+def tier1_arc_clearance(ranges: np.ndarray, range_min: float, angles: np.ndarray,
+                        steerings, half_width: float, car_length: float,
+                        wheelbase: float, laser_offset_x: float,
+                        laser_offset_y: float, max_length: float) -> float:
+    """Tier 1's arc check: the smallest swept_path_clearance over the arcs for
+    each steering angle in ``steerings`` (radians), or ``inf`` if all are clear.
+
+    The caller chooses the beams. pure_pursuit_node and the simulator pass the
+    +/-body_clearance_fov_deg window that the footprint check uses, never the
+    whole scan (see the note above swept_path_clearance). A beam is valid only
+    if it is finite, positive and at least ``range_min``; NaN, +/-inf, zero,
+    negative and sub-range_min readings are unknown and are never obstacles.
+
+    ``steerings`` is the rack's last commanded angle (the slew basis) and this
+    tick's steering before the emergency override. Taking the minimum over both
+    covers the rack still being where it was (servo lag) and where it is being
+    sent.
+
+    The curvature is clipped to a radius of 1.01 * half_width, because
+    swept_path_clearance raises for a tighter turn. No steering the car can take
+    comes near that limit, so the clip only keeps a bad value from raising inside
+    the control loop. A non-finite steering cannot be evaluated, so it reads as
+    blocked (0.0), which makes the caller stop.
+    """
+    measured = np.asarray(ranges, dtype=np.float64)
+    beam_angles = np.asarray(angles, dtype=np.float64)
+    if measured.shape != beam_angles.shape:
+        raise ValueError('ranges and angles must have matching shapes')
+    if not all(math.isfinite(steering) for steering in steerings):
+        return 0.0
+    valid = np.isfinite(measured) & (measured > 0.0) & (measured >= range_min)
+    clean = np.where(valid, measured, 0.0)
+    max_curvature = 1.0 / (1.01 * half_width)
+    best = math.inf
+    for steering in steerings:
+        curvature = math.tan(steering) / wheelbase
+        curvature = min(max_curvature, max(-max_curvature, curvature))
+        best = min(best, swept_path_clearance(
+            clean, valid, beam_angles, curvature, half_width, car_length,
+            wheelbase, laser_offset_x, laser_offset_y, max_length))
+    return best

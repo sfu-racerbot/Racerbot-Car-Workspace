@@ -147,7 +147,7 @@ The guard compares the leaf name (the part after the final dot for nested parame
 | `SAFETY_TRUE`: may only be `true` | `enable_deadman`, `enable_ttc`, `enable_swept_clearance` |
 | `SAFETY_FIXED`: cannot appear in tuning | `deadman_button` |
 | `SAFETY_CEILING`: cannot exceed the shared value | `max_speed`, `profile_max_speed`, `profile_max_brake`, `ttc_min_closing_speed`, and every name ending in `*_timeout_sec` |
-| `SAFETY_FLOOR`: cannot go below the shared value | `ttc_threshold_sec`, `ttc_path_margin`, `car_width`, `car_length`, `optimize_car_width`, `emergency_stop_clearance`, `forward_stop_clearance`, `swept_clearance_margin`, `swept_clearance_max_length`, `emergency_stop_distance`, `profile_wall_clearance`, `narrow_corridor_clearance`, `open_corridor_clearance`, `overtake_min_side_clearance`, `body_clearance_fov_deg` |
+| `SAFETY_FLOOR`: cannot go below the shared value | `ttc_threshold_sec`, `ttc_path_margin`, `car_width`, `car_length`, `optimize_car_width`, `emergency_stop_clearance`, `forward_stop_clearance`, `swept_clearance_margin`, `swept_clearance_max_length`, `emergency_stop_distance`, `profile_wall_clearance`, `narrow_corridor_clearance`, `open_corridor_clearance`, `overtake_min_side_clearance`, `body_clearance_fov_deg`, `emergency_arc_clearance`, `emergency_arc_length`, `emergency_hard_stop_distance` |
 
 Ceiling and floor values must be numeric and not NaN (not-a-number). These checks prevent a per-car tuning file from weakening the listed safety bounds; they do not validate physical performance.
 

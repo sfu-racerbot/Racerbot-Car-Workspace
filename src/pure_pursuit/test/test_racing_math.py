@@ -1035,3 +1035,252 @@ def test_interpolate_along_clamps_to_last_waypoint_when_open():
         segment_index=4, t=0.5, qx=0.0, qy=0.0, heading=0.0,
         lateral_error=0.0, arc_length=0.0)
     assert racing_math.interpolate_along(values, proj, closed=False) == pytest.approx(4.0)
+
+
+# ============================================================================
+# Tier 1 arc check: swept_path_clearance and tier1_arc_clearance
+# ============================================================================
+#
+# Oracles, named per test:
+#   closed form  -- the expected value is written out from the geometry in the test
+#   spec         -- the text of a file in this repo (gap_follow's reference copy)
+#   brute force  -- _brute_contact_arc below. It drives the car's rectangle along the
+#                   arc and asks when it first covers the point. It shares no code with
+#                   racing_math or gap_logic, so it can disagree with them.
+#
+# The body is the cars' own envelope: half width 0.155 m (car_width 0.31), car_length
+# 0.58, wheelbase 0.36, and the LiDAR 0.26 m ahead of base_link. The front edge is
+# therefore FRONT = 0.47 m ahead of base_link, and 0.21 m ahead of the LiDAR.
+
+HALF_WIDTH = 0.155
+CAR_LENGTH = 0.58
+WHEELBASE = 0.36
+LASER_X = 0.26
+FRONT = WHEELBASE / 2.0 + CAR_LENGTH / 2.0      # 0.47 m: closed form 0.18 + 0.29
+REAR = WHEELBASE / 2.0 - CAR_LENGTH / 2.0       # -0.11 m
+TIER1_TRIP_M = 0.14                              # emergency_arc_clearance, pure_pursuit.yaml
+TRUST_CONTACT_M = 0.10                           # contacts this close must always trip
+
+
+def _brute_contact_arc(points, curvature, horizon=1.0, step=0.001):
+    """Brute-force oracle. For each base_link point, the rear-axle arc length at which the
+    car's rectangle first covers it while it drives the constant-curvature arc, or inf if
+    it never does within ``horizon``. Sampled every ``step`` metres, so each answer is
+    accurate to about one step. Left is positive, as in racing_math (REP-103)."""
+    pts = np.asarray(points, dtype=float).reshape(-1, 2)
+    out = np.full(len(pts), np.inf)
+    if abs(curvature) < 1e-9:
+        for i, (x, y) in enumerate(pts):
+            if abs(y) > HALF_WIDTH:
+                continue
+            if x >= FRONT:
+                out[i] = x - FRONT           # the front edge reaches it after x - FRONT
+            elif x >= REAR:
+                out[i] = 0.0                 # already under the body
+        return out
+    radius = 1.0 / curvature
+    sign = 1.0 if radius > 0.0 else -1.0
+    span = abs(radius)
+    undecided = np.ones(len(pts), dtype=bool)
+    for phi in np.arange(0.0, horizon / span + 1e-12, step / span):
+        # Rear axle on the circle about (0, sign * span), heading sign * phi.
+        axle_x = span * math.sin(phi)
+        axle_y = sign * span * (1.0 - math.cos(phi))
+        heading = sign * phi
+        dx = pts[:, 0] - axle_x
+        dy = pts[:, 1] - axle_y
+        body_x = dx * math.cos(heading) + dy * math.sin(heading)
+        body_y = -dx * math.sin(heading) + dy * math.cos(heading)
+        hit = undecided & (body_x >= REAR) & (body_x <= FRONT) & (np.abs(body_y) <= HALF_WIDTH)
+        out[hit] = span * phi
+        undecided &= ~hit
+        if not undecided.any():
+            break
+    return out
+
+
+def _single_return_free(points, curvature, max_length=1.0):
+    """swept_path_clearance for a scan whose only valid beams are the given base_link points."""
+    ranges, angles = [], []
+    for x, y in points:
+        lx = x - LASER_X
+        ranges.append(math.hypot(lx, y))
+        angles.append(math.atan2(y, lx))
+    return racing_math.swept_path_clearance(
+        np.array(ranges), np.ones(len(ranges), dtype=bool), np.array(angles), curvature,
+        HALF_WIDTH, CAR_LENGTH, WHEELBASE, LASER_X, 0.0, max_length)
+
+
+def _curvature(steering_rad):
+    return math.tan(steering_rad) / WHEELBASE
+
+
+def test_the_brute_force_oracle_matches_the_straight_closed_form():
+    # oracle: closed form. A point 0.59 m from base_link on the centreline is reached when the
+    # front edge covers it: 0.59 - 0.47 = 0.12 m of travel. This checks the oracle itself.
+    assert _brute_contact_arc([(0.59, 0.0)], 0.0)[0] == pytest.approx(0.12, abs=2e-3)  # m
+
+
+def test_the_brute_force_oracle_matches_a_turn_closed_form():
+    # oracle: closed form. A point on the rear axle's own path, FRONT + 0.30 m of arc from
+    # the start of a left turn of radius 1.2 m. The body reaches it after about 0.30 m of
+    # travel. This checks the oracle's arc branch, which the tests below depend on.
+    radius = 1.2
+    phi = (FRONT + 0.30) / radius
+    point = (radius * math.sin(phi), radius * (1.0 - math.cos(phi)))
+    assert _brute_contact_arc([point], 1.0 / radius)[0] == pytest.approx(0.30, abs=0.02)  # m
+
+
+def test_a_wall_dead_ahead_is_the_front_edge_distance():
+    # oracle: closed form. 0.33 m from the LiDAR is 0.33 + 0.26 - 0.47 = 0.12 m of arc.
+    assert _single_return_free([(0.59, 0.0)], 0.0) == pytest.approx(0.12, abs=1e-9)  # m
+
+
+def test_a_point_outside_the_half_width_band_is_never_in_the_way():
+    # oracle: closed form. |y| = 0.20 m is beyond the 0.155 m half width, so a straight car
+    # never touches it. The brute-force oracle agrees.
+    assert _single_return_free([(0.50, 0.20)], 0.0) == math.inf
+    assert _brute_contact_arc([(0.50, 0.20)], 0.0)[0] == math.inf  # oracle: brute force
+
+
+def test_nothing_beyond_max_length_is_in_the_way():
+    # oracle: closed form. A wall 1.76 m from base_link is 1.76 - 0.47 = 1.29 m of arc. It is
+    # inf under a 1.0 m horizon and 1.29 m under a 1.5 m horizon.
+    assert _single_return_free([(1.76, 0.0)], 0.0, max_length=1.0) == math.inf
+    assert _single_return_free([(1.76, 0.0)], 0.0, max_length=1.5) == pytest.approx(
+        1.29, abs=1e-9)  # m
+
+
+def test_a_return_already_under_the_body_reads_zero():
+    # oracle: closed form. x = 0.40 m is 0.07 m short of the front edge, so the car is already
+    # alongside it. The contract is 0.0, not a negative distance.
+    assert _single_return_free([(0.40, 0.0)], 0.0) == 0.0  # m
+
+
+def test_an_arc_point_on_the_rear_axle_path_is_its_own_arc_length_left_and_right():
+    # oracle: closed form. The rear axle's path is a circle of radius 1.2 m. A point on it,
+    # FRONT + 0.30 m of arc from the start, is 0.30 m of free road whichever way the car turns.
+    # Mirroring y and the curvature gives the right turn.
+    radius = 1.2
+    phi = (FRONT + 0.30) / radius
+    left = (radius * math.sin(phi), radius * (1.0 - math.cos(phi)))
+    right = (left[0], -left[1])
+    assert _single_return_free([left], 1.0 / radius) == pytest.approx(0.30, abs=1e-9)  # m
+    assert _single_return_free([right], -1.0 / radius) == pytest.approx(0.30, abs=1e-9)  # m
+
+
+@pytest.mark.parametrize('value, is_valid', [
+    (math.nan, True), (math.inf, True), (0.0, True), (-1.0, True),
+    (0.33, False),   # a finite return the caller marked invalid (below range_min, say)
+])
+def test_unknown_beams_are_never_obstacles(value, is_valid):
+    # oracle: spec. Invalid beams are unknown, not obstacles. The function also refuses
+    # NaN, inf, zero and negative ranges even when the caller marks them valid. Each case
+    # sits inside the arc's band, so only the validity handling can make it trip.
+    free = racing_math.swept_path_clearance(
+        np.array([value]), np.array([is_valid]), np.array([0.05]), 0.0, HALF_WIDTH,
+        CAR_LENGTH, WHEELBASE, LASER_X, 0.0, 1.0)
+    assert free == math.inf
+
+
+def test_a_turn_tighter_than_the_half_width_is_refused():
+    # oracle: spec. The function refuses rather than returning a number for a turn whose
+    # radius is inside the body. tier1_arc_clearance clips, so the control loop never asks.
+    with pytest.raises(ValueError, match='turn radius must exceed half_width'):
+        _single_return_free([(0.2, 0.0)], 1.0 / (HALF_WIDTH * 0.9))
+
+
+def test_the_port_is_the_gap_follow_reference_copy():
+    # oracle: spec. gap_follow's gap_logic.swept_path_clearance is the reference. Nothing
+    # imports across packages, so the two function bodies must stay identical text. This is
+    # the same anti-drift pattern as test_pure_pursuit_live_tuning.py's copy check.
+    here = os.path.dirname(__file__)
+    reference = os.path.join(here, '..', '..', 'gap_follow', 'gap_follow', 'gap_logic.py')
+    mine = os.path.join(here, '..', 'pure_pursuit', 'racing_math.py')
+
+    def body(path):
+        text = open(path, encoding='utf-8').read()
+        start = text.index('def swept_path_clearance(')
+        return text[start:text.index('\n\n\ndef ', start)]
+
+    assert body(mine) == body(reference)
+
+
+def test_tier1_takes_the_smaller_of_the_rack_arc_and_the_commanded_arc():
+    # oracle: closed form (0.12 m straight, above) and brute force (full lock). A wall dead
+    # ahead is 0.12 m on the straight arc, but on a full-lock arc the car reaches it sooner.
+    # Either slot alone must trip, so the check takes the minimum over both.
+    ranges = np.array([0.33])
+    angles = np.array([0.0])
+    full = 0.42
+    brute = _brute_contact_arc([(0.59, 0.0)], _curvature(full))[0]
+    assert brute < TIER1_TRIP_M  # oracle: brute force says the body reaches it inside 0.14 m
+    straight = racing_math.tier1_arc_clearance(
+        ranges, 0.05, angles, (0.0, 0.0), HALF_WIDTH, CAR_LENGTH, WHEELBASE, LASER_X, 0.0, 1.0)
+    commanded_only = racing_math.tier1_arc_clearance(
+        ranges, 0.05, angles, (0.0, full), HALF_WIDTH, CAR_LENGTH, WHEELBASE, LASER_X, 0.0, 1.0)
+    rack_only = racing_math.tier1_arc_clearance(
+        ranges, 0.05, angles, (full, 0.0), HALF_WIDTH, CAR_LENGTH, WHEELBASE, LASER_X, 0.0, 1.0)
+    assert straight == pytest.approx(0.12, abs=1e-9)                       # m, closed form
+    assert commanded_only < TIER1_TRIP_M and rack_only < TIER1_TRIP_M     # both slots count
+    assert commanded_only == pytest.approx(rack_only, abs=1e-12)          # order is irrelevant
+
+
+def test_a_steering_beyond_the_limits_is_clipped_not_raised():
+    # oracle: spec. A steering past the limits is clipped to a radius of 1.01 * half width,
+    # so swept_path_clearance does not raise inside the control loop. The result must equal
+    # the same check at exactly that clip.
+    ranges = np.array([0.33])
+    angles = np.array([0.0])
+    clip_steering = math.atan(WHEELBASE / (1.01 * HALF_WIDTH))
+    beyond = racing_math.tier1_arc_clearance(
+        ranges, 0.05, angles, (0.0, 1.5), HALF_WIDTH, CAR_LENGTH, WHEELBASE, LASER_X, 0.0, 1.0)
+    at_clip = racing_math.tier1_arc_clearance(
+        ranges, 0.05, angles, (0.0, clip_steering), HALF_WIDTH, CAR_LENGTH, WHEELBASE,
+        LASER_X, 0.0, 1.0)
+    assert beyond == pytest.approx(at_clip, abs=1e-12)
+
+
+@pytest.mark.parametrize('bad', [math.nan, math.inf, -math.inf])
+def test_tier1_reads_a_non_finite_steering_as_blocked(bad):
+    # oracle: spec. A steering that cannot be evaluated is blocked: 0.0, which makes the
+    # caller stop. An open scan would otherwise read inf.
+    free = racing_math.tier1_arc_clearance(
+        np.array([10.0]), 0.05, np.array([0.0]), (0.0, bad), HALF_WIDTH, CAR_LENGTH, WHEELBASE,
+        LASER_X, 0.0, 1.0)
+    assert free == 0.0
+
+
+def test_tier1_rejects_mismatched_arrays():
+    with pytest.raises(ValueError, match='matching shapes'):
+        racing_math.tier1_arc_clearance(
+            np.array([1.0, 2.0]), 0.05, np.array([0.0]), (0.0, 0.0), HALF_WIDTH, CAR_LENGTH,
+            WHEELBASE, LASER_X, 0.0, 1.0)
+
+
+def _forward_window_grid():
+    """Base_link points on a 2 cm grid that the LiDAR sees in its forward +/-90 deg window."""
+    points = []
+    for x in np.arange(-0.10, 0.601, 0.02):
+        for y in np.arange(-0.30, 0.301, 0.02):
+            bearing = math.atan2(y, x - LASER_X)
+            if abs(bearing) <= math.radians(90.0) and math.hypot(x - LASER_X, y) >= 0.05:
+                points.append((float(x), float(y)))
+    return points
+
+
+@pytest.mark.parametrize('steering', [0.0, 0.33, -0.33, 0.42, -0.42])
+def test_every_contact_within_a_tenth_of_a_metre_trips_tier1(steering):
+    # oracle: brute force, independent of racing_math. For every grid return that the car's
+    # rectangle reaches within TRUST_CONTACT_M of arc, on each steering in both cars'
+    # envelope, the swept path must trip at TIER1_TRIP_M. The measured limit is 0.1025 m, at
+    # 0.33 rad on the inner side of a turn, on a 5 mm grid (docs/racing-autonomy.md). Between
+    # there and 0.14 m the model is a few cm optimistic, and Tier 0's 0.03 m contact stop
+    # is the backstop.
+    points = _forward_window_grid()
+    contact = _brute_contact_arc(points, _curvature(steering))
+    misses = []
+    for point, arc in zip(points, contact):
+        if arc <= TRUST_CONTACT_M and not _single_return_free([point], _curvature(steering)) < TIER1_TRIP_M:
+            misses.append((point, arc))
+    assert not misses, misses[:5]

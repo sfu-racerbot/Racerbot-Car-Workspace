@@ -822,12 +822,75 @@ Seven independent checks, each capable of unilaterally forcing a stop or a steer
 | **Body contact** (checked first among the reactive tiers below) | Minimum clearance from the padded body, over *every* beam and not just a forward cone, is at or below `emergency_stop_clearance` (default 0.03m) | Structurally sees a wall the car is *alongside*, which a forward-cone minimum cannot — the 2026-07-27 collision. A contact dead ahead with a real gap elsewhere now attempts a crawl out first (`body_contact_escape`, 2026-08-25, gated by the stricter `body_contact_escape_clearance`) before falling back to the unconditional stop; a contact at the flank never gets that option |
 | Opponent detection + overtake steering | Another car detected and being closed on within `overtake_trigger_gap` (default 3.0m of *track* distance) | Not a safety check at all — a racing one. See [Racing against opponents](#racing-against-opponents-detection-tracking-and-overtaking) below. Always subordinate to the two checks after it |
 | Reactive avoidance (steer around) | An unmapped return in the 60° cone is under 1.5m; before a map is ready, raw range is under the 0.6m fallback (cut from 0.7m on 2026-08-25) | Map subtraction prevents ordinary walls from continuously triggering the traffic layer. A committed pass bypasses the generic 1m/s cap, while the emergency tier remains active |
-| Emergency hard stop (always wins) | Minimum range in a narrower `safety_fov_deg` cone (default 60°) is under `emergency_stop_distance` (default 0.35m, cut from 0.4m on 2026-08-25), or `/scan` itself is stale/missing | Last resort. A directional escape (`emergency_escape`) applies here too, same as body contact above — pre-dates this session — before the stop is unconditional |
+| Emergency swept-path stop (always wins; 2026-11-07) | The body's own swept path is blocked: on the arc the car is on (the rack's last commanded steering) or the arc it is being steered onto (this tick's steering), the free distance from the body's front edge is under `emergency_arc_clearance` (default 0.14m), over the same +/-90deg window as the footprint check; or a return sits inside `emergency_hard_stop_distance` (default 0.25m) in the 60deg cone, at any steering; or `/scan` itself is stale/missing | Replaces the 2026-08-25 raw-range rule, which stopped a car whose path was clear at 0.35m in the 60deg cone (in a full-lock turn the cone points at the wall the car is turning away from). A directional escape (`emergency_escape`) applies here too. Returns behind the sensor (beyond +/-90deg) are not read, on purpose: see [The emergency swept-path check](#the-emergency-swept-path-check-2026-11-07). Simulator-validated only; not yet driven |
 | Unhandled exception | Anything in the control step raises | `control_loop()` wraps the whole step in try/except; on *any* exception it publishes a stop command *before* re-raising, so an unexpected bug can't leave the last (possibly full-speed) command sitting on `/drive` forever |
 
 **Every stop in this table is published immediately and unshaped.** The acceleration and steering rate limits described in [Online command shaping](#online-command-shaping) sit on the *normal* command path only. A zero-speed command never passes through them, because rate-limiting a stop into a nonzero command would defeat the whole table.
 
 Because the deadman check runs first, holding LB is a precondition for the car moving at all. Releasing it stops the car immediately, regardless of what every other watchdog says.
+
+### The emergency swept-path check (2026-11-07)
+
+Tier 1 stops the car on its own swept path, not on a range in a cone. `racing_math.tier1_arc_clearance`
+takes the free distance along a constant-curvature arc from the body's front edge, for two arcs: the
+one the car is on (the rack's last commanded steering, `steering_basis`) and the one it is being
+steered onto (this tick's steering). The smaller free distance counts, and it trips under
+`emergency_arc_clearance`. The same function runs in `pure_pursuit_node` and in the no-ROS simulator
+(`apply_map_safety`), so the two cannot disagree.
+
+- **Why 0.14 m.** Straight ahead the check reproduces the old rule. The old 0.35 m is measured from the
+  LiDAR, and the front edge is 0.21 m ahead of it (wheelbase/2 + car_length/2 - laser_offset_x =
+  0.18 + 0.29 - 0.26), so 0.35 - 0.21 = 0.14 m from the front edge.
+- **Why an arc.** On a full-lock turn the 60deg cone points at the wall the car is turning away from. The
+  old rule stopped such a car with a clear path. The regression case: a wall 25deg to the right at 0.33 m
+  on full left lock. The brute-force oracle never reaches it, and Tier 1 no longer stops the car.
+- **The window.** +/-90deg, `body_clearance_fov_deg`, the same window as the footprint check. The rear of a
+  270deg scan is the car's own chassis, which lies inside the body. Over the full scan the arc trips on 100%
+  of car 2's 2026-10-30 scans, against 0.2% over the window (measured on that run).
+- **The backstop.** A return inside `emergency_hard_stop_distance` (0.25 m) in the 60deg cone stops the
+  car at any steering. Measured 2026-11-07 on 856 in-cone returns closer than 0.25 m (more than 3 cm
+  from the body), at 25 (rack, command) steering pairs per car: the arc trips on every one, so the
+  backstop never decides alone there. It is the net that holds if the arc model is wrong close to the
+  body. `test_tier1_arc.py` tests it alone with the arc check switched off.
+- **The model's error.** Compared with brute-force contact (the car's rectangle driven along the arc, in
+  a 5 mm sweep), the model is optimistic for returns on the inner side of a turn by up to about 2 cm at
+  0.14 m; the smallest contact it misses is 0.1025 m. For some near-side returns it is pessimistic by up
+  to 0.29 m, which stops the car early. Contacts within 0.10 m always trip (`test_racing_math.py`, 2 cm
+  grid). Tier 0 (body contact within 0.03 m) is the backstop for the rest.
+- **The blind spot, on purpose.** Returns behind the sensor (beyond +/-90deg) are read by neither Tier 1
+  nor the footprint check. The rear flank is the one place this matters. On the simulator's 06a line
+  (seed 12345) the rear-right flank meets a wall in that blind spot while turning left at about 0.28 rad, and the car
+  touches it. The HEAD code makes the same contact, because its footprint check uses the same window and
+  neither rule acts on that run (see the simulator note in `CHANGELOG.md`). Fixing that needs a rear
+  window, and that is a separate decision.
+- **Not addressed.** A 0.14 m trip is not a stopping distance. At these speeds a stop takes longer than
+  that, so Tier 1 is a last resort for a path that is already blocked, not a braking plan.
+
+**Real-scan replay (2026-11-07).** `tools/run_analysis/tier1_replay.py` replays both triggers over recorded
+runs. Counts are scans where the rule stops the car, not counting Tier 0 scans, which both rules share.
+Steering is the commanded steering from the bag, as a proxy for the controller's own (see the script).
+
+| Run | Scans (not Tier 0) | Old cone rule (< 0.35 m raw, +/-30deg) | New arc-aware Tier 1 | New only | Old only | Map check |
+|---|---:|---:|---:|---:|---:|---|
+| `20261106-184753` (06b) | 1377 | 0 | 0 | 0 | 0 | yes: pose and rebuilt map |
+| `20261106-171030` (06a) | 10693 | 0 | 0 | 0 | 0 | no pose in the bag |
+| `20261030-175124` (car 2, 10-30) | 3317 | 2 | 3 | 1 | 0 | no pose in the bag |
+
+The one new-only trip (10-30 run, t=1793407907.95) is at -19.25deg, 0.362 m, on a straight command. Its
+return is 0.13 m ahead of the front-right corner, so the swept path is blocked and the old 0.35 m rule
+missed it by 1.2 cm. It is persistent: the same surface is in 3 consecutive scans, closing at about 3 cm
+per scan (about 1.2 m/s), so it is structure, not a one-scan spike. The map check is the control: with
+the 06b pose and rebuilt map, 92% of returns within 3 m lie within 0.10 m of an occupied cell, and 51%
+when the pose is shifted 0.5 m. Only 06b has a pose, so the other two runs are classified by persistence
+alone, and they are small samples: three trips in 15,387 scans.
+
+**Simulator (six lines, 2026-11-07, car 2 profile).** Seeds 12345-12347 on `car2_course_2026_11_06b` and
+`car2_course_2026_11_06a_scans`, `--safety map --laps 4 --steering-limit 0.42 --speed 5.0 --lateral 2.9`.
+06b: contact 0 on all three seeds, 9.8 s laps, 5 to 13 stop steps. 06a seeds 12346 and 12347: contact 0,
+12.0 s laps. 06a seed 12345: contact 1, no lap, cross-track max 0.28 m, 0 stop steps. The HEAD code gives
+the same result on that seed, so the contact is not caused by this change; it is the rear-flank blind spot
+above, and it is a finding for the team, not a fixed behaviour.
+
 
 Concretely, that means **`joy_node` must be up** while racing. It lives in `bringup_launch.py` — the shared foundation every control layer needs — not in `teleop_launch.py`, which is the manual-driving control layer you simply don't launch during a race. See [operations.md](operations.md#racing-with-the-pure-pursuit-stack).
 
@@ -1162,7 +1225,10 @@ All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that fi
 | `off_racing_line_recovery_timeout_sec` | `5.0` | s; give up and hard-stop if recovery has not closed the error back under `max_cross_track_error` within this long. The give-up **latches** (2026-09-26): it holds until the error closes (car repositioned, or localization corrects) or LB is released, rather than re-arming a fresh crawl on the next tick |
 | `enable_lidar_safety` | `true` | Master switch for the entire reactive net below (avoidance + opponent overtaking both require this too) |
 | `safety_fov_deg` | `60.0` | Width of the narrow forward cone checked for the hard emergency stop |
-| `emergency_stop_distance` | `0.35` | Meters; hard stop, always wins (cut from 0.4 on 2026-08-25, untested on the car -- pure_pursuit never took control in the run that motivated it) |
+| `emergency_stop_distance` | `0.35` | Meters; the avoidance brake reserve and the committed-pass speed cap. No longer the Tier 1 hard stop since 2026-11-07 (that is `emergency_arc_clearance` and `emergency_hard_stop_distance`). Cut from 0.4 on 2026-08-25, untested on the car |
+| `emergency_arc_clearance` | `0.14` | Meters; Tier 1 trips when the body's swept path is blocked closer than this, measured from the front edge. `0.35 - 0.21`: straight ahead this is the old 0.35m LiDAR rule. Shared floor: a tuning overlay may only raise it |
+| `emergency_arc_length` | `1.0` | Meters; the arc's horizon. Must be finite and at least `emergency_arc_clearance`, or the node refuses to start. Shared floor |
+| `emergency_hard_stop_distance` | `0.25` | Meters; raw backstop anywhere in the 60deg cone, at any steering. Shared floor |
 | `scan_timeout_sec` | `0.5` | LIDAR staleness watchdog |
 | `enable_obstacle_avoidance` | `true` | Steer around something close instead of just stopping, when there's room |
 | `avoidance_fov_deg` | `60.0` | Forward cone used for avoidance steering and opponent gating |
