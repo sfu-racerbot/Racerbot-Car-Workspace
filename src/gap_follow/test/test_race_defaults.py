@@ -63,7 +63,8 @@ def test_the_safety_values_the_race_defaults_left_alone(car):
     assert P['ttc_threshold_sec'] == pytest.approx(0.30, abs=1e-9)  # s
     assert P['max_braking_decel'] == pytest.approx(3.0, abs=1e-9)  # m/s^2
     assert P['emergency_stop_clearance'] == pytest.approx(0.0, abs=1e-9)  # m
-    assert P['forward_stop_clearance'] == pytest.approx(0.20, abs=1e-9)  # m
+    # Except the forward reserve: 0.12 since 2026-11-07, docs/gap-follow.md#race-defaults-2026-10-27.
+    assert P['forward_stop_clearance'] == pytest.approx(0.12, abs=1e-9)  # m
     # docs/gap-follow.md#race-defaults-2026-10-27, car 1.
     # Car 2: 0.42 since 2026-11-07 (0.349 before), inside its 2026-10-16 measured
     # circles: docs/hardware-reference.md, car 2's steering.

@@ -142,7 +142,13 @@ gap_follow_node:
     # steering lag measured on run 20261019-200703 and full gain, the car
     # weaves at speed (docs/gap-follow.md).
     # 0 disables. Simulator-validated only.
-    steering_gain_speed_ref: 1.8
+    # 3.5 (was 1.8) on 2026-11-07: at 1.8 the car steered into a sharp corner
+    # at half strength from ~3.3 m/s and reached full lock late (tech lead:
+    # "turning at full lock should happen sooner"). Simulator, car 2 at
+    # 0.42 rad, 6 seeds: 06a 11.35 -> 11.09 s, 06b 8.46 -> 8.20 s, no
+    # contact. Off (0) was 10.94 / 8.20 s; 3.5 keeps the weave protection at
+    # the speeds it was measured at, until a floor test shows it is not needed.
+    steering_gain_speed_ref: 3.5
     # Raised 1.0 -> 2.0 on 2026-10-19 with the swept-path / corner-setup
     # rework: 1.0 m/s^2 (~0.1 g) held the car near 1.4 m/s through every
     # corner. Raised 2.0 -> 2.5 on 2026-10-26, to match pure_pursuit's 2.5
@@ -365,7 +371,14 @@ gap_follow_node:
     # ordinary cornering, not just genuine near-misses, into the
     # escape_creep_speed regime below -- a plausible source of a real report
     # of the car "inching" around corners.
-    forward_stop_clearance: 0.20
+    # Cut from 0.20 to 0.12 on 2026-11-07 (tech lead: the car stopped its
+    # sharp turns near walls with room still to turn). Car 2's 2026-11-06
+    # runs held full-lock turns to <=0.4 m/s on the creep and clearance caps
+    # 400+ times; TTC and emergency clearance fired 4 times in all. Simulator,
+    # car 2 at 0.42 rad, 6 seeds each: 06a course 11.50 -> 11.35 s, 06b
+    # 8.46 s unchanged, no contact on either. The bubble (safety_margin) was
+    # tried too and kept: 0.12 there gave contact on 4 of 6 seeds.
+    forward_stop_clearance: 0.12
     forward_stop_fov_deg: 60.0
     # Inside forward_stop_clearance the car crawls at this speed instead of
     # latching at zero. That cone points where the car is aimed, not where it

@@ -151,7 +151,10 @@ def _forward_cone_ceiling(node, scan):
 # ============================================================================
 
 def test_swept_clearance_lets_the_car_past_the_old_cone_ceiling_on_a_narrow_straight(node):
-    scan = _raycast(_corridor(0.75, 0.75))
+    # 0.70 m a side (0.75 until 2026-11-07): with the forward reserve cut to
+    # 0.12 m the cone's ceiling in a 1.5 m corridor rose to 2.61 m/s, so the
+    # side walls no longer bound it there. Narrower, they do again.
+    scan = _raycast(_corridor(0.70, 0.70))
     old_ceiling = _forward_cone_ceiling(node, scan)
     assert old_ceiling < 2.6          # the side walls were the "obstacle"
     cmd = _drive(node, scan, speed=3.0)
