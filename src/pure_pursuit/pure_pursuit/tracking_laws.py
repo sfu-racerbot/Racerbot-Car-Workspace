@@ -20,7 +20,7 @@ import math
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Mapping, Protocol
+from typing import Mapping, Optional, Protocol
 
 import numpy as np
 
@@ -139,17 +139,26 @@ def _wrap(angle: float) -> float:
 
 
 def sample_at_arc(values: np.ndarray, cumulative: np.ndarray, s: float,
-                  closed: bool = True) -> float:
+                  closed: bool = True, seg_len: Optional[np.ndarray] = None) -> float:
     """Linear interpolation of a per-waypoint field at arc length `s`.
 
     `cumulative[i]` is the arc length of waypoint i (from waypoint 0). On a
     closed loop `s` wraps modulo the total length; on an open path it clamps
-    to the ends. Used by MPC to sample curvature and speed along the horizon.
+    to the ends. Used by MPC and delay_lqr to sample curvature and speed ahead.
+
+    On a closed loop the lap is ``cumulative[-1] + seg_len[-1]``: cumulative
+    stops at the last waypoint, and the closing segment back to waypoint 0
+    is ``seg_len[-1]`` (compute_segment_lengths). Pass ``seg_len`` so the
+    wrap happens at the true seam and the closing segment interpolates from
+    the last waypoint to the first (2026-11-07; without it the lap was one
+    segment short and values near the seam came from the wrong waypoint).
     """
     n = len(values)
     if n == 0:
         raise TrackingLawError('sample_at_arc: empty values')
     total = float(cumulative[-1])
+    if closed and seg_len is not None:
+        total += float(seg_len[-1])
     if closed:
         s = s % total
         idx = int(np.searchsorted(cumulative, s, side='right') - 1)
@@ -679,9 +688,9 @@ class MpcLaw:
         s = s0
         for k in range(n):
             speeds[k] = max(
-                sample_at_arc(path.speed_profile, path.cumulative, s, path.closed),
+                sample_at_arc(path.speed_profile, path.cumulative, s, path.closed, path.seg_len),
                 LqrGainTable.V_FLOOR)
-            kappas[k] = sample_at_arc(path.curvature, path.cumulative, s, path.closed)
+            kappas[k] = sample_at_arc(path.curvature, path.cumulative, s, path.closed, path.seg_len)
             ff[k] = math.atan(self.limits.wheelbase * kappas[k])
             if k + 1 < n:
                 s = s + speeds[k] * dt_p
@@ -1020,6 +1029,23 @@ class DelayLqrLaw:
         self.limits = limits
         self.params = params
         dt = limits.control_dt
+        # The servo estimate is rebuilt each tick over SERVO_WARMUP_TICKS of
+        # history, starting at the oldest command in the window. It must be able
+        # to settle inside that window from any start: a full lock-to-lock slew
+        # at servo_rate, then the first-order tail down to 1e-3 of the step.
+        # A slower servo than that would leave a lasting wheel-angle error, so
+        # refuse it rather than predict with it.
+        servo_step = params.servo_gain * dt
+        if math.isfinite(servo_step) and 0.0 < servo_step < 1.0:
+            tail = math.log(1e-3) / math.log(1.0 - servo_step)
+        else:
+            tail = 1.0
+        slew = 2.0 * limits.max_steering_angle / (params.servo_rate * dt)
+        if slew + tail > self.SERVO_WARMUP_TICKS:
+            raise ValueError(
+                f'delay_lqr: the servo (gain {params.servo_gain}/s, rate {params.servo_rate} rad/s) '
+                f'needs {slew + tail:.0f} ticks to settle, more than the '
+                f'{self.SERVO_WARMUP_TICKS}-tick history the estimate runs over')
         self.sensing_ticks = int(round(params.sensing_delay / dt))
         self.actuation_ticks = int(round(params.actuation_delay / dt))
         self.horizon_ticks = self.sensing_ticks + self.actuation_ticks
@@ -1036,9 +1062,11 @@ class DelayLqrLaw:
         # reads is actuation ticks older than that.
         self._history: deque = deque(
             maxlen=self.SERVO_WARMUP_TICKS + self.horizon_ticks + 1)
+        self._last_output = None
 
     def reset(self) -> None:
         self._history.clear()
+        self._last_output = None
 
     def _wheel_angles(self):
         """(angles, delta_at_action): the wheel angle at each tick the sensed
@@ -1053,7 +1081,9 @@ class DelayLqrLaw:
         gain, rate = self.params.servo_gain, self.params.servo_rate
         dt = self.limits.control_dt
         history = self._history
-        delta = 0.0
+        # Start from the oldest command the warm-up reads, not from zero: after
+        # a re-seed every entry is that command and the estimate is exact.
+        delta = float(history[-(actuation + sensing + self.SERVO_WARMUP_TICKS)])
         angles = []
         for offset in range(-(sensing + self.SERVO_WARMUP_TICKS), actuation):
             if offset >= -sensing:
@@ -1069,9 +1099,16 @@ class DelayLqrLaw:
         dt = self.limits.control_dt
         limit = self.limits.max_steering_angle
         previous = float(inp.previous_steering)
-        if self._history:
+        # The history is one entry per tick of *this law's* commands. If the
+        # command applied last tick is not what this law returned (a stop, a
+        # recovery, an escape or another law published in between), the gap's
+        # commands and timing are unknown: re-seed as if the rack had held the
+        # applied command, instead of replaying stale steering as recent.
+        last = getattr(self, '_last_output', None)
+        if self._history and last is not None and abs(previous - last) <= 1e-6:
             self._history.append(previous)     # the command applied last tick
         else:
+            self._history.clear()
             self._history.extend([previous] * self._history.maxlen)
         angles, delta = self._wheel_angles()
         v = max(float(inp.speed), 0.0)
@@ -1098,7 +1135,7 @@ class DelayLqrLaw:
         e = proj.lateral_error
         theta = _wrap(psi - proj.heading)
         lead_arc = proj.arc_length + v * self.feedforward_lead
-        kappa_at_action = sample_at_arc(path.curvature, path.cumulative, lead_arc, path.closed)
+        kappa_at_action = sample_at_arc(path.curvature, path.cumulative, lead_arc, path.closed, path.seg_len)
         feedforward = math.atan(L * kappa_at_action)
         w = delta - feedforward
         K = self._table.gain_at(max(v, ServoLqrGainTable.V_FLOOR))
@@ -1107,6 +1144,7 @@ class DelayLqrLaw:
         # this law returns, and the one the history records, the same.
         steered = racing_math.slew_rate_limit(command, previous, dt, self.limits.max_steering_rate)
         steering = float(np.clip(steered, -limit, limit))
+        self._last_output = steering
         detail = (f"delay_lqr e={e:+.3f}m th={theta:+.3f}rad w={w:+.3f}rad "
                   f"ff={feedforward:+.3f}rad K=[{K[0]:.2f},{K[1]:.2f},{K[2]:.2f}]")
         return SteeringResult(steering=steering, unclipped=float(command), detail=detail)

@@ -2787,8 +2787,10 @@ class PurePursuitNode(Node):
         # courses 06a/06b). Capping the basis at the target keeps the climb-back
         # behaviour above (target above the car's speed) and lets a falling
         # profile command what it asks, slewed from the last command as before.
-        # gap_follow never slew-limits braking at all. A lower command is never
-        # less safe.
+        # gap_follow never slew-limits braking at all. What this guarantees: the
+        # command is never higher than the old basis gave for the same inputs,
+        # never above the tick's target, and every hard ceiling below still
+        # applies unchanged.
         ramp_basis = self.last_commanded_speed
         if self._odom_fresh():
             ramp_basis = max(

@@ -265,10 +265,39 @@ def test_the_feedforward_is_read_one_servo_time_constant_past_the_action_point()
 
 
 def test_the_servo_state_is_the_first_order_response_to_the_command():
-    # The command 0.1 rad is applied one tick ago and nothing before it. The servo sees it
-    # 3 ticks after it was issued (the transport), so at the action point the wheel has
-    # moved only by one Euler step of the servo: delta = g * dt * 0.1 (below the rate cap).
+    # The law's own command u1 is applied one tick ago and only zeros before it. The servo
+    # sees it 3 ticks after it was issued (the transport), so at the action point the wheel
+    # has moved only by one Euler step of the servo: delta = g * dt * u1 (below the rate cap).
     # Then w = delta and the feedback on a straight line at zero error is -K2 * delta.
+    # (2026-11-07: u1 is now the law's own output. A previous_steering the law did not
+    # return means another path published in between, and the law re-seeds; see
+    # test_a_command_the_law_did_not_return_reseeds_the_history.)
+    v = 2.0
+    ctx = straight_path()
+    law = make(limits=UNSLEWED)
+    idle = TrackingInput(x=1.0, y=0.0, yaw=0.0, speed=v,
+                         nearest_idx=nearest_index(ctx, 1.0, 0.0), previous_steering=0.0)
+    for _ in range(50):
+        assert law.steer(idle, ctx).steering == pytest.approx(0.0, abs=1e-12)
+    # one tick 2 cm to the right of the line: the law steers left, u1 > 0
+    u1 = law.steer(TrackingInput(x=1.0, y=-0.02, yaw=0.0, speed=v,
+                                 nearest_idx=nearest_index(ctx, 1.0, -0.02),
+                                 previous_steering=0.0), ctx).steering
+    assert 0.0 < u1 < 0.42 and SERVO_GAIN * u1 < 2.5   # off the clamp and under the rate cap
+    result = law.steer(TrackingInput(x=1.0, y=0.0, yaw=0.0, speed=v,
+                                     nearest_idx=nearest_index(ctx, 1.0, 0.0),
+                                     previous_steering=u1), ctx)
+    delta_at_action = SERVO_GAIN * DT * u1
+    expected = -riccati_gain(v)[2] * delta_at_action
+    assert result.steering == pytest.approx(expected, abs=1e-9)
+
+
+def test_a_command_the_law_did_not_return_reseeds_the_history():
+    # A stop, recovery or escape published in between: previous_steering is not what the
+    # law returned last tick. The law must not replay its own stale history as recent; it
+    # assumes the rack has held the applied command. Oracle (invariant): the result equals a
+    # law that never ran, given the same input, and is NOT the stale replay, in which the
+    # rack would only have taken one servo step towards the command (-K2 * g * dt * applied).
     v = 2.0
     ctx = straight_path()
     law = make(limits=UNSLEWED)
@@ -276,12 +305,38 @@ def test_the_servo_state_is_the_first_order_response_to_the_command():
                          nearest_idx=nearest_index(ctx, 1.0, 0.0), previous_steering=0.0)
     for _ in range(50):
         law.steer(idle, ctx)
+    applied = 0.1
     result = law.steer(TrackingInput(x=1.0, y=0.0, yaw=0.0, speed=v,
                                      nearest_idx=nearest_index(ctx, 1.0, 0.0),
-                                     previous_steering=0.1), ctx)
-    delta_at_action = SERVO_GAIN * DT * 0.1
-    expected = -riccati_gain(v)[2] * delta_at_action
-    assert result.steering == pytest.approx(expected, abs=1e-9)
+                                     previous_steering=applied), ctx)
+    stale = -riccati_gain(v)[2] * SERVO_GAIN * DT * applied
+    assert abs(result.steering - stale) > 0.05   # rad: far from the stale-history replay
+    # ...and it is the same as a law that never ran before
+    fresh = make(limits=UNSLEWED).steer(TrackingInput(
+        x=1.0, y=0.0, yaw=0.0, speed=v, nearest_idx=nearest_index(ctx, 1.0, 0.0),
+        previous_steering=applied), ctx)
+    assert result.steering == pytest.approx(fresh.steering, abs=1e-12)
+
+
+def test_a_servo_too_slow_for_the_estimate_window_is_refused():
+    # Lock to lock at 0.1 rad/s is 0.84 rad / 0.1 = 8.4 s = 336 ticks, far past the 40-tick
+    # window the wheel estimate is rebuilt over: refused at construction, not mispredicted.
+    with pytest.raises(ValueError, match='needs .* ticks to settle'):
+        make({'delay_lqr.servo_rate': 0.1})
+    # the car's own servo (15/s, 2.5 rad/s): 0.84/2.5/0.025 = 13.4 + ln(1e-3)/ln(0.625) = 14.7 -> 28 ticks
+    make({'delay_lqr.servo_rate': 2.5, 'delay_lqr.servo_gain': 15.0})
+
+
+def test_sample_at_arc_wraps_at_the_true_seam_of_a_closed_line():
+    # Three waypoints on a closed line, segments 1, 2 and 3 m (the last closes back to 0):
+    # the lap is 6 m. Half way along the closing segment (s = 4.5) is half way from the last
+    # waypoint's value to the first's; s = 6.5 wraps to 0.5.
+    values = np.array([0.0, 10.0, 20.0])
+    seg = np.array([1.0, 2.0, 3.0])
+    cum = racing_math.compute_cumulative_arc_length(seg)
+    assert tracking_laws.sample_at_arc(values, cum, 4.5, True, seg) == pytest.approx(10.0, abs=1e-12)
+    assert tracking_laws.sample_at_arc(values, cum, 6.5, True, seg) == pytest.approx(5.0, abs=1e-12)
+    assert tracking_laws.sample_at_arc(values, cum, 2.0, True, seg) == pytest.approx(15.0, abs=1e-12)
 
 
 # ============================================================================
