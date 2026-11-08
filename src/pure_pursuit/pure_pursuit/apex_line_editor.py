@@ -129,6 +129,16 @@ def validate_line(xy, pins, occ, params):
                 curvature_limit=limit, apex_distances_m=distances)
 
 
+def _velocity_profile(line, params):
+    return racing_math.compute_velocity_profile(
+        racing_math.compute_segment_lengths(line, closed=True),
+        racing_math.estimate_path_curvature(line, closed=True),
+        v_max=params['profile_max_speed'], v_min=params['profile_min_speed'],
+        a_lat_max=params['profile_max_lateral_accel'], a_accel_max=params['profile_max_accel'],
+        a_brake_max=params['profile_max_brake'], closed=True,
+        smoothing_passes=params['profile_smoothing_passes'])
+
+
 def edit(run, apex_file, out, config=CONFIG):
     run, apex_file, out = Path(run).resolve(), Path(apex_file).resolve(), Path(out).resolve()
     if out.exists():
@@ -136,7 +146,8 @@ def edit(run, apex_file, out, config=CONFIG):
     xy, doc = read_inputs(run, apex_file)
     if run_commands.read_start_pose(run) is None:
         raise ValueError('a valid start_pose.yaml is required for direct pure-pursuit launch')
-    params = yaml.safe_load(Path(config).read_text())['auto_map_race_node']['ros__parameters']
+    from racerbot_car.layers import effective_values, layered
+    params = effective_values(layered(str(config), 'auto_map_race.yaml'), 'auto_map_race_node')
     occ = OccupancyMap.from_yaml(str(run / 'map.yaml'))
     pins = np.array([[a['x'], a['y']] for a in doc['apexes']])
     center, left, right = optimizer.refine_centerline(
@@ -154,13 +165,7 @@ def edit(run, apex_file, out, config=CONFIG):
         apex_tolerance=TOLERANCE / 2)
     line = optimizer.resample_closed_path(result['line'], params['optimize_output_spacing'])
     checks = validate_line(line, pins, occ, params)
-    speed = racing_math.compute_velocity_profile(
-        racing_math.compute_segment_lengths(line, closed=True),
-        racing_math.estimate_path_curvature(line, closed=True),
-        v_max=params['profile_max_speed'], v_min=params['profile_min_speed'],
-        a_lat_max=params['profile_max_lateral_accel'], a_accel_max=params['profile_max_accel'],
-        a_brake_max=params['profile_max_brake'], closed=True,
-        smoothing_passes=params['profile_smoothing_passes'])
+    speed = _velocity_profile(line, params)
     if not np.isfinite(speed).all() or np.any(np.asarray(speed) <= 0):
         raise ValueError('invalid velocity profile')
     meta = yaml.safe_load((run / 'map.yaml').read_text())

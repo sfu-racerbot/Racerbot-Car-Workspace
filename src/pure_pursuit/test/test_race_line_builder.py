@@ -128,12 +128,14 @@ def test_write_preserves_waypoints_and_caps_speed(course, tmp_path):
     (['--wall-margin', '5.0'], 0, 'recorded'),
 ])
 def test_cli_fixture(tmp_path, args, exit_code, choice):
-    # oracle: fixture measurement, and spec that named mode refuses fallback.
+    # oracle: car 2 fixture measurement, and spec that named mode refuses fallback.
+    # Explicit --car must win over the current rb1 used by the test environment.
     for name in ('map.yaml', 'map.pgm', 'raceline_raw.csv'):
         shutil.copy(DATA / name, tmp_path / name)
-    env = dict(os.environ, OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
+    env = dict(os.environ, RACERBOT_CAR='rb1', OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
     proc = subprocess.run([sys.executable, '-m', 'pure_pursuit.race_line', '--run-dir',
-                           str(tmp_path), *args], env=env, capture_output=True, text=True, check=False)
+                           str(tmp_path), '--car', 'rb2', *args],
+                          env=env, capture_output=True, text=True, check=False)
     assert proc.returncode == exit_code, proc.stdout + proc.stderr
     assert OUTPUTS.intersection(p.name for p in tmp_path.iterdir()) == (OUTPUTS if exit_code == 0 else set())
     if choice is not None:

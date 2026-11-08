@@ -2093,11 +2093,8 @@ def test_bare_node_defaults_never_plan_harder_braking_than_the_shipped_config():
     said 8.0 m/s^2 -- the value auto_map_race.yaml records as having put
     the car into a wall on its first simulated race -- while the YAML said
     3.0. Oracle: the shipped config (cited file), not a golden number."""
-    import yaml
-    config = os.path.join(os.path.dirname(__file__), '..', 'config',
-                          'auto_map_race.yaml')
-    with open(config) as handle:
-        shipped = next(iter(yaml.safe_load(handle).values()))['ros__parameters']
+    from racerbot_car.layers import effective_config
+    shipped = effective_config('auto_map_race.yaml', 'auto_map_race_node')
     node = _supervisor()
     try:
         assert node.profile_max_brake <= shipped['profile_max_brake']

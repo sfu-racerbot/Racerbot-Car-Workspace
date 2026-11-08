@@ -122,7 +122,10 @@ pure_pursuit_node:
     nearest_search_window: 40    # +/- waypoints searched around the previous tick's nearest point (0 = search all)
 
     # --- Speed limits (safety ceiling -- the .csv profile is still clipped to this) ---
-    max_speed: 4.0
+    # 2026-11-07: match gap_follow's 5.0 m/s ceiling. Car 2 simulator evidence,
+    # 6 Nov courses, 3 seeds: 0.38 rad / 2.9 m/s^2 minimum-time lines had no
+    # contact (06a 10.97-11.10 s flying, 06b 9.15-9.40 s). Floor test first.
+    max_speed: 5.0
     min_speed: 0.5
     # Runtime corrections/overtakes can be sharper than the profiled line.
     # Cap their speed from commanded curvature and shape normal commands.

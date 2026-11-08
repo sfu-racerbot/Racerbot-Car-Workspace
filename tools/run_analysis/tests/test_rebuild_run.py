@@ -191,7 +191,22 @@ def good_inputs():
 def _rebuild(tmp_path, inputs, **kwargs):
     run = tmp_path / '20261030-120000'
     run.mkdir(exist_ok=True)
-    return rb.rebuild(run, tmp_path / 'auto', load=lambda _: inputs, **kwargs)
+    return rb.rebuild(run, tmp_path / 'auto', load=lambda _: inputs,
+                      supervisor_config=_recorded_base(tmp_path), **kwargs)
+
+
+def _recorded_base(tmp_path):
+    """Make optimized corridors ineligible, so the known driven geometry is the oracle.
+
+    The real builder still runs and checks all three candidates. A 20 m wall
+    margin cannot fit this 2-4 m corridor, so only the recorded candidate can
+    win. Minimum-time selection is covered on the measured fixture separately.
+    """
+    config = yaml.safe_load(rb.CONFIG_PATH.read_text())
+    config['auto_map_race_node']['ros__parameters']['race_line_wall_margin'] = 20.0
+    path = tmp_path / 'recorded_base.yaml'
+    path.write_text(yaml.safe_dump(config))
+    return path
 
 
 def _doubled():
@@ -211,8 +226,9 @@ def test_a_good_run_is_accepted_with_every_file(tmp_path, good_inputs):
     assert result.verdict.ok
     assert result.raceline_ok
     assert result.out_dir == tmp_path / 'auto' / '20261030-120000-rebuilt'
-    for name in ('map.yaml', 'map.pgm', 'raceline_raw.csv', 'raceline_profiled.csv', 'raceline_2p5.csv',
-                 'raceline_4p0.csv', 'start_pose.yaml', 'commands.txt', 'rebuild.json'):
+    # oracle: spec, one selected line, capped copy, and candidate report replace FASTER_LINES.
+    for name in ('map.yaml', 'map.pgm', 'raceline_raw.csv', 'raceline_profiled.csv',
+                 'raceline_floor_test.csv', 'race_line.json', 'start_pose.yaml', 'commands.txt', 'rebuild.json'):
         assert (result.out_dir / name).is_file(), name
 
 
@@ -250,12 +266,14 @@ def test_the_line_is_the_cleaned_one_not_the_raw_lap(tmp_path, good_inputs):
 
 
 def test_the_first_line_is_capped_and_the_faster_ones_are_not(tmp_path, good_inputs):
-    # oracle: invariant. The profile a car first races tops out at max_speed, whatever the corners allow.
-    result = _rebuild(tmp_path, good_inputs, max_speed=1.5)
+    # oracle: spec, default line uses car physics; only the separate floor-test copy is capped.
+    result = _rebuild(tmp_path, good_inputs)
     _, speed = racing_math.load_profiled_csv(str(result.out_dir / 'raceline_profiled.csv'))[:2]
-    assert speed.max() == pytest.approx(1.5, abs=1e-3)  # m/s
-    _, faster = racing_math.load_profiled_csv(str(result.out_dir / 'raceline_4p0.csv'))[:2]
-    assert faster.max() > 2.0
+    xy, floor = racing_math.load_profiled_csv(str(result.out_dir / 'raceline_floor_test.csv'))[:2]
+    assert speed.max() > 2.0  # m/s, this course has 13 m straights
+    np.testing.assert_allclose(floor, np.minimum(speed, 1.5), atol=1e-12, rtol=0)  # m/s
+    selected = racing_math.load_xy_csv(str(result.out_dir / 'raceline_profiled.csv'))
+    np.testing.assert_allclose(xy, selected, atol=1e-12, rtol=0)  # m
 
 
 def test_max_speed_is_honoured_when_changed(tmp_path, good_inputs):
@@ -280,6 +298,15 @@ def test_the_report_records_what_was_measured(tmp_path, good_inputs):
     assert report['odom_source'] == '/odom/imu'
     assert report['laps'] == result.lap_count == 2
     assert report['verdict']['mean_fit'] > 0.9
+    # oracle: spec, all three candidate verdicts survive into rebuild.json.
+    assert report['choice'] == 'recorded'
+    candidates = {c['source']: c for c in report['candidates']}
+    assert set(candidates) == {'recorded', 'min_curvature', 'min_time'}
+    assert candidates['recorded']['ok'] is True
+    assert candidates['recorded']['min_cone_m'] > report['parameters']['emergency_stop_distance']
+    assert candidates['recorded']['min_body_m'] >= report['parameters']['race_line_body_floor']
+    assert candidates['min_curvature']['ok'] is False
+    assert 'too narrow' in candidates['min_curvature']['reason']
 
 
 def test_commands_say_how_to_race_and_at_what_speed(tmp_path, good_inputs):
@@ -289,7 +316,8 @@ def test_commands_say_how_to_race_and_at_what_speed(tmp_path, good_inputs):
     assert not list(result.out_dir.glob('posegraph*'))
     assert f'race_launch.py run_dir:={result.out_dir}' in text
     assert '1.5 m/s' in text
-    assert 'raceline_2p5.csv' in text
+    assert 'profile:=raceline_floor_test.csv' in text
+    assert text.index('profile:=raceline_floor_test.csv') < text.rindex('race_launch.py run_dir:=')
 
 
 # --- refusals: review focus 1-3 --------------------------------------------------------------------
@@ -347,10 +375,15 @@ def test_an_existing_folder_is_never_overwritten(tmp_path, good_inputs):
 def test_commands_are_written_last(tmp_path, good_inputs, monkeypatch):
     # map_course's report picks the newest folder with a commands.txt, so a rebuild that dies part-way must
     # leave none, and be reported as no map rather than half of one.
-    def boom(*args, **kwargs):
-        raise RuntimeError('died part-way')
-    monkeypatch.setattr(rb.racing_math, 'compute_velocity_profile', boom)
-    with pytest.raises(RuntimeError, match='died part-way'):
+    import builtins
+    real_open = builtins.open
+
+    def fail_profile_write(path, mode='r', *args, **kwargs):
+        if str(path).endswith('raceline_profiled.csv') and 'w' in mode:
+            raise OSError('died part-way')
+        return real_open(path, mode, *args, **kwargs)
+    monkeypatch.setattr(builtins, 'open', fail_profile_write)
+    with pytest.raises(OSError, match='died part-way'):
         _rebuild(tmp_path, good_inputs)
     assert not (tmp_path / 'auto' / '20261030-120000-rebuilt' / 'commands.txt').exists()
 
@@ -444,7 +477,8 @@ def test_loader_says_there_is_nothing_with_no_scans(tmp_path, monkeypatch):
 def test_exit_zero_for_a_racing_folder(tmp_path, good_inputs, capsys):
     run = tmp_path / '20261030-120000'
     run.mkdir()
-    code = rb.main([str(run), '--out-root', str(tmp_path / 'auto')], load=lambda _: good_inputs)
+    code = rb.main([str(run), '--out-root', str(tmp_path / 'auto'),
+                    '--config', str(_recorded_base(tmp_path))], load=lambda _: good_inputs)
     assert code == 0
     assert 'GO' in capsys.readouterr().out
 
@@ -489,7 +523,7 @@ def test_a_run_outside_a_cars_data_folder_has_no_default_out_root(tmp_path, wher
 def test_main_saves_into_the_runs_own_car_by_default(tmp_path, good_inputs, capsys):
     run = tmp_path / 'data' / 'rb2' / 'racerbot_runs' / '20261030-120000'
     run.mkdir(parents=True)
-    code = rb.main([str(run)], load=lambda _: good_inputs)
+    code = rb.main([str(run), '--config', str(_recorded_base(tmp_path))], load=lambda _: good_inputs)
     assert code == 0
     saved = capsys.readouterr().out.split('Saved in: ')[1].strip()
     assert Path(saved).parent == tmp_path / 'data' / 'rb2' / 'racerbot_auto'
@@ -508,8 +542,57 @@ def test_main_refuses_a_run_with_no_car_and_no_out_root(tmp_path, capsys):
 
 
 def test_config_is_the_shipped_mapping_config():
-    # oracle: cited file. Lines are checked by the same limits a live mapping run uses.
-    config = rb.load_config()
-    shipped = yaml.safe_load(rb.CONFIG_PATH.read_text())
-    assert config == next(iter(shipped.values()))['ros__parameters']
-    assert config['profile_wall_clearance'] > 0.0
+    # oracle: spec, effective car calibration plus the unchanged controller stop distance.
+    from racerbot_car.layers import effective_config
+    for car, angle in [('rb1', .30), ('rb2', .38)]:
+        config = rb.load_config(car)
+        supervisor = effective_config('auto_map_race.yaml', 'auto_map_race_node', car)
+        controller = effective_config('pure_pursuit.yaml', 'pure_pursuit_node', car)
+        assert config == dict(supervisor, emergency_stop_distance=controller['emergency_stop_distance'])
+        assert config['profile_max_steering_angle'] == angle
+        assert config['profile_wall_clearance'] > 0.0
+
+
+def test_default_builder_selects_fastest_safe_candidate_and_writes_capped_copy(tmp_path):
+    # oracle: measured car 2 fixture; winner must have the minimum time among
+    # acceptable candidates, and the floor file must have identical geometry.
+    data = Path(__file__).resolve().parents[3] / 'src/pure_pursuit/test/data/course_20261106a'
+    grid = occupancy_map.OccupancyMap.from_yaml(data / 'map.yaml', inflate_cells=0)
+    raw = racing_math.load_xy_csv(str(data / 'raceline_raw.csv'))
+    built, tops = rb._write_lines(tmp_path, raw, grid, rb.load_config('rb2'))
+    assert built.ok, built.reason
+    eligible = [c for c in built.candidates if c.ok]
+    assert built.est_lap_s == min(c.est_lap_s for c in eligible)
+    assert built.source == 'min_time'
+    xy, speed = racing_math.load_profiled_csv(str(tmp_path / 'raceline_profiled.csv'))[:2]
+    floor_xy, floor = racing_math.load_profiled_csv(str(tmp_path / 'raceline_floor_test.csv'))[:2]
+    np.testing.assert_allclose(xy, built.xy, atol=1e-12, rtol=0)  # m
+    np.testing.assert_allclose(speed, built.speed, atol=1e-12, rtol=0)  # m/s
+    np.testing.assert_allclose(floor_xy, xy, atol=1e-12, rtol=0)  # m
+    np.testing.assert_allclose(floor, np.minimum(speed, 1.5), atol=1e-12, rtol=0)  # m/s
+    assert 1.5 < tops['raceline_profiled.csv'] <= 5.0
+
+
+def test_builder_refusal_never_writes_a_raceable_profile(tmp_path):
+    # oracle: geometry, an entirely occupied grid cannot contain a safe line.
+    angles = np.linspace(0, 2 * np.pi, 40, endpoint=False)
+    raw = np.column_stack((3 + 2 * np.cos(angles), 3 + 2 * np.sin(angles)))
+    grid = occupancy_map.OccupancyMap(np.full((120, 120), 100, np.int8), .05, 0., 0.)
+    built, tops = rb._write_lines(tmp_path, raw, grid, rb.load_config('rb1'))
+    assert not built.ok
+    assert tops == {}
+    assert not (tmp_path / 'raceline_profiled.csv').exists()
+    assert not (tmp_path / 'raceline_floor_test.csv').exists()
+    assert all(not candidate.ok for candidate in built.candidates)
+
+
+def test_run_car_identity_uses_recorded_car_before_current_car(tmp_path, monkeypatch):
+    # oracle: spec, rebuilding rb2's recording on rb1 uses rb2's physics.
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    run = tmp_path / 'data/rb2/racerbot_runs/time'
+    run.mkdir(parents=True)
+    assert rb.run_car_id(run) == 'rb2'
+    metadata = run / 'metadata'
+    metadata.mkdir()
+    (metadata / 'car.yaml').write_text('car_id: rb1\n')
+    assert rb.run_car_id(run) == 'rb1'

@@ -6,8 +6,10 @@
 map_course runs this after every run, so a run stopped early still keeps what it mapped. It takes the last
 /map in the bag, matches every scan against that map, and judges the map from the result. A line recorded from
 SLAM's live pose can run through the walls of the final map (docs/superpowers/specs/2026-10-30-slam-reliability.md),
-so the racing line here comes from the car's path on the map itself, through the same cleanup and limits a live
-mapping run uses (recorded_path.prepare, auto_map_race.yaml).
+so the racing line here is seeded from the car's path on the final map. The offline
+builder compares recorded, minimum-curvature and minimum-time candidates using
+the selected car's effective calibration. The selected profile uses the car's
+speed ceiling; raceline_floor_test.csv is the identical path capped at floor_test_speed.
 
 Writes <out-root>/<run name>-rebuilt/, never over an existing folder, with commands.txt last, so a rebuild that
 dies part-way leaves no folder that looks finished. A map refused by the verdict gets no raceline_profiled.csv,
@@ -33,11 +35,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(REPO_ROOT / 'src' / 'pure_pursuit'))
 from pure_pursuit import map_localize, occupancy_map, racing_math, recorded_path, run_commands  # noqa: E402
+from pure_pursuit.race_line import (  # noqa: E402
+    RaceLineConfig, build_race_line, write_race_line)
+from racerbot_car.identity import current_car_id  # noqa: E402
+from racerbot_car.layers import effective_config, effective_values, layered  # noqa: E402
 from run_analysis import runlog, slam_bag  # noqa: E402
 
 CONFIG_PATH = REPO_ROOT / 'src' / 'pure_pursuit' / 'config' / 'auto_map_race.yaml'
-DEFAULT_MAX_SPEED = 1.5  # m/s, the speed docs/writing-your-own-node.md's "low speed" first floor test means
-FASTER_LINES = ((2.5, 'raceline_2p5.csv'), (4.0, 'raceline_4p0.csv'))
 SCAN_STRIDE = 2  # of the 40 Hz scans, the same rate slam_toolbox's throttle_scans takes
 SEE_THROUGH_STRIDE = 5  # of the tracked scans: see-through is the slow part, and varies slowly
 SAME_FIT_MARGIN = 0.03  # fits closer than this are a tie: a few beams of noise
@@ -99,8 +103,28 @@ def load_inputs(run_dir) -> RunInputs:
                      slam_pose=np.asarray(slam.get('slam_pose', np.zeros((0, 4))), dtype=float).reshape(-1, 4))
 
 
-def load_config() -> dict:
-    return next(iter(yaml.safe_load(CONFIG_PATH.read_text()).values()))['ros__parameters']
+def load_config(car_id=None, supervisor_config=None) -> dict:
+    car_id = current_car_id() if car_id is None else car_id
+    if supervisor_config is None:
+        config = effective_config('auto_map_race.yaml', 'auto_map_race_node', car_id)
+    else:
+        config = effective_values(layered(str(supervisor_config), 'auto_map_race.yaml', car_id),
+                                  'auto_map_race_node')
+    config['emergency_stop_distance'] = effective_config(
+        'pure_pursuit.yaml', 'pure_pursuit_node', car_id)['emergency_stop_distance']
+    return config
+
+
+def run_car_id(run_dir: Path) -> str:
+    """Use recorded identity, then the car-partitioned path, else the current car."""
+    metadata = run_dir / 'metadata/car.yaml'
+    if metadata.is_file():
+        car = yaml.safe_load(metadata.read_text()).get('car_id')
+        if car:
+            return car
+    if run_dir.parent.name == 'racerbot_runs' and run_dir.parent.parent.parent.name == 'data':
+        return run_dir.parent.parent.name
+    return current_car_id()
 
 
 def _write_map(out_dir: Path, inputs: RunInputs, max_speckle_cells: int) -> None:
@@ -180,58 +204,52 @@ def _best_line(track, laps, grid, config):
     return best[1], best[2]
 
 
-def _write_lines(out_dir: Path, line, raw, max_speed: float, config: dict) -> dict:
-    """The profile files, and {file: top speed} of what each one asks of the car."""
+def _write_lines(out_dir: Path, raw, grid, config: dict):
+    """Build with the same physics and checks as map_course; keep every candidate verdict."""
     racing_math.save_xy_csv(str(out_dir / 'raceline_raw.csv'), raw)
-    seg_len = racing_math.compute_segment_lengths(line, closed=True)
-    curvature = racing_math.estimate_path_curvature(line, closed=True)
-    tops = {}
-    for speed_cap, name in ((max_speed, 'raceline_profiled.csv'), *FASTER_LINES):
-        speeds = racing_math.compute_velocity_profile(
-            seg_len, curvature, v_max=min(speed_cap, config['profile_max_speed']),
-            v_min=min(config['profile_min_speed'], speed_cap),
-            a_lat_max=config['profile_max_lateral_accel'], a_accel_max=config['profile_max_accel'],
-            a_brake_max=config['profile_max_brake'], closed=True,
-            smoothing_passes=config['profile_smoothing_passes'])
-        racing_math.save_profiled_csv(str(out_dir / name), line, speeds)
-        tops[name] = float(speeds.max())
-    return tops
+    line = build_race_line(grid, raw, RaceLineConfig.from_params(config))
+    tops = write_race_line(out_dir, line, config['floor_test_speed']) if line.ok else {}
+    return line, tops
 
 
-def _commands(out_dir: Path, run_name: str, verdict, message: str, raceable: bool, max_speed: float) -> str:
+def _commands(out_dir: Path, run_name: str, verdict, message: str, raceable: bool) -> str:
     rule = run_commands.RULE
     if not raceable:
         return '\n'.join([
             rule, f'NO RACING FOLDER FROM RUN {run_name}.', rule, '', f'  Why: {message}', '',
             f'  The map is kept in {out_dir} to look at. Map again:',
             '    ros2 run racerbot_launch map_course', rule, '']) + '\n'
-    lines = [f'Rebuilt from run {run_name}: {message}', '',
-             f'FIRST TRY: raceline_profiled.csv is capped at {max_speed:g} m/s. Wheels off the ground first, then the',
-             'floor. To go faster later, stop racing and copy a faster line over it:']
-    lines += [f'  cp {out_dir / name} {out_dir / "raceline_profiled.csv"}    # {cap:g} m/s'
-              for cap, name in FASTER_LINES]
-    return '\n'.join(lines) + '\n\n' + run_commands.commands_text(out_dir, posegraph=False)
+    return (f'Rebuilt from run {run_name}: {message}\n\n'
+            + run_commands.commands_text(out_dir, posegraph=False))
 
 
-def rebuild(run_dir, out_root, max_speed: float = DEFAULT_MAX_SPEED, load=load_inputs) -> RebuildResult:
+def rebuild(run_dir, out_root, max_speed: float | None = None, load=load_inputs,
+            car_id=None, supervisor_config=None) -> RebuildResult:
     """See the module docstring. Raises NothingToRebuild, and FileExistsError for an existing folder."""
     run_dir = Path(run_dir)
     out_dir = Path(out_root) / f'{run_dir.name}-rebuilt'
     if out_dir.exists():
         raise FileExistsError(f'{out_dir} already exists; rebuilds are never overwritten')
     inputs = load(run_dir)
-    config = load_config()
+    car_id = run_car_id(run_dir) if car_id is None else car_id
+    config = load_config(car_id, supervisor_config)
+    if max_speed is not None:
+        if not np.isfinite(max_speed) or max_speed <= 0:
+            raise ValueError('max_speed must be finite and positive')
+        config['profile_max_speed'] = min(max_speed, config['profile_max_speed'])
+        config['profile_min_speed'] = min(config['profile_min_speed'], config['profile_max_speed'])
     out_dir.mkdir(parents=True)
     _write_map(out_dir, inputs, config['map_despeckle_max_cells'])
 
-    grid = occupancy_map.OccupancyMap.from_yaml(str(out_dir / 'map.yaml'))
-    report = {'run': str(run_dir), 'odom_source': inputs.odom_source, 'scans': int(len(inputs.times))}
+    grid = occupancy_map.OccupancyMap.from_yaml(str(out_dir / 'map.yaml'), inflate_cells=0)
+    report = {'run': str(run_dir), 'car_id': car_id, 'parameters': config, 'candidates': [],
+              'odom_source': inputs.odom_source, 'scans': int(len(inputs.times))}
 
     def finish(verdict, laps, raceable, message):
         report.update(verdict=asdict(verdict), laps=laps, raceline_ok=raceable, message=message)
         (out_dir / 'rebuild.json').write_text(json.dumps(report, indent=2) + '\n')
         (out_dir / 'commands.txt').write_text(
-            _commands(out_dir, run_dir.name, verdict, message, raceable, max_speed))
+            _commands(out_dir, run_dir.name, verdict, message, raceable))
         return RebuildResult(out_dir, verdict, laps, raceable, message)
 
     try:
@@ -267,7 +285,16 @@ def rebuild(run_dir, out_root, max_speed: float = DEFAULT_MAX_SPEED, load=load_i
     if line is None:
         return finish(verdict, len(laps), False, f'the map is good, but none of its {len(laps)} lap(s) gave a line '
                                                  'the car fits and can steer.' + weaker)
-    report['speeds'] = _write_lines(out_dir, line, raw, max_speed, config)
+    built, report['speeds'] = _write_lines(out_dir, raw, grid, config)
+    report['candidates'] = [dict(
+        source=c.source, ok=c.ok, reason=c.reason,
+        **{key: getattr(c, key) if np.isfinite(getattr(c, key)) else None
+           for key in ('est_lap_s', 'min_cone_m', 'min_body_m', 'max_curvature')})
+        for c in built.candidates]
+    report['choice'] = built.source
+    if not built.ok:
+        return finish(verdict, len(laps), False, 'no acceptable racing line: ' + built.reason)
+    line = built.xy
     stop = track.poses[-1]
     run_commands.write_start_pose(out_dir, stop)
     off_line = float(np.min(np.hypot(line[:, 0] - stop[0], line[:, 1] - stop[1])))
@@ -294,8 +321,10 @@ def main(argv=None, load=load_inputs) -> int:
     parser.add_argument('--out-root', type=Path,
                         help='where the race folder goes (default: the racerbot_auto folder of the '
                              "run's own car, data/<car>/racerbot_auto beside data/<car>/racerbot_runs)")
-    parser.add_argument('--max-speed', type=float, default=DEFAULT_MAX_SPEED,
-                        help=f'top speed of raceline_profiled.csv in m/s (default {DEFAULT_MAX_SPEED})')
+    parser.add_argument('--max-speed', type=float,
+                        help='Optional lower speed ceiling (default: car effective profile_max_speed).')
+    parser.add_argument('--car', help='Car ID (default: recorded metadata or run path, then current car).')
+    parser.add_argument('--config', type=Path, help='Supervisor base YAML before car calibration.')
     args = parser.parse_args(argv)
     run_dir = args.run_dir.expanduser()
     out_root = args.out_root.expanduser() if args.out_root is not None else default_out_root(run_dir)
@@ -303,7 +332,8 @@ def main(argv=None, load=load_inputs) -> int:
         parser.error(f'{run_dir} is not in a data/<car>/racerbot_runs folder, so its car is unknown: '
                      'pass --out-root')
     try:
-        result = rebuild(run_dir, out_root, args.max_speed, load=load)
+        result = rebuild(run_dir, out_root, args.max_speed, load=load, car_id=args.car,
+                         supervisor_config=args.config)
     except NothingToRebuild as exc:
         print(f'NOTHING TO REBUILD: {exc}')
         return 2

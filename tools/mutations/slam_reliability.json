@@ -487,8 +487,8 @@
   },
   {
    "file": "src/racerbot_launch/scripts/map_course",
-   "old": "analysis = rebuild_step(recorded_run, output_directory(launch_argv), handle) and analysis",
-   "new": "rebuild_step(recorded_run, output_directory(launch_argv), handle)",
+   "old": "analysis = rebuild_step(recorded_run, output_directory(launch_argv), handle,\n                                        launch_argv) and analysis",
+   "new": "rebuild_step(recorded_run, output_directory(launch_argv), handle, launch_argv)",
    "tests": [
     "src/racerbot_launch/test/test_map_course.py"
    ]
@@ -503,8 +503,8 @@
   },
   {
    "file": "src/racerbot_launch/scripts/map_course",
-   "old": "text=True, errors='replace', start_new_session=True)",
-   "new": "text=True, errors='replace')",
+   "old": "result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,\n                                text=True, errors='replace', start_new_session=True)",
+   "new": "result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,\n                                text=True, errors='replace')",
    "tests": [
     "src/racerbot_launch/test/test_map_course.py"
    ]
@@ -687,8 +687,8 @@
   },
   {
    "file": "tools/run_analysis/rebuild_run.py",
-   "old": "v_max=min(speed_cap, config['profile_max_speed'])",
-   "new": "v_max=config['profile_max_speed']",
+   "old": "config['profile_max_speed'] = min(max_speed, config['profile_max_speed'])",
+   "new": "config['profile_max_speed'] = config['profile_max_speed']",
    "tests": [
     "tools/run_analysis/tests/test_rebuild_run.py"
    ]
@@ -719,8 +719,8 @@
   },
   {
    "file": "tools/run_analysis/rebuild_run.py",
-   "old": "if room > best[0]:\n            best = (room, prepared.xy, raw)",
-   "new": "if room > best[0]:\n            best = (room, raw, raw)",
+   "old": "tops = write_race_line(out_dir, line, config['floor_test_speed']) if line.ok else {}",
+   "new": "racing_math.save_xy_csv(str(out_dir / 'raceline_profiled.csv'), raw)\n    tops = {}",
    "tests": [
     "tools/run_analysis/tests/test_rebuild_run.py"
    ]

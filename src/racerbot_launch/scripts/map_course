@@ -22,9 +22,11 @@ run's scans against its last map and judges it (``rebuild:=false`` skips that), 
 run stopped with Ctrl+C keeps what it mapped, and the last thing on screen says
 whether the map is good enough to race on.
 
-A run that finishes by itself then just prints the commands. One stopped with Ctrl+C,
-or that fails, gets a short summary first. The in-depth reports take minutes, so they
-only run with ``analysis:=true``; the summary says how to run them later.
+After shutdown the offline racing-line builder compares candidates and writes the
+selected profile plus a capped floor-test copy. It can take minutes. On failure
+the node's profile is retained. A run stopped with Ctrl+C, or one that fails, gets
+a short summary before the commands. In-depth reports only run with
+``analysis:=true``; the summary says how to run them later.
 
 Hold LB the whole time the car should move. See docs/launchstart.md.
 """
@@ -154,7 +156,7 @@ def quick_report(run, parent, laps, wanted) -> str:
     return '\n'.join(lines) + '\n'
 
 
-def rebuild_step(run, parent, handle):
+def rebuild_step(run, parent, handle, argv=()):
     """Turn the recording into a racing folder. Returns False if the operator stopped it.
 
     Runs before the reports: it is what the operator came for, and its verdict and
@@ -172,7 +174,11 @@ def rebuild_step(run, parent, handle):
                                       else 'workspace rebuild script not found.'))
         return True
     command = [sys.executable, str(script), str(run), '--out-root', str(parent)]
-    emit('Checking the map against this run\'s scans (about 20 s; Ctrl+C skips it)...')
+    for arg in argv:
+        if arg.startswith('supervisor_config:='):
+            command += ['--config', os.path.expanduser(arg.split(':=', 1)[1])]
+    emit('Checking the map against this run\'s scans and building the racing line '
+         '(can take minutes; Ctrl+C skips it)...')
     try:
         # Its own session, so only the wrapper hears a second Ctrl+C at the terminal.
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -187,6 +193,48 @@ def rebuild_step(run, parent, handle):
     if result.returncode not in (0, 1, 2):
         emit(f'Map check failed (exit {result.returncode}); re-run: {shlex.join(command)}')
     return True
+
+
+def build_profile(run, argv, handle):
+    """Offline process boundary: replace only a successful run's profile, after shutdown."""
+    if run is None:
+        return
+    outputs = ('raceline_profiled.csv', 'raceline_floor_test.csv', 'race_line.json')
+    originals = {}
+    command = [sys.executable, '-m', 'pure_pursuit.race_line', '--run-dir', str(run)]
+    for arg in argv:
+        if arg.startswith('supervisor_config:='):
+            command += ['--config', os.path.expanduser(arg.split(':=', 1)[1])]
+    process = None
+    try:
+        print('Building the racing line offline (can take minutes; Ctrl+C keeps the node profile)...',
+              flush=True)
+        for name in outputs:
+            path = run / name
+            originals[path] = path.read_bytes() if path.is_file() else None
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, errors='replace', start_new_session=True)
+        output, _ = process.communicate()
+        handle.write(output)
+        if process.returncode:
+            raise RuntimeError(output.strip().splitlines()[-1] if output.strip()
+                               else f'builder exit {process.returncode}')
+        summary = next((line for line in reversed(output.splitlines()) if line.startswith('choice:')),
+                       'builder finished')
+        message = f'Race line: {summary}'
+    except (OSError, RuntimeError, KeyboardInterrupt) as exc:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait()
+        for path, original in originals.items():
+            if original is not None:
+                path.write_bytes(original)
+            elif path.is_file():
+                path.unlink()
+        message = f'Race line builder failed; kept the node\'s profile: {exc or "interrupted"}'
+    print(message, flush=True)
+    handle.write(message + '\n')
+    handle.flush()
 
 
 def analyse(run, log, handle):
@@ -291,9 +339,11 @@ def main(argv=None):
                 stopped = True
                 continue
         handle.flush()
+        build_profile(new_run(output_directory(launch_argv), started), launch_argv, handle)
         if switches['rebuild']:
             try:
-                analysis = rebuild_step(recorded_run, output_directory(launch_argv), handle) and analysis
+                analysis = rebuild_step(recorded_run, output_directory(launch_argv), handle,
+                                        launch_argv) and analysis
             except KeyboardInterrupt:
                 print('Map check interrupted.', flush=True)
                 analysis = False

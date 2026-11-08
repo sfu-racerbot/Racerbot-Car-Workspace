@@ -136,7 +136,9 @@ def test_cli_module_from_another_directory(run):
     import os
     import subprocess
     env = dict(os.environ)
-    env['PYTHONPATH'] = str(Path(editor.__file__).resolve().parents[1])
+    # Preserve sourced dependencies and the subprocess hardware-isolation hook.
+    env['PYTHONPATH'] = (str(Path(editor.__file__).resolve().parents[1])
+                         + os.pathsep + env.get('PYTHONPATH', ''))
     result = subprocess.run([sys.executable, '-m', 'pure_pursuit.apex_line_editor',
         '--run', str(run), '--apexes', str(run / 'apexes.json'),
         '--out', str(run / 'cli')], cwd='/tmp', env=env,

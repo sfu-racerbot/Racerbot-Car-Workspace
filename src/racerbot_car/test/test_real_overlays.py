@@ -12,6 +12,7 @@ CONFIGS = {name: ROOT / 'src/f1tenth_system/f1tenth_stack/config' / name
            for name in ('vesc.yaml', 'sensors.yaml', 'joy_teleop.yaml')}
 CONFIGS.update({f'{name}.yaml': ROOT / 'src' / name / 'config' / f'{name}.yaml'
                 for name in ('gap_follow', 'pure_pursuit', 'neural_racer', 'odom_calibration')})
+CONFIGS['auto_map_race.yaml'] = ROOT / 'src/pure_pursuit/config/auto_map_race.yaml'
 OVERLAYS = sorted(CARS.glob('*/calibration/*.yaml'))
 
 

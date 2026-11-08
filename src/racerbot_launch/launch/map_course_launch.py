@@ -299,7 +299,8 @@ def generate_launch_description(imu_probe=None):
         supervisor = Node(
             package='pure_pursuit', executable='auto_map_race_node',
             name='auto_map_race_node', output='screen',
-            parameters=[LaunchConfiguration('supervisor_config'), {
+            parameters=[*layered(LaunchConfiguration('supervisor_config').perform(context),
+                                 'auto_map_race.yaml', car_id), {
                 'mapping_laps': laps,
                 'max_mapping_laps': laps + 2,
                 'finish_after_mapping': True,

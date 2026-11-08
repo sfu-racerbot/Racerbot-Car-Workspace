@@ -11,8 +11,10 @@ import importlib.util
 import json
 import os
 import stat
+import sys
 import time
 from pathlib import Path
+import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'map_course'
 
@@ -462,6 +464,58 @@ class _FakeLaunch:
 
     def wait(self):
         return self.code
+
+
+@pytest.mark.parametrize('outcome', ['success', 'failed', 'cannot_start'])
+def test_builder_runs_after_shutdown_and_preserves_node_profile_on_failure(
+        tmp_path, monkeypatch, capsys, outcome):
+    # oracle: spec, offline process starts only after wait(), before commands print;
+    # a non-zero builder must preserve the exact node profile, even after a partial write.
+    maps = tmp_path / 'maps'
+    run = _run_dir(maps, 'node-run', 'RACE-COMMANDS')
+    profile = run / 'raceline_profiled.csv'
+    original = b'x,y,speed\n0,0,0.8\n'
+    profile.write_bytes(original)
+    shutdown = tmp_path / 'shutdown'
+
+    class Launch(_FakeLaunch):
+        def wait(self):
+            shutdown.touch()
+            return 0
+
+    launch = Launch([])
+    real_popen = mc.subprocess.Popen
+    seen = []
+
+    def popen(command, *args, **kwargs):
+        if command[:2] == ['ros2', 'launch']:
+            return launch
+        assert shutdown.exists(), 'builder started while mapping still ran'
+        assert command[1:3] == ['-m', 'pure_pursuit.race_line']
+        assert command[3:5] == ['--run-dir', str(run)]
+        assert command[5:] == ['--config', str(tmp_path / 'custom.yaml')]
+        seen.append(command)
+        if outcome == 'cannot_start':
+            raise OSError('builder unavailable')
+        script = (f'from pathlib import Path; Path({str(profile)!r}).write_text("built"); '
+                  f'Path({str(run / "raceline_floor_test.csv")!r}).write_text("partial floor"); '
+                  'print("choice: recorded; chosen recorded: 12.000 s"); '
+                  f'raise SystemExit({1 if outcome == "failed" else 0})')
+        return real_popen([sys.executable, '-c', script], *args, **kwargs)
+
+    monkeypatch.setattr(mc.subprocess, 'Popen', popen)
+    monkeypatch.setattr(mc, 'missing_drivers', lambda: [])
+    monkeypatch.setattr(mc, '_running', lambda _: False)
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
+    assert mc.main([f'output_directory:={maps}', 'rebuild:=false',
+                    f'supervisor_config:={tmp_path / "custom.yaml"}']) == 0
+    text = capsys.readouterr().out
+    assert len(seen) == 1
+    assert profile.read_bytes() == (b'built' if outcome == 'success' else original)
+    assert (run / 'raceline_floor_test.csv').exists() is (outcome == 'success')
+    summary = 'Race line: choice:' if outcome == 'success' else "kept the node's profile"
+    assert summary in text
+    assert text.index(summary) < text.index('RACE-COMMANDS')
 
 
 def _only_the_launch_is_fake(monkeypatch, launch):

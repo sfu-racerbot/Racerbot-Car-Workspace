@@ -107,7 +107,8 @@ def generate_launch_description():
 
     * ``run_dir:=<dir>`` -- a run directory written by a mapping run
       (``ros2 run racerbot_launch map_course``, or auto_map_race_launch.py).
-      Uses that run's map.yaml and raceline_profiled.csv, and finds the car
+      Uses that run's map.yaml and the selected profile (raceline_profiled.csv
+      by default; profile:=raceline_floor_test.csv for the first floor test), and finds the car
       from LiDAR anywhere on the open course facing the racing direction.
       With start:=start_pose, seed at the mapping stop instead (map origin
       if no start pose was recorded). This is what map_course prints.
@@ -145,6 +146,9 @@ def generate_launch_description():
         'run_dir', default_value='',
         description='A mapping run\'s directory (map.yaml + raceline_profiled.csv). '
                     'Empty: use localize.yaml\'s map, waypoints_file and an RViz seed.')
+    profile_arg = DeclareLaunchArgument(
+        'profile', default_value='raceline_profiled.csv',
+        description='Waypoint CSV in run_dir; use raceline_floor_test.csv for the first floor test.')
     steering_law_arg = DeclareLaunchArgument(
         'steering_law', default_value=default_steering_law,
         description='pure_pursuit (default), stanley, lqr or mpc.')
@@ -176,7 +180,7 @@ def generate_launch_description():
             waypoints = LaunchConfiguration('waypoints_file').perform(context)
         else:
             map_yaml = os.path.join(run_dir, 'map.yaml')
-            waypoints = os.path.join(run_dir, 'raceline_profiled.csv')
+            waypoints = os.path.join(run_dir, LaunchConfiguration('profile').perform(context))
             missing = [path for path in (map_yaml, waypoints) if not os.path.isfile(path)]
             if missing:
                 raise RuntimeError(
@@ -235,5 +239,5 @@ def generate_launch_description():
         return localize + [seeder, RegisterEventHandler(
             OnProcessExit(target_action=seeder, on_exit=after_seed))]
 
-    return LaunchDescription([waypoints_arg, run_dir_arg, steering_law_arg, seed_arg, start_arg,
+    return LaunchDescription([waypoints_arg, run_dir_arg, profile_arg, steering_law_arg, seed_arg, start_arg,
                               OpaqueFunction(function=layers)])

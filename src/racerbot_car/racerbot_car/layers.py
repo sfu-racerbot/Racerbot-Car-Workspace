@@ -6,6 +6,7 @@ from pathlib import Path
 from . import guards, hardware, identity, paths, profile
 
 SHARED_CONFIGS = {
+    'auto_map_race.yaml': 'src/pure_pursuit/config/auto_map_race.yaml',
     'vesc.yaml': 'src/f1tenth_system/f1tenth_stack/config/vesc.yaml',
     'sensors.yaml': 'src/f1tenth_system/f1tenth_stack/config/sensors.yaml',
     'joy_teleop.yaml': 'src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml',
