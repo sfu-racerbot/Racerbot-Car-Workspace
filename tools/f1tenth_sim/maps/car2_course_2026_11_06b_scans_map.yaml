@@ -1,0 +1,9 @@
+free_thresh: 0.196
+image: car2_course_2026_11_06b_scans.png
+negate: 0
+occupied_thresh: 0.65
+origin:
+- -5.220897575802746
+- -1.442765904428833
+- 0.0
+resolution: 0.05000000074505806

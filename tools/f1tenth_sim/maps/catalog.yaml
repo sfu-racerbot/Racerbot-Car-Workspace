@@ -31,6 +31,17 @@ car2_course_2026_11_06b:
   width_median_m: 1.4
   width_min_m: 0.98
   width_p10_m: 1.1
+car2_course_2026_11_06b_scans:
+  import_command: python3 tools/run_analysis/scan_map.py data/rb2/racerbot_runs/20261106-184753
+    --map data/rb2/racerbot_auto/20261106-184753-rebuilt --out tools/f1tenth_sim/maps/car2_course_2026_11_06b_scans
+    --check data/rb2/racerbot_runs/20261106-184753; the centerline links to car2_course_2026_11_06b's
+  lap_length_m: 21.38
+  source: 'car 2 course, 2026-11-06 evening: walls rebuilt from run 184753. This is
+    course geometry, not a plant fit; 184753 remains held out of every plant fit.
+    In-sample wall offsets: contact +1.6 cm, beam +2.6 cm, against +4.8 cm before.'
+  width_median_m: 1.4
+  width_min_m: 0.98
+  width_p10_m: 1.1
 circular_obs:
   import_command: python3 tools/f1tenth_sim/track_import.py tools/f1tenth_sim/maps/sources/circularTrack.yaml
     --name circular_obs --source 'sfu-racerbot/racerbot_a src/maps/circularTrack.yaml

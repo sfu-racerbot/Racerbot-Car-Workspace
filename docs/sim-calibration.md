@@ -2,10 +2,12 @@
 
 > **Who this is for:** anyone about to trust a simulator result for this car, or about to measure the car again on a new floor.
 > **Read first:** [course-analysis.md](course-analysis.md), for how a recorded run is located against a map. [simulator.md](simulator.md) for what the simulator is.
-> **You'll be able to:** run the simulator on the measured floor of 2026-10-30, check it against the real car yourself, and measure a new floor the same way.
+> **You'll be able to:** select a measured floor, check it against the real car, and measure a new floor the same way.
 > **Time:** 15 minutes to read. Re-running the validation takes about 10 minutes.
 
-The simulator now has a measured **floor profile**: a named set of numbers taken from real runs on one floor with one set of tyres. On the run it was checked against, it laps within 1% of the real car and drives the same bend the same way.
+The simulator has measured **floor profiles**: named sets of numbers taken from real runs on one floor with one set of tyres. The 2026-10-30 profile laps within 1% of its validation run.
+
+**2026-11-06:** the [new car 2 profile](#car-2-floor-of-2026-11-06) improves held-out steering and speed replay, but still wedges on course 06a in five of six seeds. The highlights and tables below describe 2026-10-30 unless labelled otherwise.
 
 ## Highlights
 
@@ -191,6 +193,187 @@ The plant judges contact on the second layer when a track has one.
 - **More bend flicker than real.** The simulator switches between `gap_follow` and `corner_fallback` 3.5 times per pass at the bottom-right bend, against 2.7.
 - **LiDAR latency below one tick.** Real scans line up with the gyro to within 10 ms; the simulator delays them one 25 ms tick.
 - **Anything about another floor.** The grip curve is this floor and these tyres on 2026-10-30.
+
+## Car 2 floor of 2026-11-06
+
+Select `--floor sfu_course_2026_11_06` for car 2's floor and tyres that day. This profile improves replay of real commands and completes every course 06b simulation, but **does not yet reproduce the reliable 06a hairpin turn**.
+
+### Runs and measurement
+
+The plant (the model of the car's response to commands) was fitted on three course 06a runs. Entire recordings were held out for validation:
+
+| Role | Run | Controller recorded in `metadata/params` |
+|---|---|---|
+| Fit, 06a | `20261106-163633` | `gap_follow_node` |
+| Fit, 06a | `20261106-164401` | `pure_pursuit_node` |
+| Fit, 06a | `20261106-170803` | `gap_follow_node` |
+| Held out, 06a | `20261106-171030` | `gap_follow_node` |
+| Held out, 06b | `20261106-184753` | `gap_follow_node` through `auto_map_race_node`, mapping only |
+
+**06b has only one held-out run and no fit run.** Grip, steering response, speed response, odometry and LiDAR noise describe the car on that floor, not its layout. Fitting those parameters on 06a therefore leaves 06b as an independent different-course check of the plant.
+
+Run `185425` was excluded: it has pure-pursuit metadata but no LB-held samples or nonzero `/drive` speed, and its last bag reports truncation. Run `181002` used a different layout. No lap from `184753` was used to fit the plant.
+
+`loc.py` located the five selected runs against the supplied rebuilt maps. `car_measure.py` measured only the three fit runs; the adjacent [`sfu_course_2026_11_06_measurement.json`](../tools/f1tenth_sim/sim_fidelity/sfu_course_2026_11_06_measurement.json) preserves its output.
+
+| Measurement | Fit-only result | Profile uses |
+|---|---|---|
+| Grip, 2.5–3 asked | 2.441 m/s² achieved; left 2.496, right 1.650 | Symmetric curve, replay-selected scale 1.05 |
+| Grip, 3–3.5 / 3.5–4 / 4–5 asked | 2.596 / 2.870 / 3.051 m/s² achieved | Measured medians at bin midpoints, scaled and capped at the request |
+| Lateral grip, braking below −3 / steady ±0.5 m/s² | 2.779 / 2.647 m/s² | No longitudinal grip coupling |
+| Wheel speed / scan-to-map true speed | 1.032345 | Same odometry scale |
+| Straight steering trim | +0.006443 rad | Same trim |
+| Simplified servo replay | 4 ticks, gain 15/s, rate 2.5 rad/s | Full plant replay selects 3 ticks; gain and rate retained |
+| True-speed loop replay | Gains 7/s each way; acceleration 4, braking 3 m/s²; delay 4 ticks | Same speed loop; replay RMS 0.174 m/s |
+| Hard stops | 2.63–2.66 m/s wheel speed: 0.80 s and 1.00–1.06 wheel-metres; 4.74 m/s: 1.375 s, 3.438 wheel-metres | Recorded evidence, not independent wall-distance measurements |
+
+The whole-run `--lidar` report mixes several parked positions and gives unusably large noise estimates. A single stable window in fit run `163633`, timestamps 1794011831.129–1794011887.418, contains 2,250 scans. Its noise is 2.98 mm below 1 m and 11.87 mm beyond 4 m, with no rear-right self hits.
+
+The window is the longest contiguous stretch below 0.01 m/s wheel speed, split whenever the median adjacent-scan range change exceeds 0.02 m. Applying `car_measure.scan_statistics` gives the committed [`stable_lidar` fixture](../tools/f1tenth_sim/sim_fidelity/sfu_course_2026_11_06_stable_lidar.json). The profile uses 3 mm base noise, the same sensor's earlier 1.5 mm/m range slope, zero dropouts and no self-hit beams.
+
+### Fit and held-out replay
+
+`validate_calibration.py fit-plant` replayed real commands against the gyro, using the first 60 s from the first trusted sample of each run. Selection used mean fit-run yaw-rate RMS only. The speed loop came from true-speed replay, before steering and grip selection.
+
+A 90-candidate grid compared grip scales 0.95–1.35, linkage slopes 0.90–1.15 and delays 2–4 ticks. A 45-candidate refinement selected **grip scale 1.05, linkage slope 1.05 and 3 ticks of steering delay**. The [`replay` fixture](../tools/f1tenth_sim/sim_fidelity/sfu_course_2026_11_06_replay.json) records the axes, best candidates and scores.
+
+The central linkage is `wheel_angle = 1.05 × command + 0.006443`, up to ±0.349 rad commands. It retains the October circle measurements at full stick and the servo endpoints. Its +0.349 command gives an **effective** wheel angle of 0.372893 rad in this plant, rather than the binned table's 0.344420 rad.
+
+That effective linkage compensates the plant's remaining tyre dynamics. It is not a direct measurement of rack geometry. As with the October floor, the binned linkage was diagnostic evidence, not the fitting target.
+
+| Replay measure | Before: 10-30 floor | After: 11-06 floor |
+|---|---:|---:|
+| Fit yaw-rate RMS | 0.1097 rad/s | 0.0993 rad/s |
+| Fit speed RMS | 0.1993 m/s | 0.1806 m/s |
+| Held-out mean yaw-rate RMS | 0.1213 rad/s | 0.1032 rad/s |
+| Held-out mean speed RMS | 0.2259 m/s | 0.2027 m/s |
+| 06a held-out yaw-rate RMS | 0.1345 rad/s | 0.1189 rad/s |
+| 06a held-out speed RMS | 0.2786 m/s | 0.2365 m/s |
+| 06b held-out yaw-rate RMS | 0.1081 rad/s | 0.0874 rad/s |
+| 06b held-out speed RMS | 0.1732 m/s | 0.1689 m/s |
+
+### Wall geometry and lap scores
+
+The existing 06a scan track passed the wall check and was retained. Course 06b needed a new track, `car2_course_2026_11_06b_scans`, built with `scan_map.py` defaults from `184753`. Its centreline links to the original track's centreline.
+
+**Wall geometry is the course's shape, not a plant parameter.** Building it from the held-out run does not contaminate the held-out check of the plant: grip, steering and speed response were fitted on 06a runs only. The 06b wall check itself is in-sample, so it is not an independent validation of map geometry.
+
+The same check as `scan_map.py --check` used every 25th eligible scan and every fourth beam. Positive median error means the simulated wall is too close:
+
+| Track | Contact-wall median error | Beam-wall median error |
+|---|---:|---:|
+| Existing 06a `_scans`, held-out `171030` | −0.3 cm | +1.8 cm |
+| Original 06b, `184753` | +4.8 cm | +4.8 cm |
+| New 06b `_scans`, `184753`, in-sample | +1.6 cm | +2.6 cm |
+
+The new 06b layers reduce the bias, though they remain slightly above October's +1.0 / +2.4 cm reference. The original `car2_course_2026_11_06b` files are unchanged.
+
+Both profiles drove each held-out run's own parameters with `--params-from --launched-code`, steering cap **0.349 rad**, six seeds 12345–12350, two workers and 115 s per seed. Before/after use identical tracks and starts. Lap times are flying laps, excluding each seed's first lap.
+
+| Course and run | Real flying median | Before: 10-30 floor | After: 11-06 floor |
+|---|---:|---:|---:|
+| 06a, `171030`, speed cap 5.0 m/s | 11.50 s, 8 laps | No flying lap | 13.84 s, 16 laps, range 12.82–15.10 |
+| 06a, seeds eventually wedged | | 6/6 | 5/6 |
+| 06b, `184753`, speed cap 3.5 m/s | 9.14 s, 2 laps | 8.92 s, 66 laps | 9.33 s, 66 laps, range 9.20–9.54 |
+| 06b, seeds eventually wedged | | 0/6 | 0/6 |
+| Simulated seeds with body contact, each course | | 0/6 | 0/6 |
+
+The current localisation and scoring give 11.505 s median for 06a, versus the earlier 11.58 s real-run reference. The rounded flying times are 11.97, 11.29, 11.57, 11.44, 11.62, 11.71, 11.37 and 11.39 s. Both references are substantially faster than the new simulation; neither was a fitting target.
+
+**Hairpin verdict: partially improved, still not reproduced reliably.** Four seeds complete at least one lap at 0.349 rad, but only seed 12346 runs all 115 s without wedging.
+
+Five seeds stop near x=9.37–9.68 m, y=−0.32 to −0.03 m on the hairpin approach. Completed laps are 20% slower than the current real median, so the successful laps alone must not be treated as a clean validation.
+
+Contact comes from `FidelityPlant.chassis_contact_steps`, the harness's body-versus-wall check, never Gym's collision flag. The real-card tool's zero contact field is not an independent body-clearance measurement of the real car.
+
+The 06a start is the supplied `9.43,1.28,101.5` past the hairpin. For 06b, the first located sample at or beyond one lap of progress in the longest LB hold is timestamp **1794019693.186**: **`0.5438070161,0.2136068187,349.25150385`** (x, y, yaw in degrees).
+
+That 06b pose starts the first flying lap, found with `Course.project`, `Course.unwrap` and the run map's `raceline_raw.csv`. It is not the end-of-mapping `start_pose.yaml`. The simulator begins at rest at that pose and excludes its first lap.
+
+### Reproduce the scores
+
+**Dev-box terminal, from this repository's root folder; no drivers required.** The source runs and rebuilt maps live in the parent checkout on this box. These commands write only to scratch space; adjust `BASE` if those read-only recordings are elsewhere.
+
+```bash
+BASE=/home/bryan/racerbot-ws/.claude/worktrees/map-racer-faster-than-gap/data/rb2
+R=$BASE/racerbot_runs; M=$BASE/racerbot_auto
+O=.oc-runs/sim-floor-06-recheck
+export RB_NO_QUEUE=1 RB_WS="$PWD"
+rb python3 tools/run_analysis/loc.py "$R/20261106-163633" "$R/20261106-164401" \
+    "$R/20261106-170803" "$R/20261106-171030" --map "$M/20261106-164002-rebuilt" --out "$O/loc" --workers 2
+rb python3 tools/run_analysis/loc.py "$R/20261106-184753" \
+    --map "$M/20261106-184753-rebuilt" --out "$O/loc" --workers 2
+rb python3 tools/run_analysis/car_measure.py "$R/20261106-163633" "$R/20261106-164401" \
+    "$R/20261106-170803" --loc "$O/loc" --json "$O/fit.json"
+```
+
+**Working when:** the measurement lists exactly the three fit runs and wheel-over-true near 1.0323. To replay a locked profile without another parameter search, use an empty grid; repeat with the 10-30 floor for the before column:
+
+```bash
+rb env RACERBOT_CAR=rb2 python3 tools/f1tenth_sim/validate_calibration.py fit-plant \
+    "$R/20261106-171030" "$R/20261106-184753" --loc "$O/loc" \
+    --floor sfu_course_2026_11_06 --grid '{}' --workers 2 --out "$O/replay.json"
+rb python3 tools/f1tenth_sim/validate_calibration.py real "$R/20261106-171030" \
+    --line "$M/20261106-164002-rebuilt/raceline_raw.csv" --loc "$O/loc" --out "$O/06a-real.json"
+rb python3 tools/f1tenth_sim/validate_calibration.py real "$R/20261106-184753" \
+    --line "$M/20261106-184753-rebuilt/raceline_raw.csv" --loc "$O/loc" --out "$O/06b-real.json"
+rb env RACERBOT_CAR=rb2 python3 tools/f1tenth_sim/validate_calibration.py sim \
+    --params-from "$R/20261106-171030" --launched-code --floor sfu_course_2026_11_06 \
+    --track car2_course_2026_11_06a_scans --line "$M/20261106-164002-rebuilt/raceline_raw.csv" \
+    --start 9.43,1.28,101.5 --seeds 6 --workers 2 --seconds 115 --out "$O/06a-after.json"
+rb env RACERBOT_CAR=rb2 python3 tools/f1tenth_sim/validate_calibration.py sim \
+    --params-from "$R/20261106-184753" --launched-code --floor sfu_course_2026_11_06 \
+    --track car2_course_2026_11_06b_scans --line "$M/20261106-184753-rebuilt/raceline_raw.csv" \
+    --start 0.543807016147227,0.21360681867323164,349.25150384970954 \
+    --seeds 6 --workers 2 --seconds 115 --out "$O/06b-after.json"
+rb python3 tools/f1tenth_sim/validate_calibration.py table \
+    real="$O/06b-real.json" after="$O/06b-after.json"
+```
+
+**Working when:** replay prints yaw RMS near 0.103 rad/s and speed RMS near 0.203 m/s; the final table prints a 9.33 s simulated median. The 06a run should reproduce the reported wedges, not six clean seeds. Warnings for empty sector bins are expected; those bins are not used in these verdicts.
+
+To rebuild 06b's layers in scratch space and repeat its in-sample wall check, use the same terminal:
+
+```bash
+rb python3 tools/run_analysis/scan_map.py "$R/20261106-184753" \
+    --map "$M/20261106-184753-rebuilt" --loc "$O/loc" --out "$O/06b-walls" \
+    --check "$R/20261106-184753"
+```
+
+**Working when:** contact and beam medians print +0.016 m and +0.026 m. The committed [`laps` fixture](../tools/f1tenth_sim/sim_fidelity/sfu_course_2026_11_06_laps.json) contains the scores, per-seed outcomes, start selection and wall checks. No raw bags or localisation arrays are committed.
+
+### Limitations
+
+- **06a still fails the intended hairpin validation.** Better open-loop replay has not made the closed-loop trajectory match. Steering and grip remain symmetric; the measured left/right difference is large in some bins. No parameter was retuned toward a lap time or a successful seed.
+- **Effective linkage is model-dependent.** It absorbs remaining tyre-model error. Commands beyond ±0.349 rad use earlier circle measurements and are unvalidated on this day's floor.
+- **Braking is fitted to true-speed replay, not a new wall-measured stop.** The tool's synthetic 5.41 m/s wheel-speed stop grows from 3.38 to 5.02 m with the new speed loop. Neither figure is a validation against a 6 November stop from that speed; the fit run's largest recorded stop starts at 4.74 m/s on the wheels.
+- **06b has two real flying laps.** Its 66 simulated laps reuse one measured layout; this is a plant cross-check, not broad evidence across floors. Wall residuals remain centimetre-scale and were checked on the same run used to build the walls.
+- **LiDAR texture and mounting effects remain approximate.** The noise slope is retained from the same sensor's October measurement. The 10-30 bend-flicker box does not cover these courses, so its empty flicker scores are omitted.
+- **Mass, inertia and cornering stiffness retain the base calibration's assumptions.** This profile does not turn those defaults into measurements.
+
+### Regression checks and deliberate breaks
+
+`test_floor_2026_11_06.py` reconstructs the grip curve and linkage from recorded measurements and replay selection, checks every override's source, and drives the actual plant at a crawl. The new contact layer is checked against an independently loaded image distance transform.
+
+| Test name after `test_november_` | Break observed to fail |
+|---|---|
+| `split_and_sources_exclude_both_validation_runs` | Added held-out `184753` to the fit tuple |
+| `grip_reconstructs_the_measured_bins_and_replay_scale` | Made `with_floor` return the plain base; separately raised grip scale by 10% |
+| `linkage_and_delay_follow_gyro_replay_not_binned_rack` | Made `with_floor` return the plain base |
+| `speed_loop_and_odometry_follow_true_speed_measurement` | Same plain-base stub |
+| `sensing_and_braking_coupling_have_measured_sources` | Same plain-base stub |
+| `floor_reaches_the_plant_and_new_track_contact_layer` | Same plain-base stub; plant rack settled at 0.100 instead of 0.111443 rad |
+
+Each break failed under both car selections in the tool test runner. All breaks were reverted before the final suite run.
+
+**Dev-box terminal, repository root:** the full simulator suite compares the mirror with a real [node](glossary.md#node), a running ROS program, so `drive_intent` must be built in this checkout's overlay. `rb` sources that overlay and isolates the ROS graph.
+
+```bash
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb colcon build --symlink-install --packages-select drive_intent
+RB_NO_QUEUE=1 RB_WS=$(pwd) rb python3 -m pytest tools/f1tenth_sim/tests/ -q -p no:cacheprovider
+```
+
+**Working when:** the build finishes with one package and pytest reports **572 passed**, including all 12 new cases (six tests under two car selections). Without that local build, two existing node-parity cases fail to import `drive_intent`; no test was changed to bypass them.
 
 ## Measuring a new floor
 
