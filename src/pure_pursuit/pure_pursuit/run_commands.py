@@ -128,7 +128,11 @@ def commands_text(run_dir, raceline_ok: bool = True, map_ok: bool = True,
         'Only with start:=start_pose -- check the car is on the mapping stop. This must print GO:',
         f'  ros2 run pure_pursuit check_start --ros-args -p run_dir:={run_dir}',
         '',
-        'Terminal 2 -- pick ONE, then hold LB to drive:',
+        'Terminal 2 -- first check with wheels off the ground, then floor test at 1.5 m/s:',
+        f'  {race_command(run_dir)} profile:=raceline_floor_test.csv',
+        'If raceline_floor_test.csv is missing, the builder did not finish; rebuild before floor testing.',
+        '',
+        'After the floor test, stop that launch. Pick ONE default-speed command, then hold LB to drive:',
     ]
     for law, description in STEERING_LAWS:
         lines.append(f'  # {description}')

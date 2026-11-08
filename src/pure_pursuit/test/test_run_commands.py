@@ -133,3 +133,12 @@ def test_seeder_parameters_rejects_unknown_start(tmp_path):
     # Interface spec: other start modes raise ValueError.
     with pytest.raises(ValueError, match='start must be one of'):
         run_commands.seeder_parameters(tmp_path, 'elsewhere', 0.26, 0.0)
+def test_floor_test_precedes_default_speed_commands(tmp_path):
+    # oracle: spec, a capped floor test is the first race command for either car.
+    from pure_pursuit.run_commands import commands_text, race_command
+    text = commands_text(tmp_path)
+    floor = race_command(tmp_path) + ' profile:=raceline_floor_test.csv'
+    commands = [line.strip() for line in text.splitlines() if line.strip().startswith('ros2 launch racerbot_launch race_launch.py')]
+    assert commands[0] == floor
+    assert commands[1] == race_command(tmp_path)
+    assert 'wheels off the ground' in text
