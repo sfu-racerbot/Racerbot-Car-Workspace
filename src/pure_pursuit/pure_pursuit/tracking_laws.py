@@ -18,6 +18,7 @@ other laws -- and this module's tests -- work without it.
 
 import math
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 
@@ -97,7 +98,7 @@ class TrackingLaw(Protocol):
         ...
 
 
-LAW_NAMES = ('pure_pursuit', 'stanley', 'lqr', 'mpc')
+LAW_NAMES = ('pure_pursuit', 'stanley', 'lqr', 'mpc', 'delay_lqr')
 
 
 def _require_finite(*values):
@@ -882,6 +883,236 @@ class MpcLaw:
 
 
 # ---------------------------------------------------------------------------
+# Delay LQR (docs/steering-laws.md#delay-lqr): predict the car's delays out,
+# then correct the error it will have when the command acts.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DelayLqrParams:
+    # The weights, as LqrParams. Judged in the simulator (docs/steering-laws.md).
+    q_lateral: float = 1.0
+    q_heading: float = 1.0
+    r_steer: float = 1.0
+    v_grid_max: float = 6.0          # m/s, top of the gain schedule
+    # The steering chain, as the simulator models car 2 on the 2026-11-06 floor
+    # (tools/f1tenth_sim/sim_fidelity/calibration.py: pose_delay_ticks 2,
+    # steering_delay_ticks 3, steering_servo_gain 15, steering_rate_max 2.5 at
+    # 40 Hz). These belong to a car. Car 1's are not measured.
+    sensing_delay: float = 0.05      # s: the pose is 2 ticks old
+    actuation_delay: float = 0.075   # s: 3 ticks of command transport before the servo
+    servo_gain: float = 15.0         # 1/s: the servo's proportional position loop
+    servo_rate: float = 2.5          # rad/s: the servo's slew ceiling
+
+
+class ServoLqrGainTable:
+    """Speed-scheduled LQR gain for the error model with the steering servo as a state.
+
+    The state is x = [e, theta, w]: cross-track error, heading error, and
+    w = delta - atan(L kappa), the servo's wheel angle less the feedforward. The
+    input is the command's offset from the feedforward. The servo takes one
+    Euler step per tick, delta += g dt (u - delta), which is what the simulator's
+    servo does, so with a = g dt:
+
+        A(v) = [[1, v dt, 0], [0, 1, v dt / L], [0, 0, 1 - a]]     B = [0, 0, a]'
+
+    The gain minimises sum(x' Q x + r u^2) with Q = diag(q_lateral, q_heading, 0)
+    through the discrete algebraic Riccati equation, on LqrGainTable's speed
+    grid. Solved once at construction.
+    """
+
+    V_FLOOR = 0.1   # m/s; the model is uncontrollable at v = 0
+    V_STEP = 0.05   # m/s grid spacing
+
+    def __init__(self, q_lateral: float, q_heading: float, r_steer: float,
+                 dt: float, wheelbase: float, servo_gain: float, v_grid_max: float):
+        import scipy.linalg  # local import: only needed at construction
+
+        for name, value in (('delay_lqr.q_lateral', q_lateral),
+                            ('delay_lqr.q_heading', q_heading),
+                            ('delay_lqr.r_steer', r_steer)):
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError(f'{name} must be > 0, got {value}')
+        if not (math.isfinite(v_grid_max) and v_grid_max > self.V_FLOOR):
+            raise ValueError(
+                f'delay_lqr.v_grid_max must be > {self.V_FLOOR}, got {v_grid_max}')
+        if not (math.isfinite(dt) and dt > 0.0):
+            raise ValueError(f'delay_lqr dt must be > 0, got {dt}')
+        if not (math.isfinite(wheelbase) and wheelbase > 0.0):
+            raise ValueError(f'wheelbase must be > 0, got {wheelbase}')
+        if not (math.isfinite(servo_gain) and 0.0 < servo_gain * dt <= 1.0):
+            raise ValueError(
+                f'delay_lqr.servo_gain * dt must be in (0, 1], got {servo_gain * dt}')
+
+        self.dt = dt
+        self.wheelbase = wheelbase
+        self.servo_step = servo_gain * dt
+        self.Q = np.diag([q_lateral, q_heading, 0.0])
+        self.R = np.array([[r_steer]])
+
+        speeds = np.arange(self.V_FLOOR, v_grid_max + 1e-9, self.V_STEP)
+        self._grid_speeds = speeds
+        gains = np.zeros((len(speeds), 3))
+        for i, v in enumerate(speeds):
+            A, B = self._ab(v)
+            P = scipy.linalg.solve_discrete_are(A, B, self.Q, self.R)
+            K = np.linalg.solve(self.R + B.T @ P @ B, B.T @ P @ A)
+            gains[i] = K[0]
+        self._gains = gains
+
+    def _ab(self, v: float):
+        v = max(v, self.V_FLOOR)
+        a = self.servo_step
+        A = np.array([[1.0, v * self.dt, 0.0],
+                      [0.0, 1.0, v * self.dt / self.wheelbase],
+                      [0.0, 0.0, 1.0 - a]])
+        B = np.array([[0.0], [0.0], [a]])
+        return A, B
+
+    def gain_at(self, v: float) -> np.ndarray:
+        """The 1x3 feedback gain K at speed v, linearly interpolated."""
+        v = float(np.clip(v, self._grid_speeds[0], self._grid_speeds[-1]))
+        n = len(self._grid_speeds)
+        pos = (v - self._grid_speeds[0]) / self.V_STEP
+        lo = int(np.clip(math.floor(pos), 0, n - 1))
+        hi = min(lo + 1, n - 1)
+        t = 0.0 if hi == lo else (pos - lo) / (hi - lo)
+        return self._gains[lo] + t * (self._gains[hi] - self._gains[lo])
+
+
+class DelayLqrLaw:
+    """Steer for the command's effect, not the pose's age.
+
+    A command computed now acts on the wheels `sensing_delay + actuation_delay`
+    seconds later: the pose it is computed from is already that old, and the
+    command then waits in transport before the servo follows it. The law holds
+    every quantity that delay needs, so it predicts those ticks out instead of
+    correcting the error the car has already moved past:
+
+    1. keeps the commands the car was given (`previous_steering`, one a tick) and
+       runs the servo model over them, to estimate the wheel angle each tick;
+    2. rolls the sensed pose forward along the bicycle model with those angles,
+       to the tick this command acts (sensing + actuation ticks ahead);
+    3. projects that pose onto the line, and takes the feedforward atan(L kappa)
+       at the line's curvature one servo time constant further on, since the
+       wheels lag the command;
+    4. applies the LQR gain for the delay-free error at that tick, the wheel
+       angle included: u = ff - K . [e, theta, delta - ff];
+    5. limits the result to the steering-rate and angle limits the shaper uses,
+       so the command returned is the command the wheels receive.
+
+    The gain is the delay-free one (ServoLqrGainTable) because the prediction has
+    taken the delay out of the loop. The servo is inside the design because its
+    lag is not a delay the prediction can remove.
+    """
+
+    name = 'delay_lqr'
+
+    # Ticks of command history the servo estimate runs over. Its error from an
+    # unknown start shrinks by 1 - g*dt (0.625 at 15/s, 40 Hz) a tick, so 40 is
+    # ~1e-8 of the start error.
+    SERVO_WARMUP_TICKS = 40
+
+    def __init__(self, limits: VehicleLimits, params: DelayLqrParams):
+        _check_delay('delay_lqr.sensing_delay', params.sensing_delay)
+        _check_delay('delay_lqr.actuation_delay', params.actuation_delay)
+        if not (math.isfinite(params.servo_rate) and params.servo_rate > 0.0):
+            raise ValueError(f'delay_lqr.servo_rate must be > 0, got {params.servo_rate}')
+        self.limits = limits
+        self.params = params
+        dt = limits.control_dt
+        self.sensing_ticks = int(round(params.sensing_delay / dt))
+        self.actuation_ticks = int(round(params.actuation_delay / dt))
+        self.horizon_ticks = self.sensing_ticks + self.actuation_ticks
+        self._table = ServoLqrGainTable(
+            params.q_lateral, params.q_heading, params.r_steer, dt,
+            limits.wheelbase, params.servo_gain, params.v_grid_max)
+        # The curvature feedforward is read one servo time constant (1 / servo_gain)
+        # past the action point. The wheels lag the command (a first-order servo is
+        # at 63% of a step after one time constant), so the curvature the wheels
+        # need when they reach the command is the one further along the line.
+        self.feedforward_lead = 1.0 / params.servo_gain
+        # Enough commands for the servo warm-up: the warm-up starts
+        # SERVO_WARMUP_TICKS + sensing ticks back, and the oldest command it
+        # reads is actuation ticks older than that.
+        self._history: deque = deque(
+            maxlen=self.SERVO_WARMUP_TICKS + self.horizon_ticks + 1)
+
+    def reset(self) -> None:
+        self._history.clear()
+
+    def _wheel_angles(self):
+        """(angles, delta_at_action): the wheel angle at each tick the sensed
+        pose is rolled through, and the angle when this command acts.
+
+        Tick offsets are relative to now (0). The pose is from -sensing ticks; the
+        command issued now enters the transport at 0 and reaches the servo at
+        +actuation ticks. Command `u` from q ticks ago is history[-q], and the
+        servo sees at tick j the command issued at j - actuation.
+        """
+        sensing, actuation = self.sensing_ticks, self.actuation_ticks
+        gain, rate = self.params.servo_gain, self.params.servo_rate
+        dt = self.limits.control_dt
+        history = self._history
+        delta = 0.0
+        angles = []
+        for offset in range(-(sensing + self.SERVO_WARMUP_TICKS), actuation):
+            if offset >= -sensing:
+                angles.append(delta)
+            command = history[-(actuation - offset)]
+            servo_velocity = min(max(gain * (command - delta), -rate), rate)
+            delta += servo_velocity * dt
+        return angles, delta
+
+    def steer(self, inp: TrackingInput, path: PathContext) -> SteeringResult:
+        _require_finite(inp.x, inp.y, inp.yaw, inp.speed, inp.previous_steering)
+        L = self.limits.wheelbase
+        dt = self.limits.control_dt
+        limit = self.limits.max_steering_angle
+        previous = float(inp.previous_steering)
+        if self._history:
+            self._history.append(previous)     # the command applied last tick
+        else:
+            self._history.extend([previous] * self._history.maxlen)
+        angles, delta = self._wheel_angles()
+        v = max(float(inp.speed), 0.0)
+
+        # Roll the sensed pose through the ticks until this command acts: each
+        # tick is a constant-curvature arc at that tick's wheel angle.
+        x, y, psi = float(inp.x), float(inp.y), float(inp.yaw)
+        for angle in angles:
+            kappa = math.tan(angle) / L
+            dpsi = v * dt * kappa
+            if abs(kappa) < 1e-9:
+                x += v * dt * math.cos(psi)
+                y += v * dt * math.sin(psi)
+            else:
+                x += (math.sin(psi + dpsi) - math.sin(psi)) / kappa
+                y -= (math.cos(psi + dpsi) - math.cos(psi)) / kappa
+            psi += dpsi
+
+        walked = racing_math.find_lookahead_index(
+            path.seg_len, inp.nearest_idx, v * dt * self.horizon_ticks, closed=path.closed)
+        nearest, _ = racing_math.find_nearest_index(
+            path.xy, (x, y), closed=path.closed, prev_index=walked, search_window=6)
+        proj = racing_math.project_onto_path(path.xy, path.seg_len, (x, y), nearest, path.closed)
+        e = proj.lateral_error
+        theta = _wrap(psi - proj.heading)
+        lead_arc = proj.arc_length + v * self.feedforward_lead
+        kappa_at_action = sample_at_arc(path.curvature, path.cumulative, lead_arc, path.closed)
+        feedforward = math.atan(L * kappa_at_action)
+        w = delta - feedforward
+        K = self._table.gain_at(max(v, ServoLqrGainTable.V_FLOOR))
+        command = feedforward - float(K[0] * e + K[1] * theta + K[2] * w)
+        # The shaper slews at the same rate; applying it here keeps the command
+        # this law returns, and the one the history records, the same.
+        steered = racing_math.slew_rate_limit(command, previous, dt, self.limits.max_steering_rate)
+        steering = float(np.clip(steered, -limit, limit))
+        detail = (f"delay_lqr e={e:+.3f}m th={theta:+.3f}rad w={w:+.3f}rad "
+                  f"ff={feedforward:+.3f}rad K=[{K[0]:.2f},{K[1]:.2f},{K[2]:.2f}]")
+        return SteeringResult(steering=steering, unclipped=float(command), detail=detail)
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -931,6 +1162,18 @@ def make_law(name: str, limits: VehicleLimits,
             max_iter=int(params.get('mpc.max_iter', d.max_iter)),
             max_consecutive_misses=int(params.get('mpc.max_consecutive_misses', d.max_consecutive_misses)),
             delay_compensation=float(params.get('mpc.delay_compensation', d.delay_compensation)),
+        ))
+    if name == 'delay_lqr':
+        d = DelayLqrParams()
+        return DelayLqrLaw(limits, DelayLqrParams(
+            q_lateral=float(params.get('delay_lqr.q_lateral', d.q_lateral)),
+            q_heading=float(params.get('delay_lqr.q_heading', d.q_heading)),
+            r_steer=float(params.get('delay_lqr.r_steer', d.r_steer)),
+            v_grid_max=float(params.get('delay_lqr.v_grid_max', d.v_grid_max)),
+            sensing_delay=float(params.get('delay_lqr.sensing_delay', d.sensing_delay)),
+            actuation_delay=float(params.get('delay_lqr.actuation_delay', d.actuation_delay)),
+            servo_gain=float(params.get('delay_lqr.servo_gain', d.servo_gain)),
+            servo_rate=float(params.get('delay_lqr.servo_rate', d.servo_rate)),
         ))
     raise ValueError(
         f"unknown steering_law '{name}' (expected one of {LAW_NAMES})")

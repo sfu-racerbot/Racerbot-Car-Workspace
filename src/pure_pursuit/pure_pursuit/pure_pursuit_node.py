@@ -356,6 +356,14 @@ class PurePursuitNode(Node):
         self.declare_parameter('mpc.max_iter', 4000)
         self.declare_parameter('mpc.max_consecutive_misses', 3)
         self.declare_parameter('mpc.delay_compensation', 0.05)
+        self.declare_parameter('delay_lqr.q_lateral', 1.0)
+        self.declare_parameter('delay_lqr.q_heading', 1.0)
+        self.declare_parameter('delay_lqr.r_steer', 1.0)
+        self.declare_parameter('delay_lqr.v_grid_max', 6.0)
+        self.declare_parameter('delay_lqr.sensing_delay', 0.05)
+        self.declare_parameter('delay_lqr.actuation_delay', 0.075)
+        self.declare_parameter('delay_lqr.servo_gain', 15.0)
+        self.declare_parameter('delay_lqr.servo_rate', 2.5)
 
         # --- Opponent detection mode: 'heuristic' (shape-based, no map
         # needed) or 'map' (ray-cast map subtraction via range_libc --
@@ -619,7 +627,7 @@ class PurePursuitNode(Node):
             'max_lookahead': self.max_lookahead,
             'lookahead_speed_gain': self.lookahead_speed_gain,
         }
-        for prefix in ('stanley', 'lqr', 'mpc'):
+        for prefix in ('stanley', 'lqr', 'mpc', 'delay_lqr'):
             for full_name in self._declared_law_param_names(prefix):
                 self._law_params[full_name] = self.get_parameter(full_name).value
         try:
@@ -853,6 +861,10 @@ class PurePursuitNode(Node):
         'mpc': ('mpc.dt', 'mpc.horizon_steps', 'mpc.q_lateral', 'mpc.q_heading',
                 'mpc.r_steer', 'mpc.r_rate', 'mpc.deadline_sec', 'mpc.max_iter',
                 'mpc.max_consecutive_misses', 'mpc.delay_compensation'),
+        'delay_lqr': ('delay_lqr.q_lateral', 'delay_lqr.q_heading', 'delay_lqr.r_steer',
+                      'delay_lqr.v_grid_max', 'delay_lqr.sensing_delay',
+                      'delay_lqr.actuation_delay', 'delay_lqr.servo_gain',
+                      'delay_lqr.servo_rate'),
     }
 
     def _declared_law_param_names(self, prefix: str):
@@ -1047,7 +1059,7 @@ class PurePursuitNode(Node):
             # built once in __init__ and cached, so accepting a runtime change
             # would report a value the control loop never uses. Refuse loudly.
             if (parameter.name == 'steering_law'
-                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.'))
+                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.', 'delay_lqr.'))
                     or parameter.name == 'tracking_curvature_smoothing'):
                 return SetParametersResult(
                     successful=False,

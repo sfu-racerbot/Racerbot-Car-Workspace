@@ -119,7 +119,7 @@ def _pose_slightly_left(node):
     node.scan_callback(_clear_scan())
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
 def test_lb_held_on_line_steers_toward_it(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -134,7 +134,7 @@ def test_lb_held_on_line_steers_toward_it(node_factory, law_name):
     assert node.last_decision_state == law_name
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
 def test_lb_released_stops(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -147,7 +147,7 @@ def test_lb_released_stops(node_factory, law_name):
     assert published[-1].drive.speed == 0.0
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
 def test_joy_never_received_stops(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -157,7 +157,7 @@ def test_joy_never_received_stops(node_factory, law_name):
     assert published[-1].drive.speed == 0.0
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
 def test_joy_stale_stops(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -172,7 +172,7 @@ def test_joy_stale_stops(node_factory, law_name):
     assert published[-1].drive.speed == 0.0
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
 def test_law_failure_stops_the_car(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -224,7 +224,7 @@ def test_unknown_steering_law_refuses_to_start(profiled_csv):
         rclpy.shutdown()
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
 def test_steering_law_is_not_live_tunable(node_factory, law_name):
     node = node_factory(law_name)
     result = node._parameter_callback([
@@ -237,7 +237,8 @@ def test_steering_law_is_not_live_tunable(node_factory, law_name):
 # pre-existing dashboard feature); test_live_lookahead_tune_reaches_the_law
 # below covers them. Only the new laws' dotted params must be refused.
 @pytest.mark.parametrize('law_name, dotted', [
-    ('stanley', 'stanley.gain'), ('lqr', 'lqr.q_lateral')])
+    ('stanley', 'stanley.gain'), ('lqr', 'lqr.q_lateral'),
+    ('delay_lqr', 'delay_lqr.q_lateral')])
 def test_law_params_are_not_live_tunable(node_factory, law_name, dotted):
     node = node_factory(law_name)
     result = node._parameter_callback([
@@ -246,7 +247,8 @@ def test_law_params_are_not_live_tunable(node_factory, law_name, dotted):
 
 
 @pytest.mark.parametrize('law_name, params_class', [
-    ('stanley', tracking_laws.StanleyParams), ('lqr', tracking_laws.LqrParams)])
+    ('stanley', tracking_laws.StanleyParams), ('lqr', tracking_laws.LqrParams),
+    ('delay_lqr', tracking_laws.DelayLqrParams)])
 def test_node_defaults_are_the_law_defaults(node_factory, law_name, params_class):
     # No params file: the node's declare_parameter defaults alone. They must
     # build the same law the harness tunes and judges (tracking_laws' dataclass
@@ -312,7 +314,7 @@ def test_live_steering_rate_tune_reaches_the_law_limits(node_factory):
     assert node.tracking_law.limits.max_steering_rate == 2.5
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
 def test_profile_reload_resets_the_law(node_factory, profiled_csv, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
