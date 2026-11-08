@@ -54,6 +54,9 @@ SAFETY_FLOOR = {
     'swept_clearance_margin', 'swept_clearance_max_length', 'emergency_stop_distance',
     'profile_wall_clearance', 'narrow_corridor_clearance', 'open_corridor_clearance',
     'overtake_min_side_clearance', 'body_clearance_fov_deg',
+    # Tier 1 arc check (2026-11-07): a larger clearance or horizon or backstop is the
+    # conservative direction, so an overlay may only raise them.
+    'emergency_arc_clearance', 'emergency_arc_length', 'emergency_hard_stop_distance',
 }
 
 

@@ -161,3 +161,39 @@ def test_layered_refuses_invalid_tuning_yaml(tmp_path, content):
     overlay.write_text(content)
     with pytest.raises(guards.TuningOverlayError, match='gap_follow.yaml'):
         layers.layered(str(SHARED), 'gap_follow.yaml', 'testcar', tmp_path)
+
+
+# Tier 1 arc check (pure_pursuit.yaml, 2026-11-07). Each shared value is the spec, copied from
+# that file. A car's tuning overlay may only raise these: a lower arc trip distance, horizon or
+# backstop lets the car drive closer to a return before Tier 1 acts.
+PURE_PURSUIT_FLOOR_KEYS = {
+    'emergency_arc_clearance': 0.14,
+    'emergency_arc_length': 1.0,
+    'emergency_hard_stop_distance': 0.25,
+}
+
+
+def check_pure_pursuit(tmp_path, key, value, shared_value):
+    source = tmp_path / 'shared.yaml'
+    source.write_text(yaml.safe_dump({'pure_pursuit_node': {'ros__parameters': {key: shared_value}}}),
+                      encoding='utf-8')
+    overlay = tmp_path / 'overlay.yaml'
+    overlay.write_text(f'pure_pursuit_node:\n  ros__parameters:\n    # why: physical difference\n'
+                       f'    {key}: {value}\n', encoding='utf-8')
+    return guards.check_tuning_overlay(overlay, source, 'pure_pursuit.yaml')
+
+
+@pytest.mark.parametrize('key, shared_value', sorted(PURE_PURSUIT_FLOOR_KEYS.items()))
+def test_tuning_rejects_a_lower_tier1_arc_value(tmp_path, key, shared_value):
+    """Oracle: spec (SAFETY_FLOOR in guards.py: a floor key may not fall below its shared value).
+    Ten per cent under the shared value is refused under the floor's own message."""
+    problems = check_pure_pursuit(tmp_path, key, shared_value * 0.9, shared_value)
+    assert any('overlay.yaml' in p and key in p and 'falls below the shared safety floor' in p
+               for p in problems), problems
+
+
+@pytest.mark.parametrize('key, shared_value', sorted(PURE_PURSUIT_FLOOR_KEYS.items()))
+def test_tuning_allows_a_higher_or_equal_tier1_arc_value(tmp_path, key, shared_value):
+    """Oracle: spec (the same floor rule: at or above the shared value passes)."""
+    assert check_pure_pursuit(tmp_path, key, shared_value * 1.1, shared_value) == []
+    assert check_pure_pursuit(tmp_path, key, shared_value, shared_value) == []
