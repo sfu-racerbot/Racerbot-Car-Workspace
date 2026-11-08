@@ -221,6 +221,33 @@ pure_pursuit_node:
     # evidence behind it yet. Validate in racerbot_sim before trusting it
     # on the car.
     emergency_stop_distance: 0.35
+    # 2026-11-07: this no longer sets the Tier 1 hard stop. Tier 1 now asks
+    # whether the body's own swept path is clear (emergency_arc_clearance
+    # below) and keeps a raw backstop for the cone (emergency_hard_stop_distance).
+    # emergency_stop_distance still sets the avoidance brake reserve and the
+    # committed-pass speed cap.
+    #
+    # 2026-11-07: Tier 1 arc check. The swept path is the free distance along
+    # the arc the car is on (the rack's last commanded steering) and the arc it
+    # is being steered onto (this tick's steering), measured from the body's
+    # front edge, over the same +/-90deg window the footprint check uses. The
+    # threshold is 0.14m = 0.35m - 0.21m: the front edge is 0.21m ahead of the
+    # LiDAR on both cars (wheelbase/2 + car_length/2 - laser_offset_x =
+    # 0.18 + 0.29 - 0.26), so a wall dead ahead trips here at the same 0.35m raw
+    # range the old cone check stopped at. On a turn the arc is a few cm off the
+    # brute-force contact distance (docs/racing-autonomy.md, reactive safety).
+    emergency_arc_clearance: 0.14
+    # Horizon of that arc, in metres. Must be finite and at least
+    # emergency_arc_clearance: beyond the horizon the swept path reads inf, so a
+    # shorter one would leave the band between the two unmeasured. The node
+    # refuses a shorter horizon at startup.
+    emergency_arc_length: 1.0
+    # Raw-range backstop anywhere in the safety cone, independent of steering.
+    # Measured 2026-11-07 on 856 in-cone returns closer than this, at 25
+    # (rack, command) steering pairs per car: the arc check trips on every one,
+    # so the backstop never decides alone there. It is the net that holds if the
+    # arc model is ever wrong close to the body.
+    emergency_hard_stop_distance: 0.25
     # Escape from that hard stop rather than latching in it. A stopped car
     # cannot clear its own safety cone -- nothing about the scene changes at
     # zero speed -- so the stop above, on its own, ends the run wherever it

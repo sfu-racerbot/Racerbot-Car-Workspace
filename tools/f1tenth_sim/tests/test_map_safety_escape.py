@@ -181,8 +181,12 @@ def test_forward_contact_without_an_opening_stops():
     ("emergency_escape_speed", 0.0, None, "stop"),
     # The crawl speed is the parameter, not a constant.
     ("emergency_escape_speed", 0.40, None, "escape"),
-    # The 0.33 m wall is outside a 0.32 m stop distance.
-    ("emergency_stop_distance", 0.32, None, "none"),
+    # The 0.33 m wall's swept arc is 0.088 m at the input steering. test_the_arc_threshold_
+    # is_bracketed_by_the_brute_force_contact checks that against an independent oracle, so
+    # the two rows below sit either side of it. emergency_stop_distance no longer decides
+    # Tier 1: the swept arc does.
+    ("emergency_arc_clearance", 0.08, None, "none"),
+    ("emergency_arc_clearance", 0.09, None, "escape"),
     # 0.12 m is contact once the contact threshold is raised, and contact crawls at its own
     # 0.0 m floor.
     ("emergency_stop_clearance", 0.13, None, "escape"),
@@ -208,6 +212,113 @@ def test_e_the_tier_thresholds_are_the_nodes_parameters(key, value, open_run, ex
     assert result == expected
     assert steering == pytest.approx(want_steering, abs=1e-9)  # rad
     assert speed == pytest.approx(want_speed, abs=1e-12)  # m/s
+
+
+def _brute_contact(node, point, curvature, horizon=1.0, step=0.001):
+    """Brute-force oracle: the rear-axle arc length at which the car's rectangle first covers the
+    base_link point driving the constant-curvature arc, or inf within the horizon. It shares no
+    code with racing_math or apply_map_safety. Left is positive."""
+    half = node['car_width'] / 2.0
+    front = node['wheelbase'] / 2.0 + node['car_length'] / 2.0
+    rear = node['wheelbase'] / 2.0 - node['car_length'] / 2.0
+    x0, y0 = point
+    if abs(curvature) < 1e-9:
+        if abs(y0) > half or x0 < rear:
+            return math.inf
+        return max(x0 - front, 0.0)
+    radius = 1.0 / curvature
+    sign = 1.0 if radius > 0.0 else -1.0
+    span = abs(radius)
+    for phi in np.arange(0.0, horizon / span + 1e-12, step / span):
+        axle_x = span * math.sin(phi)
+        axle_y = sign * span * (1.0 - math.cos(phi))
+        heading = sign * phi
+        dx, dy = x0 - axle_x, y0 - axle_y
+        body_x = dx * math.cos(heading) + dy * math.sin(heading)
+        body_y = -dx * math.sin(heading) + dy * math.cos(heading)
+        if rear <= body_x <= front and abs(body_y) <= half:
+            return span * phi
+    return math.inf
+
+
+def _return_points(scan, lidar, node):
+    """base_link points of every finite beam (the LiDAR sits at laser_offset_x/y)."""
+    angles = lidar.angle_min + np.arange(lidar.num_beams) * lidar.angle_increment
+    points = []
+    for index in np.flatnonzero(np.isfinite(scan)):
+        rng = float(scan[index])
+        points.append((node['laser_offset_x'] + rng * math.cos(angles[index]),
+                       node['laser_offset_y'] + rng * math.sin(angles[index])))
+    return points
+
+
+def test_the_arc_threshold_is_bracketed_by_the_brute_force_contact():
+    """The table's arc rows (0.08 m: no stop, 0.09 m: crawl) decide this wall only if the model's
+    free distance lies between them. The safety oracle is the real contact: the model must never
+    be later than the car's brute-force contact with the wall, or the car would touch it before
+    Tier 1 acted. Oracle: brute force over the wall's own returns (the real contact), and the
+    invariant model <= brute. The 0.08 to 0.09 m bracket is a change-detector (not an oracle),
+    kept so the table's rows keep meaning what they say."""
+    car, lidar, node = _setup()
+    scan = _escape_scene(lidar, _body_clear_wall(node))
+    curvature = math.tan(INPUT_STEERING) / node['wheelbase']
+    brute = min(_brute_contact(node, point, curvature) for point in _return_points(scan, lidar, node))
+    model = rv._arc_clearance(scan, INPUT_STEERING, INPUT_STEERING, rv.PURE_PURSUIT_PARAMS)
+    assert model <= brute + 1e-9, (model, brute)  # invariant: never later than the real contact
+    assert 0.08 < model < 0.09, model  # change-detector (not an oracle): the rows straddle it
+
+
+def test_the_rack_arc_counts_in_the_simulator_too():
+    """The node's rack-only scene (tests/test_tier1_arc.py): one return at base_link (0.52, 0.17),
+    0.17 m left of the centreline, outside the body. Rack at full lock with the command straight
+    must stop the car, and with the rack straight it must pass through. Oracle: brute force
+    (contact inside the 0.14 m threshold on the full-lock arc, inf straight)."""
+    car, lidar, node = _setup()
+    full = node['max_steering_angle']
+    forward = 0.52 - node['laser_offset_x']
+    index = round((math.atan2(0.17, forward) - lidar.angle_min) / lidar.angle_increment)
+    beam_angle = lidar.angle_min + index * lidar.angle_increment
+    scan = _blank(lidar)
+    scan[index] = math.hypot(forward, 0.17)  # range from the LiDAR to the return
+    point = (node['laser_offset_x'] + scan[index] * math.cos(beam_angle),
+             node['laser_offset_y'] + scan[index] * math.sin(beam_angle))
+    assert point[1] > node['car_width'] / 2.0  # closed form: the return is outside the body
+    assert _brute_contact(node, point, math.tan(full) / node['wheelbase']) < 0.14  # oracle
+    assert _brute_contact(node, point, 0.0) == math.inf                             # oracle
+    assert rv.apply_map_safety(scan, 0.0, INPUT_SPEED, car, applied_steering=full) == (
+        0.0, 0.0, "stop")
+    assert rv.apply_map_safety(scan, 0.0, INPUT_SPEED, car, applied_steering=0.0) == (
+        0.0, INPUT_SPEED, "none")
+
+
+@pytest.mark.parametrize("distance, expected", [(0.245, "stop"), (0.255, "none")])
+def test_the_backstop_is_its_own_value_in_the_simulator(distance, expected, monkeypatch):
+    """With the arc check off (no free distance is below zero), only the raw cone backstop can stop
+    the car. A return 10 deg to the right at 0.245 m is inside the 0.25 m backstop and past the
+    3 cm contact band (closed form: 0.245 - 0.21 / cos 10 deg = 0.032 m), so it stops; at 0.255 m
+    it does not. Oracle: spec (emergency_hard_stop_distance, pure_pursuit.yaml)."""
+    car, lidar, node = _setup()
+    monkeypatch.setitem(rv.PURE_PURSUIT_PARAMS, "emergency_arc_clearance", 0.0)
+    scan = _blank(lidar)
+    scan[_beam(-10.0, lidar)] = distance
+    assert rv.apply_map_safety(scan, INPUT_STEERING, INPUT_SPEED, car)[2] == expected
+
+
+def test_a_return_behind_the_sensor_is_outside_the_arc_window_in_the_simulator():
+    """A return at -120 deg, 0.15 m, is the car's own rear structure, inside the body. The body
+    window is +/-90 deg, so it is never read; read, it would put the swept path at 0.0 on every scan.
+    Oracle: closed form (the return is at (0.185, -0.130) m in base_link, inside the rectangle
+    x in [-0.11, 0.47] m, |y| <= 0.155 m)."""
+    car, lidar, node = _setup()
+    scan = _blank(lidar)
+    scan[_beam(-120.0, lidar)] = 0.15
+    x = node['laser_offset_x'] + 0.15 * math.cos(math.radians(-120.0))
+    y = 0.15 * math.sin(math.radians(-120.0))
+    front = node['wheelbase'] / 2.0 + node['car_length'] / 2.0
+    rear = node['wheelbase'] / 2.0 - node['car_length'] / 2.0
+    assert rear <= x <= front and abs(y) <= node['car_width'] / 2.0  # oracle: closed form
+    assert rv.apply_map_safety(scan, INPUT_STEERING, INPUT_SPEED, car) == (
+        INPUT_STEERING, INPUT_SPEED, "none")
 
 
 def test_escape_steering_is_clamped_to_the_steering_limit():
@@ -245,7 +356,7 @@ def test_run_pure_solo_counts_escape_steps_apart_from_stop_steps(monkeypatch):
     car = selected_car(note=False)
     calls = []
 
-    def always_escape(scan, steering, speed, car_id=None):
+    def always_escape(scan, steering, speed, car_id=None, *, applied_steering=None):
         calls.append(1)
         return steering, speed, "escape"
 

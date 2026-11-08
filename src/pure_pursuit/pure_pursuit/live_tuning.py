@@ -346,9 +346,10 @@ PURE_PURSUIT_TUNABLES = (
     # off from here; see the banner above. ---
     Tunable('emergency_stop_distance', 'Safety margins', 0.15, 2.0, unit='m',
             step=0.05, safety=True,
-            description='Range inside the forward cone that triggers an '
-                        'immediate stop. Lowering it lets the car run '
-                        'closer to traffic and leaves less room to be wrong.'),
+            description='Brake reserve for steering around something and for '
+                        'a committed pass. It no longer sets the hard stop: '
+                        'that is the swept-path check and the cone backstop, '
+                        'set in the YAML, not here.'),
     Tunable('emergency_stop_clearance', 'Safety margins', 0.0, 0.4, unit='m',
             step=0.01, safety=True,
             description='All-round contact floor measured from the car body '
