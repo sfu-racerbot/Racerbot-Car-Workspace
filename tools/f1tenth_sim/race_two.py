@@ -198,7 +198,8 @@ def race_metrics(rows, dt, length, laps):
                 wall_contact_ticks=sum(bool(r['wall_contact']) for r in rows))
 
 
-def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0):
+def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0,
+        pass_lookahead=None, cap_only=False):
     rv.select_profile('car', 'rb2')
     xy, speeds = racing_math.load_profiled_csv(line)
     plan = rv.PathPlan(np.asarray(xy), racing_math.compute_segment_lengths(xy, closed=True), np.minimum(speeds, 5.0))
@@ -206,6 +207,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     plant = rv.make_plant(eval_gap.track_path(track), count, seed,
                           calibration=with_floor('sfu_course_2026_11_06'), car_id='rb2', max_laps=1000)
     params = rv._pure_pursuit_params('rb2')
+    if pass_lookahead is not None:
+        params['overtake_lookahead_distance'] = pass_lookahead
     followers = [rv.PathFollower(plan, law_name='delay_lqr', car_id='rb2')]
     factor = {'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'gap': 1.0, 'solo': 1.0}[opponent]
     opp_plan = rv.PathPlan(plan.xy, plan.seg_len, np.minimum(plan.speed * factor, 1.5) if opponent == 'blocker' else plan.speed * factor)
@@ -258,7 +261,10 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                     if so is not None:
                         steering = so
                     if vo is not None:
-                        speed, cap = vo, min(cap, vo)
+                        # Experimental ceiling correction, never a shipped node
+                        # setting: preserve override targets for stop/escape/avoid.
+                        speed = min(speed, vo) if cap_only and safety is None else vo
+                        cap = min(cap, vo)
                     if base_state == 'off_racing_line':
                         speed, safety = 0.0, base_state
                     steering, speed = shape.command(steering, speed, cap, measured_speed=state[3])
@@ -294,6 +300,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     result = race_metrics(rows, rv.CONTROL_DT, progress[0].length, laps)
     result.update(track=track, opponent=opponent, seed=seed, head_start_m=actual_head, laps=laps,
                   timeout_s=timeout, elapsed_s=rows[-1]['time'],
+                  experiments=dict(pass_lookahead_m=pass_lookahead, cap_only=cap_only),
                   ego_laps=rows[-1]['ego_progress'] / progress[0].length,
                   opponent_laps=rows[-1]['opp_progress'] / progress[0].length if count == 2 else None,
                   node_sha256=hashlib.sha256(NODE.read_bytes()).hexdigest(),
@@ -313,14 +320,21 @@ def main():
     ap.add_argument('--head-start', type=float, default=3.0)
     ap.add_argument('--laps', type=int, default=4)
     ap.add_argument('--timeout', type=float, default=100.0)
+    ap.add_argument('--pass-lookahead', type=float,
+                    help='EXPERIMENT: override passing preview for both map cars, in metres')
+    ap.add_argument('--cap-only', action='store_true',
+                    help='EXPERIMENT: mapped pass cap can only lower the profile target')
     ap.add_argument('--output', type=Path, required=True)
     args = ap.parse_args()
     if not math.isfinite(args.head_start) or not 2 <= args.head_start <= 4 or args.laps < 1 or not math.isfinite(args.timeout) or args.timeout <= 0:
         ap.error('need head-start in [2,4] m, positive laps and finite positive timeout')
+    if args.pass_lookahead is not None and (not math.isfinite(args.pass_lookahead) or args.pass_lookahead <= 0):
+        ap.error('pass-lookahead must be positive and finite')
     args.output.mkdir(parents=True, exist_ok=True)
     results = []
     for seed in map(int, args.seeds.split(',')):
-        result, rows = run(args.track, args.line, args.opponent, seed, args.head_start, args.laps, args.timeout)
+        result, rows = run(args.track, args.line, args.opponent, seed, args.head_start, args.laps, args.timeout,
+                           args.pass_lookahead, args.cap_only)
         with (args.output / f'{seed}.csv').open('w') as stream:
             writer = csv.DictWriter(stream, fieldnames=rows[0])
             writer.writeheader()

@@ -217,6 +217,21 @@ The emergency layers do execute and command zero or 0.25 m/s escape. They do not
 
 The mapped forward-cone pass cap also has an implementation hazard. `_reactive_override` returns a ceiling, but `control_step` assigns it as the new target rather than taking the minimum with the profile. The online curvature ceiling can hide this, so its contribution needs a controlled trial before changing the node.
 
+### Screened corrections: no driving change promoted
+
+Two harness-only trials used seed 12345 on all eight course/opponent combinations. `--cap-only` makes the mapped pass ceiling lower the profile target without replacing it. `--pass-lookahead 1.5 --cap-only` also shortens the passing preview from 4.0 m to 1.5 m.
+
+| Trial | Contact-free runs | Four-lap finishes | Physical passes | Finding |
+|---|---|---|---|---|
+| Pass ceiling correction, 4.0 m preview | 0/8 | 0/8 | 0 | Correcting the ceiling alone does not fix the passing geometry |
+| Pass ceiling correction, 1.5 m preview | 2/8 | 2/8 | 0 | Survives 06b against Map ×0.9 and gap_follow by giving up the pass and following; still contacts in six scenarios |
+
+The two clean short-preview finishes took 37.175 s against Map ×0.9 and 36.975 s against `gap_follow`, versus the same seed's 36.750 s solo. Neither is a successful overtake. These are single-seed rejection screens, not six-seed promotion evidence.
+
+The trials support a passing-path limitation rather than a single preview constant that makes the offset strategy work. Neither trial meets the zero-contact requirement, so the driving node and its gate thresholds retain their measured baseline behaviour.
+
+Results and transition traces are archived as [`race_two_cap_only_2026_11_08.json`](../tools/f1tenth_sim/race_two_cap_only_2026_11_08.json) and [`race_two_short_preview_2026_11_08.json`](../tools/f1tenth_sim/race_two_short_preview_2026_11_08.json). The flags are experimental simulator controls for reproducing those rejected trials.
+
 ### Measurement fidelity and evidence
 
 `race_two.py` compiles an explicit allow-list of ROS-free method bodies from `pure_pursuit_node.py`. The detector, confirmation gate, tracker, pass timers and reactive decisions therefore execute the current node source without starting ROS. Clock, scan-message and map-ray-cast I/O are supplied by the simulator.
