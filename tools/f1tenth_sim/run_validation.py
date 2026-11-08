@@ -602,7 +602,7 @@ class PathFollower:
         self.law = law
         # MPC's single-tick fallback (spec 04), mirrored from the node.
         self._mpc_fallback = None
-        if isinstance(self.law, tracking_laws.MpcLaw):
+        if self.law.name in tracking_laws.DEADLINE_LAWS:
             self._mpc_fallback = tracking_laws.make_law(
                 'pure_pursuit', self.VEHICLE_LIMITS,
                 {'min_lookahead': min_lookahead, 'max_lookahead': max_lookahead,
@@ -667,7 +667,7 @@ class PathFollower:
                 previous_steering=float(previous_steering)),
                 self.path_context)
             steering = result.steering
-            if isinstance(self.law, tracking_laws.MpcLaw):
+            if self.law.name in tracking_laws.DEADLINE_LAWS:
                 self.law.miss_policy.on_success()
         except tracking_laws.MpcMiss:
             # Mirror spec 04's node policy exactly: fall back to pure pursuit
@@ -1112,7 +1112,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             ),
         }
     )
-    if law_name == "mpc":
+    if law_name in tracking_laws.DEADLINE_LAWS:
         policy = follower.law.miss_policy
         result.update({
             "mpc_miss_steps": follower.mpc_miss_steps,

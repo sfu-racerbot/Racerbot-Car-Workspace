@@ -119,7 +119,7 @@ def _pose_slightly_left(node):
     node.scan_callback(_clear_scan())
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr', 'delay_mpc'])
 def test_lb_held_on_line_steers_toward_it(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -134,7 +134,7 @@ def test_lb_held_on_line_steers_toward_it(node_factory, law_name):
     assert node.last_decision_state == law_name
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr', 'delay_mpc'])
 def test_lb_released_stops(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -147,7 +147,7 @@ def test_lb_released_stops(node_factory, law_name):
     assert published[-1].drive.speed == 0.0
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr', 'delay_mpc'])
 def test_joy_never_received_stops(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -157,7 +157,7 @@ def test_joy_never_received_stops(node_factory, law_name):
     assert published[-1].drive.speed == 0.0
 
 
-@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr'])
+@pytest.mark.parametrize('law_name', ['pure_pursuit', 'stanley', 'lqr', 'delay_lqr', 'delay_mpc'])
 def test_joy_stale_stops(node_factory, law_name):
     node = node_factory(law_name)
     node.enable_deadman = True
@@ -363,11 +363,17 @@ def osqp_available():
     return pytest.importorskip('osqp', reason='spec 04 G0: osqp not installed')
 
 
-def _mpc_node(profiled_csv, **params):
+@pytest.fixture(params=['mpc', 'delay_mpc'])
+def deadline_law(request):
+    return request.param
+
+
+def _mpc_node(profiled_csv, law_name='mpc', **params):
     extra = []
     for key, value in params.items():
+        key = key.replace('mpc.', law_name + '.', 1)
         extra += ['-p', f'{key}:={value}']
-    return _make_node(profiled_csv, 'mpc', extra)
+    return _make_node(profiled_csv, law_name, extra)
 
 
 def test_mpc_lb_held_drives(osqp_available, profiled_csv):
@@ -402,10 +408,10 @@ def test_mpc_node_defaults_are_the_law_defaults_and_delay_reaches_it(
         rclpy.shutdown()
 
 
-def test_mpc_miss_falls_back_to_pure_pursuit(osqp_available, profiled_csv):
+def test_mpc_miss_falls_back_to_pure_pursuit(osqp_available, profiled_csv, deadline_law):
     # deadline_sec=1e-9 forces every solve to miss; with the default
     # max_consecutive_misses=3 the first two ticks fall back.
-    node = _mpc_node(profiled_csv, **{'mpc.deadline_sec': 1e-9})
+    node = _mpc_node(profiled_csv, deadline_law, **{'mpc.deadline_sec': 1e-9})
     try:
         node.enable_deadman = True
         _hold_lb(node)
@@ -420,8 +426,8 @@ def test_mpc_miss_falls_back_to_pure_pursuit(osqp_available, profiled_csv):
         rclpy.shutdown()
 
 
-def test_mpc_latches_after_max_consecutive_misses(osqp_available, profiled_csv):
-    node = _mpc_node(profiled_csv, **{'mpc.deadline_sec': 1e-9,
+def test_mpc_latches_after_max_consecutive_misses(osqp_available, profiled_csv, deadline_law):
+    node = _mpc_node(profiled_csv, deadline_law, **{'mpc.deadline_sec': 1e-9,
                                       'mpc.max_consecutive_misses': 3})
     try:
         node.enable_deadman = True
@@ -442,8 +448,8 @@ def test_mpc_latches_after_max_consecutive_misses(osqp_available, profiled_csv):
         rclpy.shutdown()
 
 
-def test_mpc_latch_clears_when_lb_is_released(osqp_available, profiled_csv):
-    node = _mpc_node(profiled_csv, **{'mpc.deadline_sec': 1e-9,
+def test_mpc_latch_clears_when_lb_is_released(osqp_available, profiled_csv, deadline_law):
+    node = _mpc_node(profiled_csv, deadline_law, **{'mpc.deadline_sec': 1e-9,
                                       'mpc.max_consecutive_misses': 2})
     try:
         node.enable_deadman = True
@@ -468,8 +474,8 @@ def test_mpc_latch_clears_when_lb_is_released(osqp_available, profiled_csv):
         rclpy.shutdown()
 
 
-def test_live_lookahead_tune_reaches_the_mpc_fallback_law(osqp_available, profiled_csv):
-    node = _mpc_node(profiled_csv)
+def test_live_lookahead_tune_reaches_the_mpc_fallback_law(osqp_available, profiled_csv, deadline_law):
+    node = _mpc_node(profiled_csv, deadline_law)
     try:
         _tune(node, min_lookahead=0.9, max_lookahead=0.9, lookahead_speed_gain=0.0)
         assert node._mpc_fallback_law.params == tracking_laws.PurePursuitParams(
@@ -479,12 +485,12 @@ def test_live_lookahead_tune_reaches_the_mpc_fallback_law(osqp_available, profil
         rclpy.shutdown()
 
 
-def test_mpc_intent_never_runs_the_solver(osqp_available, profiled_csv):
+def test_mpc_intent_never_runs_the_solver(osqp_available, profiled_csv, deadline_law):
     # Drive-intent safety contract (docs/drive-intent.md): the diagnostic
     # reads what the control path computed and must not run the controller
     # again. With no MPC plan to replay, the arrow comes from the
     # pure-pursuit fallback law, and the MPC law is never called.
-    node = _mpc_node(profiled_csv)
+    node = _mpc_node(profiled_csv, deadline_law)
     try:
         _pose_slightly_left(node)
         node._last_law_predicted = ()
@@ -499,3 +505,42 @@ def test_mpc_intent_never_runs_the_solver(osqp_available, profiled_csv):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+def test_delay_mpc_parameters_reach_node_and_are_launch_only(node_factory):
+    from dataclasses import fields
+    given = tracking_laws.DelayMpcParams(
+        dt=.04, horizon_steps=23, q_lateral=2., q_heading=3., r_steer=4.,
+        r_rate=.002, deadline_sec=.007, max_iter=2300, max_consecutive_misses=4,
+        sensing_delay=.025, actuation_delay=.1, servo_gain=12., servo_rate=2.)
+    extra = [item for f in fields(given)
+             for item in ('-p', f'delay_mpc.{f.name}:={getattr(given, f.name)}')]
+    node = node_factory('delay_mpc', extra)
+    assert node.tracking_law.params == given
+    for f in fields(given):
+        result = node._parameter_callback([
+            Parameter('delay_mpc.' + f.name, value=getattr(given, f.name))])
+        assert not result.successful
+
+
+def test_delay_mpc_node_defaults_match_dataclass(node_factory):
+    node = node_factory('delay_mpc')
+    assert node.tracking_law.params == tracking_laws.DelayMpcParams()
+
+
+def test_delay_mpc_success_records_timing_and_replays_plan(node_factory):
+    node = node_factory('delay_mpc')
+    _pose_slightly_left(node)
+    published = _capture_published(node)
+    _one_command_interval(node)
+    node.control_loop()
+    assert published[-1].drive.speed > 0.
+    assert node.last_decision_state == 'delay_mpc'
+    assert node._mpc_timing and node._mpc_timing[-1] > 0.
+    assert node._last_law_predicted[0] < 0.
+    solves = node.tracking_law.solves_since_reset
+    nearest = racing_math.find_nearest_index(
+        node.xy, (node.car_x, node.car_y), closed=True)[0]
+    trajectory = node._intent_path(0., 2., nearest_idx=nearest)
+    assert len(trajectory) >= 2
+    assert node.tracking_law.solves_since_reset == solves

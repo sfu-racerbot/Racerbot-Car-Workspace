@@ -22,6 +22,22 @@ for changes the team made.
 - Add 18 collected harness tests, each seen failing under a deliberate stub; signed progress, lateral direction and persistence thresholds also fail under numerical mutations. Document traces, commands, break evidence and a proposed collision-checked passing planner in [Racing autonomy](docs/racing-autonomy.md#two-car-racing-on-the-6-nov-courses-2026-11-08).
 - Verification: simulator tools 654 passed; pure pursuit 976 passed, 11 existing dependency skips and the known trust-region failure; launch 312 passed. Fresh-worktree dashboard/launch dependency failures were resolved by initialising pinned submodules and building prerequisites.
 
+## 2026-11-08: experimental delay MPC, promotion rejected
+
+### pure_pursuit
+
+- Add `delay_mpc`: a warm-started OSQP steering plan over lateral error, heading error and first-order servo angle, starting at the delayed command's action point. Hard bounds cover command angle, command rate and predicted servo rate.
+- Extract `DelayPredictor` for both delay laws. All 35 existing delay LQR tests pass unchanged; 500 varied ticks match the original implementation's steering, unclipped output and detail exactly.
+- Add launch-only `delay_mpc.*` parameters: `dt` 0.025 s, `horizon_steps` 32, `q_lateral` 4, `q_heading` 4, `r_steer` 1, `r_rate` 0, `deadline_sec` 0.008 s, `max_iter` 4000 and `max_consecutive_misses` 3. Sensing delay 0.05 s, actuation delay 0.075 s, servo gain 15 /s and servo rate 2.5 rad/s use car 2's simulator model.
+- Share deadline-law dispatch between the controller [node](docs/glossary.md#node) and simulator. Delay MPC uses MPC's one-tick fallback, repeated-miss stop [latch](docs/glossary.md#latch), LB re-arm, timing reports and diagnostic plan replay. Tests cover both solver laws and delay MPC's LB gate; each new test was observed failing under a deliberate break.
+
+### Simulator result and limitations
+
+- Across seeds 12345–12347, delay MPC at 2.7 m/s² completed both courses without body contact. Flying medians were 11.525 / 9.125 s versus delay LQR's 11.425 / 8.800 s; 06b had 77 safety-stop ticks. Higher ceilings did not satisfy the zero-stop requirement.
+- Car 2 retains `delay_lqr`. No six-seed promotion run was attempted after the three-seed failure. All tuning configurations, rejected alternatives, timings and reproduction commands are in [delay MPC results](docs/steering-laws.md#delay-mpc-results).
+- Simulator-host timing p50 was about 2.7–3.0 ms with per-run p99 up to 6.85 ms for the selected configuration. These are x86-64 measurements; Jetson budget verification and physical-car validation remain open.
+- Suites: pure pursuit 1029 passed, 11 existing skips and only the known trust-region optimiser failure; simulator tools 636 passed; car profiles 231 passed; launch 312 passed. The four suites ran separately with ROS domain isolation.
+
 ## 2026-11-08: car 2 map racer beats the shipped gap_follow reference
 
 **Simulator-validated only, not driven on the car.**
