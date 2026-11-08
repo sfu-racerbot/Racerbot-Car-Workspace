@@ -59,6 +59,10 @@ def main(argv=None) -> int:
     ap.add_argument("--profiled", action="store_true",
                     help="--line is a profiled x,y,speed CSV: drive its own speeds instead of re-profiling it "
                          "(--speed and --lateral then only set the controller's ceilings)")
+    ap.add_argument("--law", default="pure_pursuit", choices=("pure_pursuit", "stanley", "lqr", "mpc"),
+                    help="steering law, as pure_pursuit_node's steering_law")
+    ap.add_argument("--set", action="append", default=[],
+                    help="a pure_pursuit.yaml steering-law parameter, name=value (e.g. lookahead_speed_gain=0.25)")
     ap.add_argument("--online-lateral", type=float, default=None,
                     help="lateral limit of the controller's online curvature ceiling, m/s^2 (default: the planned one)")
     ap.add_argument("--steering-limit", type=float,
@@ -80,7 +84,8 @@ def main(argv=None) -> int:
                                speed=np.minimum(profiled, top))
         else:
             plan = plan_line(xy, top, lateral, args.brake, args.accel) if xy is not None else None
-        r = rv.run_pure_solo(track, args.seed, args.timeout, calibration=calibration, plan=plan,
+        r = rv.run_pure_solo(track, args.seed, args.timeout, calibration=calibration, plan=plan, law_name=args.law,
+                             law_params={k: float(v) for k, v in (item.split("=", 1) for item in args.set)} or None,
                              max_speed=top, max_lateral_accel=args.online_lateral or lateral, safety=args.safety,
                              laps=args.laps, steering_limit=args.steering_limit)
         print(f"top {top:.1f} lateral {lateral:.1f}: lap {r['lap_time_s']} finished {r['passed']} contact {r['contact_steps']} "
