@@ -9,3 +9,7 @@ pure_pursuit_node:
     # steering chain is not measured, so it keeps pure_pursuit.
     # why: car 2's measured steering delays make pure pursuit weave at race speed; delay_lqr predicts through them
     steering_law: delay_lqr
+    # why: car 2's offset-point pass hit cars/walls in all 48 traffic races; no swept-path planner exists
+    enable_opponent_overtake: false
+    # why: car 2's measured 4/3 m/s² speed loop and transport/lag require braking before the emergency tier
+    enable_opponent_following: true

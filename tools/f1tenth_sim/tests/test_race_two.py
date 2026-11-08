@@ -139,3 +139,182 @@ def test_source_safety_adapter_denies_blind_or_flank_contact(scan_kind):
     assert speed == 0.0
     assert steer is None
     assert state in ('lidar_scan_missing', 'lidar_scan_stale', 'body_contact')
+
+
+def test_shipped_car2_follows_after_confirmation_without_an_offset_target():
+    d, scan = decisions()
+    follower = race.rv.PathFollower(rectangle(), law_name='delay_lqr', car_id='rb2')
+    for now in np.arange(0, .125, .025):
+        d.observe([0, 0, 0, 1, 0], scan, float(now), 0)
+        _, _, _, target, _ = d.base_command(follower, [0, 0, 0, 1, 0], 0)
+        # oracle: spec; the shipped confirmation gate still spans .15s.
+        assert d.follow_speed_cap is None
+        assert target is None
+    for now in np.arange(.125, .3, .025):
+        d.observe([0, 0, 0, 1, 0], scan, float(now), 0)
+        _, _, _, target, _ = d.base_command(follower, [0, 0, 0, 1, 0], 0)
+    # oracle: invariant; a real confirmed car gets a physical-braking cap,
+    # never a point-offset target, in car 2's shipped configuration.
+    assert 0 < d.follow_speed_cap < 2
+    assert target is None
+    assert not d.overtake_active
+    assert d.enable_opponent_following and not d.enable_opponent_overtake
+
+
+@pytest.mark.parametrize('kind', ['clear', 'blocked', 'stale', 'invalid', 'nan', 'zero', 'short'])
+def test_lost_opponent_reacquisition_requires_a_visible_stopping_arc(kind):
+    d, scan = decisions()
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    # Map/scan input boundary: a known wall at y=.20. A 0.31m-wide car
+    # fits, but the inflated line corridor is occluded. All math is real.
+    def wall(x, y, yaw, beam_angles):
+        sine = np.sin(yaw + beam_angles)
+        return np.where(sine > .001, np.minimum(10, .2 / np.maximum(sine, .001)), 10)
+    scan[:] = wall(0, 0, 0, angles)
+    d.map_ray_caster.expected_ranges = wall
+    d.opponent.arc_length, d.opponent.last_update_time = 2.0, 0.0
+    d.opponent.progress_rate = 1.0
+    if kind == 'blocked':
+        scan[np.abs(angles) < .1] = .8
+    elif kind == 'invalid':
+        scan[:] = math.inf
+    elif kind == 'nan':
+        scan[:] = math.nan
+    elif kind == 'zero':
+        scan[:] = 0
+    elif kind == 'short':
+        scan = np.array([10.0])
+    d.observe([0, 0, 0, .1, 0], scan, 3.0, 0)
+    if kind == 'stale':
+        d.last_scan_time = 0.0
+    d._update_opponent_and_overtake(0, allow_pass=False, desired_steering=0)
+    # oracle: invariant; no blind timeout or escape from a blocked arc.
+    # The only permitted lost-track motion is the specified .25m/s crawl.
+    assert d.follow_speed_cap == (.25 if kind == 'clear' else 0.0)
+    assert not d.overtake_active
+
+
+def test_confirmed_car_behind_on_the_line_does_not_create_a_forward_follow_cap():
+    d, scan = decisions()
+    # Ego faces backwards here: the real detected object is in its scan's
+    # forward cone, but behind it along the racing line. This isolates
+    # the longitudinal gate used at folded/adjacent track sections.
+    for now in np.arange(0, .3, .025):
+        d.observe([5, 0, 0, 1, math.pi], scan, float(now), 0)
+        d._update_opponent_and_overtake(50, allow_pass=False)
+    # oracle: invariant; only an opponent ahead on the line triggers following.
+    assert d.opponent.arc_length < 5
+    assert d.follow_speed_cap is None
+    assert not d.overtake_active
+
+
+def test_following_retains_an_ahead_car_round_a_bend_outside_the_avoidance_cone():
+    d, scan = decisions()
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    # Rectangle's next leg is x=10, y increasing. Ego is at (8.5,0),
+    # opponent surface at (10,2): 3.5m ahead along the line, bearing >30°.
+    scan[:] = 10
+    bearing = math.atan2(2, 10 - 8.5 - d.laser_offset_x)
+    distance = math.hypot(2, 10 - 8.5 - d.laser_offset_x)
+    scan[np.abs(angles - bearing) < .08] = distance
+    for now in np.arange(0, .3, .025):
+        d.observe([8.5, 0, 0, 1, 0], scan, float(now), 0)
+        d._update_opponent_and_overtake(85, allow_pass=False)
+    # oracle: known geometry and confirmation spec; following must retain
+    # the real ahead car without borrowing the narrow avoidance aim cone.
+    assert d.opponent.arc_length == pytest.approx(12, abs=.05)  # 5cm surface-centroid discretisation
+    assert 0 < d.follow_speed_cap < d.max_speed
+    assert not d.overtake_active
+
+
+def test_speed_credit_needs_a_continuous_fresh_track_and_allows_braking():
+    tracker = race.OpponentTracker(.3, 1.0)
+    for now in np.arange(0, .351, .025):
+        tracker.update((39.5 + 3 * now) % 40, float(now), 40)
+    # oracle: closed form; 3m/s, minus 1m/s uncertainty and worst braking
+    # through half the .35s measurement interval. Seam wrapping must agree.
+    lower = tracker.speed_lower_bound(.35, 40, 1.0, 3.0)
+    expected_ema = 3 * (1 - .7 ** 14)
+    assert lower == pytest.approx(expected_ema - 1 - 3 * .35 / 2, abs=1e-9)  # m/s
+    assert tracker.speed_lower_bound(.461, 40, 1, 3) == 0
+    assert tracker.speed_lower_bound(.3, 40, 1, 3) == 0  # genuinely future observation
+    assert tracker.speed_lower_bound(.35, 40, -1, 3) == 0
+    assert tracker.speed_lower_bound(.35, 40, 1, 0) == 0
+    assert tracker.speed_lower_bound(.35, 40, math.nan, 3) == 0
+    tracker.update(3, 2.0, 40)
+    assert tracker.speed_lower_bound(2.0, 40, 1, 3) == 0
+    braking = race.OpponentTracker(1, 1)
+    for now in np.arange(0, .351, .025):
+        braking.update(3 * now - 1.5 * now ** 2, float(now), 40)
+    assert 0 < braking.speed_lower_bound(.35, 40, .1, 3) <= 3 - 3 * .35
+    braking.progress_rate = -1
+    assert braking.speed_lower_bound(.35, 40, .1, 3) == 0
+
+
+def test_old_surface_bound_is_retired_once_not_resurrected_each_lap():
+    d, scan = decisions()
+    scan[:] = 10
+    d.opponent.arc_length, d.opponent.last_update_time = 2, 0
+    d.observe([4, 0, 0, 1, 0], scan, 3, 0)
+    d._update_opponent_and_overtake(40, allow_pass=False)
+    # oracle: invariant; a safely traversed old location is not a new car
+    # ahead when progress next wraps. New detections still need confirmation.
+    assert d.follow_speed_cap is None
+    d.observe([0, 0, 0, 1, 0], scan, 20, 0)
+    d._update_opponent_and_overtake(0, allow_pass=False)
+    assert d.follow_speed_cap is None
+
+
+def test_opponent_reacquisition_does_not_alias_to_the_old_search_window():
+    d, scan = decisions()
+    d.opponent.prev_nearest_index = 300  # opposite part of the 40m rectangle
+    for now in np.arange(0, .3, .025):
+        d.observe([0, 0, 0, 1, 0], scan, float(now), 0)
+        d._update_opponent_and_overtake(0, allow_pass=False)
+    # oracle: geometry; surface is 2m ahead of laser x=.26 on y=0.
+    assert d.opponent.arc_length == pytest.approx(2.26, abs=.025)  # m, scan-centroid discretisation
+    assert 0 < d.follow_speed_cap < 2
+
+
+def test_unconfirmed_traffic_brakes_without_borrowing_gap_steering():
+    d, scan = decisions()
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    scan[np.abs(angles) < .08] = 1.1
+    d.opponent.arc_length = 2  # previously confirmed traffic memory
+    d.observe([0, 0, 0, 2, 0], scan, 3, 0)
+    steering, speed, state, _ = d._reactive_override(allow_avoidance=True, desired_steering=.25)
+    # oracle: delayed physical stop, with visible surface-to-front gap.
+    gap = 1.1 + .26 - (.58 + .36) / 2
+    expected = math.sqrt((3 * .45) ** 2 + 6 * (gap - .65)) - 3 * .45
+    assert steering is None
+    assert speed == pytest.approx(expected, abs=1e-9)  # m/s
+    assert state is None
+
+
+def test_source_adapter_completes_only_on_persistent_measured_body_lead():
+    d, scan = decisions()
+    d.enable_opponent_following = False  # isolate the explicitly opted-in legacy pass
+    for now in np.arange(0, .3, .025):
+        d.observe([4.8, 0, 0, 1, 0], scan, float(now), 0)
+        d._update_opponent_and_overtake(48, allow_pass=True)
+    assert d.overtake_active
+    # Ego rounds the right bend; the stationary observed surface at (7.06,0)
+    # is now behind but still in the physical 270° scan.
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    bearing = (math.atan2(-.5 - d.laser_offset_x, 7.06 - 10) - math.pi / 2 + math.pi) % (2 * math.pi) - math.pi
+    measured = np.full(1081, 10.0)
+    measured[np.abs(angles - bearing) < .055] = math.hypot(7.06 - 10, .5 + d.laser_offset_x)
+    observations = [(now, measured) for now in (.3, .325, .35, .375, .4)]
+    observations += [(.425, np.full(1081, 10.0))]
+    observations += [(float(now), measured) for now in np.arange(.45, .95, .025)]
+    for now, observation in observations:
+        d.observe([10, .5, 0, 1, math.pi / 2], observation, now, 0)
+        d._update_opponent_and_overtake(105, allow_pass=True)
+        # oracle: approved contract; a missing measurement resets the .5s
+        # hold, even though predicted progress already says ego is ahead.
+        assert d.overtake_active
+        assert not d.last_opponent_status.startswith('overtake complete:')
+    d.observe([10, .5, 0, 1, math.pi / 2], measured, .95, 0)
+    assert d._update_opponent_and_overtake(105, allow_pass=True) is None
+    assert not d.overtake_active
+    assert d.last_opponent_status.startswith('overtake complete: measured body lead')
