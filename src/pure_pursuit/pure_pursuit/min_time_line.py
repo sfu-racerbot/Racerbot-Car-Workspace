@@ -218,6 +218,7 @@ class MinTimeLine:
 def optimize_min_time(center, width_left, width_right, physics: CarPhysics, field_at, *, start=None,
                       half_width=0.155, wall_margin=0.10, emergency_stop_distance=0.35, cone_margin=0.10,
                       body_floor=0.08, control_spacing=1.0, smoothing=0.5, max_iter=300, repairs=8,
+                      body_floor_tight=None,
                       laser_x=0.26):
     """The fastest closed line inside the corridor that keeps every safety margin.
 
@@ -292,7 +293,7 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
         cone = cone_clearance(field_at, xy, laser_x=laser_x)
         body = footprint_clearance(field_at, xy, half_width=half_width)
         too_tight = np.abs(signed_curvature(xy)) > limit + 0.02
-        bad = (cone < need_cone) | (body < body_floor)
+        bad = (cone < need_cone) | (body < body_floor_at(xy, body_floor, body_floor_tight, limit))
         if not bad.any() and not too_tight.any():
             speed, _, _ = speed_profile(xy, physics)
             lap = lap_time(xy, physics)
@@ -317,6 +318,33 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
                        f'no line keeps every limit: forward cone {cone.min():.2f} m (need {need_cone:.2f}), '
                        f'body {body.min():.2f} m (need {body_floor:.2f}), curvature {tight:.2f}/m '
                        f'(limit {limit:.2f}/m)')
+
+
+def body_floor_at(xy, body_floor, body_floor_tight, curvature_limit, window_m=0.6):
+    """The body-clearance floor at each station of a closed line.
+
+    ``body_floor`` on straights; rising linearly to ``body_floor_tight`` as the line's curvature
+    goes from half the curvature limit to 90% of it, and held over ``window_m`` either side of
+    each such point (corner entry and exit). Tracking error is largest where the steering is
+    near its limit and has no reserve to correct (car 2, 2026-11-06 floor: max cross-track
+    0.28 m at the 06b hairpin against 0.09 m mean), so that is where the line needs room.
+    ``body_floor_tight`` None or equal to ``body_floor`` gives the constant floor.
+    """
+    xy = np.asarray(xy, dtype=float)
+    n = len(xy)
+    if body_floor_tight is None or body_floor_tight == body_floor:
+        return np.full(n, float(body_floor))
+    if not (math.isfinite(body_floor_tight) and body_floor_tight >= 0.0):
+        raise ValueError('body_floor_tight must be finite and non-negative')
+    if not (math.isfinite(curvature_limit) and curvature_limit > 0.0):
+        raise ValueError('curvature_limit must be finite and positive')
+    k = np.abs(signed_curvature(xy))
+    weight = np.clip((k / curvature_limit - 0.5) / 0.4, 0.0, 1.0)
+    spacing = float(np.median(_segments(xy))) if n > 1 else 1.0
+    half = max(0, int(round(window_m / max(spacing, 1e-6))))
+    if half:
+        weight = np.max([np.roll(weight, j) for j in range(-half, half + 1)], axis=0)
+    return body_floor + (body_floor_tight - body_floor) * weight
 
 
 def offsets_of(center, line_xy):

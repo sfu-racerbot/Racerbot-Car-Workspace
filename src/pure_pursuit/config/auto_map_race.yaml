@@ -196,7 +196,16 @@ auto_map_race_node:
     profile_speed_delay: 0.10  # s
     race_line_wall_margin: 0.15  # m
     race_line_cone_margin: 0.10  # m beyond the unchanged forward stop distance
-    race_line_body_floor: 0.08  # m
+    # Body clearance the racing line keeps from the walls (2026-11-07, was
+    # 0.08): it must cover the controller's tracking error. Simulated on car
+    # 2's 2026-11-06 floor, delay_lqr tracks within 0.09 m on average but up
+    # to 0.28-0.32 m where the steering is near its limit, so the floor rises
+    # from 0.22 m on straights to 0.30 m near the limit
+    # (min_time_line.body_floor_at). 0.08 put the line 0.11-0.15 m from walls
+    # at speed and every controller touched; this pair laps 06a/06b with no
+    # contact and no emergency stop (9 seeds each).
+    race_line_body_floor: 0.22  # m
+    race_line_body_floor_tight: 0.30  # m
     floor_test_speed: 1.5  # m/s, cap of raceline_floor_test.csv only
     profile_max_accel: 6.0
     # SAFETY-CRITICAL, and NOT the same knob as pure_pursuit.yaml's

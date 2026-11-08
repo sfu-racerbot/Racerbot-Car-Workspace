@@ -4,11 +4,20 @@ auto_map_race_node:
     # contacted or wedged. Leaves 0.04 rad below the controller's 0.42 cap.
     profile_max_steering_angle: 0.38
     # car_measure.py, 20261106-{163633,170803,171030}: 2.9-3.1 m/s^2
-    # achieved at hard requests (3.5-5 m/s^2), left turns.
-    profile_max_lateral_accel: 2.9
-    # Same three measured runs: 2.9-3.1 m/s^2 achieved, right turns.
-    profile_max_lateral_accel_right: 2.9
+    # achieved at hard requests (3.5-5 m/s^2). 3.2 (2026-11-07) is the
+    # simulator floor fitted to those runs by gyro replay (sfu_course_2026_11_06,
+    # grip x1.05, PR #32), on which 3.2 was fastest with no contact (06a/06b,
+    # 9 seeds each); tight corners are held lower by pure_pursuit's
+    # max_lateral_accel (2.7). Floor test: watch /imu slip on fast sweepers.
+    profile_max_lateral_accel: 3.2
+    # Same, right turns.
+    profile_max_lateral_accel_right: 3.2
     # Same runs, fitted speed loop: accel 4.0, brake 3.0 m/s^2.
     profile_max_accel: 4.0
     # Same runs: 0.349 rad commanded gave 0.345 at the wheels (0.99 ratio).
     profile_steering_linkage_gain: 0.99
+    # Same runs, fitted speed loop: 4 ticks (0.10 s) transport, then a
+    # first-order response at 7/s (1/7 = 0.14 s): braking lands ~0.24 s after
+    # the command. 0.22 s planned braking points early enough on the 06a/06b
+    # simulator courses with no contact (0.18 wedged at the 06b hairpin).
+    profile_speed_delay: 0.22
