@@ -59,7 +59,7 @@ def main(argv=None) -> int:
     ap.add_argument("--profiled", action="store_true",
                     help="--line is a profiled x,y,speed CSV: drive its own speeds instead of re-profiling it "
                          "(--speed and --lateral then only set the controller's ceilings)")
-    ap.add_argument("--law", default="pure_pursuit", choices=("pure_pursuit", "stanley", "lqr", "mpc"),
+    ap.add_argument("--law", default="pure_pursuit", choices=rv.tracking_laws.LAW_NAMES,
                     help="steering law, as pure_pursuit_node's steering_law")
     ap.add_argument("--set", action="append", default=[],
                     help="a pure_pursuit.yaml steering-law parameter, name=value (e.g. lookahead_speed_gain=0.25)")
@@ -89,7 +89,7 @@ def main(argv=None) -> int:
                              max_speed=top, max_lateral_accel=args.online_lateral or lateral, safety=args.safety,
                              laps=args.laps, steering_limit=args.steering_limit)
         print(f"top {top:.1f} lateral {lateral:.1f}: lap {r['lap_time_s']} finished {r['passed']} contact {r['contact_steps']} "
-              f"cross-track max {r['max_cross_track_m']} safety avoid {r['avoid_steps']} stop {r['stop_steps']} escape {r.get('escape_steps', 0)} "
+              f"cross-track max {r['max_cross_track_m']} mean {r['mean_cross_track_m']} safety avoid {r['avoid_steps']} stop {r['stop_steps']} escape {r.get('escape_steps', 0)} "
               f"lap times {[round(value, 2) for value in r['lap_times_s']]}", flush=True)
     return 0
 
