@@ -6,7 +6,22 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): arc-aware Tier 1 emergency check
+## 2026-11-07 (latest): delay LQR steering law, simulator only (not the default)
+
+### pure_pursuit
+
+- Add steering law `delay_lqr` (`steering_law:=delay_lqr`). It predicts the car's steering delays out of the loop (position estimate 2 ticks old, command transport 3 ticks, servo time constant 1/15 s), reads the curvature feedforward one servo time constant past the action point, and applies a speed-scheduled LQR. Code: `tracking_laws.py` (`DelayLqrLaw`, `ServoLqrGainTable`, `DelayLqrParams`), `pure_pursuit_node.py`, `run_commands.py`.
+- New parameters in `pure_pursuit.yaml`, launch-time only like the other laws' parameters: `delay_lqr.q_lateral` 1.0, `delay_lqr.q_heading` 1.0, `delay_lqr.r_steer` 1.0, `delay_lqr.v_grid_max` 6.0, `delay_lqr.sensing_delay` 0.05 s, `delay_lqr.actuation_delay` 0.075 s, `delay_lqr.servo_gain` 15 /s, `delay_lqr.servo_rate` 2.5 rad/s. The last four are car 2's floor values. Car 1's are not measured.
+- Default `steering_law` is still `pure_pursuit` for both cars. On the 2026-11-06 floor the law did not reach zero wall contact: after the merge, six of six judged runs contacted, against three of six for pure pursuit (all three on 06a).
+- The merge of origin/main (which includes PR #33) changed the delay law's 06b runs from a long safety stop to a wall contact after a short stop. Details: [Delay LQR results](docs/steering-laws.md#delay-lqr-results).
+- Tests: `test_delay_lqr_law.py` (32 tests), and in `test_tracking_law_integration.py` eight reach tests for the `delay_lqr.*` parameters plus `delay_lqr` in each law-parametrised node test. The law's tests and the reach tests were each seen to fail against a deliberate break.
+
+### No-ROS simulator
+
+- `pure_course.py` prints the mean cross-track next to the max. `--law` takes its choices from `tracking_laws.LAW_NAMES`.
+- The two racing lines behind the results are committed in `tools/f1tenth_sim/lines/`.
+
+## 2026-11-07: arc-aware Tier 1 emergency check
 
 **Behavior change. Simulator-validated only, not yet driven on the car.** Simulator validation has one
 line that contacts (06a, seed 12345), and the same contact happens on the code before this change.
