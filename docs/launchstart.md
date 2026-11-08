@@ -175,7 +175,7 @@ After the launch stops, `map_course` **checks the map against the run's own scan
 
 Here and below, replace `<id>` with `rb1` for car 1 or `rb2` for car 2. Replace the other angle-bracketed placeholders with the actual names too.
 
-- **`GO`:** the map is good, and the race commands at the end point at that folder. Its racing line comes from where the car really was on the finished map, capped at **1.5 m/s** for the first drive. The commands show how to go faster.
+- **`GO`:** the map is good, and the race commands at the end point at that folder. The builder selects the fastest acceptable line using the car's calibration. `raceline_profiled.csv` uses the shared **5.0 m/s** ceiling; `raceline_floor_test.csv` is the same path capped at **1.5 m/s** for the first floor test.
 - **`NO-GO`:** do not race on it. The most common reason is walls drawn twice. Map again, with the gyro on.
 
 **What you see next depends on how the run ended:**
@@ -194,6 +194,8 @@ ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<t
 **Working when:** each prints its report and saves it under that run's `analysis/` folder.
 
 `rebuild:=false` skips the map check. If recording is disabled, there is nothing to check.
+
+After the mapping launch has shut down, the offline builder also runs on the folder saved by the mapping node (the ROS program). It prints `Race line: choice: ...` on success. If it fails, `map_course` says why and keeps the node's profile. Optimization can take minutes; it runs after driving has stopped.
 
 Mapping defaults to a 3.5 m/s speed cap. The gyro SLAM profile was validated by replay only up to about 3.3 m/s. Raise the default only after a recorded gyro run at a higher speed produces a clean `slam_report`.
 
@@ -321,24 +323,39 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 
 ## Race on a saved map
 
-**Put the car anywhere on the course,** on open track and facing the racing direction (the way it drove while mapping). Keep it still until the race controller starts. The race launch matches the car's LiDAR scans (sweeps of distance readings, see [glossary](glossary.md)) against the whole saved map to find it, then starts the localizer there. Tested on recorded scans and in the simulator only; not yet driven.
+**Put the car anywhere on the course,** on open track and facing the racing direction (the way it drove while mapping). Keep it still until the race controller starts.
+
+The race launch matches the car's LiDAR scans (sweeps of distance readings, see [glossary](glossary.md)) against the whole saved map to find it, then starts the localizer there. Tested on recorded scans and in the simulator only; not yet driven.
 
 **Terminal 1:** the `bringup_launch.py` from mapping, still running. Start it again if you closed it.
 
-**Terminal 2**, pick one (the end-of-mapping printout has these with your run's folder already filled in):
+**First check with the wheels off the ground, then use the capped floor-test profile in open space. Hold LB whenever the car should move; releasing it stops the car.** The new line physics have simulator evidence, not floor validation.
+
+**Terminal 2:** set `RUN_DIR` to the `Saved in:` folder printed after mapping. In this car 2 example, replace `YOUR_RUN` with that folder's name; use `rb1` instead of `rb2` for car 1. The end-of-mapping commands already contain the full path.
+
+```bash
+RUN_DIR="$HOME/racerbot-ws/data/rb2/racerbot_auto/YOUR_RUN"
+ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR" profile:=raceline_floor_test.csv
+```
+
+**Working when:** `Particle filter is at the start pose; racing can begin.` appears, then the car follows the selected line at no more than 1.5 m/s while LB is held. A missing-profile error names the file and refuses to start; rebuild the line before testing.
+
+**After the floor test passes:** stop that launch with `Ctrl+C`. In the same Terminal 2, pick one default-speed command:
 
 ```bash
 # pure pursuit (the default racing controller)
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run>
+ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR"
 # Stanley
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run> steering_law:=stanley
+ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR" steering_law:=stanley
 # LQR
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run> steering_law:=lqr
+ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR" steering_law:=lqr
 # MPC
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run> steering_law:=mpc
+ros2 launch racerbot_launch race_launch.py run_dir:="$RUN_DIR" steering_law:=mpc
 ```
 
 **Working when:** `Particle filter is at the start pose; racing can begin.` appears (the race controller only starts after it), then the car drives the racing line while you hold LB.
+
+The default is `profile:=raceline_profiled.csv`, the builder's selected line at its planned speeds, up to 5.0 m/s. Details and manual rebuilding: [Minimum-time racing line](racing-autonomy.md#minimum-time-racing-line).
 
 **If it can't find the car,** the log says why, and it keeps trying for 2 minutes. Nothing drives in the meantime.
 

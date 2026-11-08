@@ -6,8 +6,10 @@
 map_course runs this after every run, so a run stopped early still keeps what it mapped. It takes the last
 /map in the bag, matches every scan against that map, and judges the map from the result. A line recorded from
 SLAM's live pose can run through the walls of the final map (docs/superpowers/specs/2026-10-30-slam-reliability.md),
-so the racing line here comes from the car's path on the map itself, through the same cleanup and limits a live
-mapping run uses (recorded_path.prepare, auto_map_race.yaml).
+so the racing line here is seeded from the car's path on the final map. The offline
+builder compares recorded, minimum-curvature and minimum-time candidates using
+the selected car's effective calibration. The selected profile uses the car's
+speed ceiling; raceline_floor_test.csv is the identical path capped at floor_test_speed.
 
 Writes <out-root>/<run name>-rebuilt/, never over an existing folder, with commands.txt last, so a rebuild that
 dies part-way leaves no folder that looks finished. A map refused by the verdict gets no raceline_profiled.csv,

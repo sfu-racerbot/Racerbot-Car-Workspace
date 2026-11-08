@@ -107,7 +107,8 @@ def generate_launch_description():
 
     * ``run_dir:=<dir>`` -- a run directory written by a mapping run
       (``ros2 run racerbot_launch map_course``, or auto_map_race_launch.py).
-      Uses that run's map.yaml and raceline_profiled.csv, and finds the car
+      Uses that run's map.yaml and the selected profile (raceline_profiled.csv
+      by default; profile:=raceline_floor_test.csv for the first floor test), and finds the car
       from LiDAR anywhere on the open course facing the racing direction.
       With start:=start_pose, seed at the mapping stop instead (map origin
       if no start pose was recorded). This is what map_course prints.

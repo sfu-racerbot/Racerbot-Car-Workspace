@@ -63,6 +63,49 @@ Two words worth pinning down before you go further, because the rest of the doc 
 
 ---
 
+## Minimum-time racing line
+
+`map_course` and `tools/run_analysis/rebuild_run.py` use one offline builder for both cars. After the mapping launch shuts down, it compares the cleaned recorded path, a minimum-curvature path (gentler corners) and a minimum-time path (the lowest estimated lap time). The default `race_line_mode: fastest` selects the fastest candidate that passes the checks.
+
+The builder checks the closed-loop final waypoints against the car's steering limit, mapped body clearance and forward-cone clearance. The cone must remain beyond the controller's effective `emergency_stop_distance` plus a 0.10 m planning margin. These checks do not alter the controller's safety thresholds.
+
+Configuration loads shared `auto_map_race.yaml`, then the selected car's calibration. Car 1 has no supervisor overlay. The principal physics values are:
+
+| Planning value | Car 1 | Car 2 |
+|---|---|---|
+| Steering limit | 0.30 rad | 0.38 rad, below its 0.42 rad controller cap |
+| Lateral acceleration, left and right | 2.5 m/s² | 2.9 m/s² |
+| Acceleration / braking | 6.0 / 3.0 m/s² | 4.0 / 3.0 m/s² |
+| Wheel angle / commanded angle | 1.0 | 0.99 |
+
+Both use a 5.0 m/s speed ceiling, a 1.0 rad/s steering-rate limit and 0.10 s steering and speed delays. Shared settings are a 0.15 m optimization wall margin, a 0.10 m forward-cone margin and a 0.08 m final body-clearance floor.
+
+Car 2's calibration cites `car_measure.py` over runs `20261106-163633`, `170803` and `171030`; see [Hardware reference](hardware-reference.md).
+
+On success the builder writes `raceline_profiled.csv`, an identical path capped at 1.5 m/s in `raceline_floor_test.csv`, and candidate verdicts in `race_line.json`. Rebuilds also record the selected car, effective parameters and candidate metrics in `rebuild.json`.
+
+`map_course` prints a one-line result; on builder failure it restores the node's original profile and says why. A rebuild with no acceptable candidate writes no raceable profile.
+
+**Terminal 2, after mapping has shut down:** to rebuild a saved mapping folder manually, set `RUN_DIR` to the `Saved in:` path, then run:
+
+```bash
+python3 -m pure_pursuit.race_line --run-dir "$RUN_DIR"
+```
+
+**Working when:** the last result line starts `choice:` and names the selected source, and both CSV files exist.
+
+`--car rb1` or `--car rb2` selects a car explicitly when working offline; otherwise the tool uses the current car. `race_line_mode` can also require `recorded`, `min_curvature` or `min_time`; a required mode refuses a failed candidate instead of choosing another source.
+
+### Limitations
+
+This chooses the lowest estimated time among the accepted candidates, not a proven global optimum. Car 2's 6 Nov simulator courses, three seeds each, gave flying laps of 10.97–11.10 s on 06a and 9.15–9.40 s on 06b at 2.9 m/s² and 0.38 rad, with no contact.
+
+The corresponding `gap_follow` times were 11.35 s and 8.46 s, so the mapped line was not faster on both courses. Planning at 0.42 rad caused contact or wedging.
+
+**Follow the static checks, wheels-off-the-ground check and capped floor test before using the default-speed line. Keep LB held to drive.** These defaults have simulator evidence only.
+
+The driving supervisor still writes its own profile; minimum-time optimization never runs inside a driving node. The continuous map-and-race launch below therefore uses the supervisor's existing profiling path.
+
 ## The fast path: map and race from one launch
 
 The five phases further down are still the best way to *understand* the stack, and they remain available individually for reusing a saved course. But for a course the car has never seen, the supported route is one command:

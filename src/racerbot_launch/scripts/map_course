@@ -22,9 +22,11 @@ run's scans against its last map and judges it (``rebuild:=false`` skips that), 
 run stopped with Ctrl+C keeps what it mapped, and the last thing on screen says
 whether the map is good enough to race on.
 
-A run that finishes by itself then just prints the commands. One stopped with Ctrl+C,
-or that fails, gets a short summary first. The in-depth reports take minutes, so they
-only run with ``analysis:=true``; the summary says how to run them later.
+After shutdown the offline racing-line builder compares candidates and writes the
+selected profile plus a capped floor-test copy. It can take minutes. On failure
+the node's profile is retained. A run stopped with Ctrl+C, or one that fails, gets
+a short summary before the commands. In-depth reports only run with
+``analysis:=true``; the summary says how to run them later.
 
 Hold LB the whole time the car should move. See docs/launchstart.md.
 """
@@ -175,7 +177,8 @@ def rebuild_step(run, parent, handle, argv=()):
     for arg in argv:
         if arg.startswith('supervisor_config:='):
             command += ['--config', os.path.expanduser(arg.split(':=', 1)[1])]
-    emit('Checking the map against this run\'s scans (about 20 s; Ctrl+C skips it)...')
+    emit('Checking the map against this run\'s scans and building the racing line '
+         '(can take minutes; Ctrl+C skips it)...')
     try:
         # Its own session, so only the wrapper hears a second Ctrl+C at the terminal.
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -204,6 +207,8 @@ def build_profile(run, argv, handle):
             command += ['--config', os.path.expanduser(arg.split(':=', 1)[1])]
     process = None
     try:
+        print('Building the racing line offline (can take minutes; Ctrl+C keeps the node profile)...',
+              flush=True)
         for name in outputs:
             path = run / name
             originals[path] = path.read_bytes() if path.is_file() else None
