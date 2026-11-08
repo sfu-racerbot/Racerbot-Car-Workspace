@@ -89,7 +89,7 @@ def main(argv=None) -> int:
                              max_speed=top, max_lateral_accel=args.online_lateral or lateral, safety=args.safety,
                              laps=args.laps, steering_limit=args.steering_limit)
         print(f"top {top:.1f} lateral {lateral:.1f}: lap {r['lap_time_s']} finished {r['passed']} contact {r['contact_steps']} "
-              f"cross-track max {r['max_cross_track_m']} safety avoid {r['avoid_steps']} stop {r['stop_steps']} "
+              f"cross-track max {r['max_cross_track_m']} safety avoid {r['avoid_steps']} stop {r['stop_steps']} escape {r.get('escape_steps', 0)} "
               f"lap times {[round(value, 2) for value in r['lap_times_s']]}", flush=True)
     return 0
 
