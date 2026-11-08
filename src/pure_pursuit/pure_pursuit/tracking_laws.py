@@ -1152,9 +1152,9 @@ class DelayMpcParams:
     dt: float = 0.025
     horizon_steps: int = 32
     q_lateral: float = 4.0
-    q_heading: float = 1.0
+    q_heading: float = 4.0
     r_steer: float = 1.0
-    r_rate: float = 0.001
+    r_rate: float = 0.0
     deadline_sec: float = 0.008
     max_iter: int = 4000
     max_consecutive_misses: int = 3

@@ -1112,7 +1112,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             ),
         }
     )
-    if law_name == "mpc":
+    if law_name in tracking_laws.DEADLINE_LAWS:
         policy = follower.law.miss_policy
         result.update({
             "mpc_miss_steps": follower.mpc_miss_steps,
