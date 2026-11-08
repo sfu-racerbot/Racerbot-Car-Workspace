@@ -267,6 +267,25 @@ def test_delay_and_smoothing_params_reach_the_law(node_factory, law_name, dotted
     assert getattr(node.tracking_law.params, field) == 0.237
 
 
+@pytest.mark.parametrize('dotted, field, value', [
+    # Distinct value per key, so two same-typed keys swapped on the way into
+    # make_law fail too. The value is passed through unchanged, so exact
+    # equality is the oracle. Without this test a launch-time delay_lqr.* value
+    # can be declared and then silently dropped before make_law, and the
+    # default wins without any error.
+    ('delay_lqr.q_lateral', 'q_lateral', 0.237),
+    ('delay_lqr.q_heading', 'q_heading', 0.341),
+    ('delay_lqr.r_steer', 'r_steer', 0.443),
+    ('delay_lqr.v_grid_max', 'v_grid_max', 4.5),
+    ('delay_lqr.sensing_delay', 'sensing_delay', 0.031),
+    ('delay_lqr.actuation_delay', 'actuation_delay', 0.042),
+    ('delay_lqr.servo_gain', 'servo_gain', 11.0),
+    ('delay_lqr.servo_rate', 'servo_rate', 1.9)])
+def test_delay_lqr_params_reach_the_law(node_factory, dotted, field, value):
+    node = node_factory('delay_lqr', ['-p', f'{dotted}:={value}'])
+    assert getattr(node.tracking_law.params, field) == value
+
+
 def _tune(node, **values):
     result = node._parameter_callback([
         Parameter(name, Parameter.Type.DOUBLE, float(value))
