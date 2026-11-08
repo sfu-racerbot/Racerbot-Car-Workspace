@@ -224,13 +224,114 @@ def closest_valid(scan: np.ndarray, half_angle_rad: float, car_id=None) -> float
     return float(values.min()) if values.size else math.inf
 
 
+def _valid_returns(ranges: np.ndarray) -> np.ndarray:
+    """Finite, positive and at least the sensor's range_min -- the node's own test."""
+    return np.isfinite(ranges) & (ranges > 0.0) & (ranges >= _lidar().range_min)
+
+
+def _beam_angles(lo: int, hi: int) -> np.ndarray:
+    lidar = _lidar()
+    return lidar.angle_min + np.arange(lo, hi + 1) * lidar.angle_increment
+
+
+def _body_boundaries(lo: int, hi: int, params) -> np.ndarray:
+    """LiDAR-to-body-edge distance per beam, as pure_pursuit_node builds it."""
+    return racing_math.vehicle_boundary_distances(
+        _beam_angles(lo, hi), float(params['car_width']), float(params['car_length']),
+        float(params['wheelbase']), float(params['laser_offset_x']),
+        float(params['laser_offset_y']))
+
+
+def _footprint_clearance(scan, params) -> float:
+    """pure_pursuit_node._footprint_clearance: the nearest valid return to the car's body
+    over body_clearance_fov_deg (180 deg, both flanks). inf when nothing is valid."""
+    lo, hi = cone_indices(math.radians(float(params['body_clearance_fov_deg'])) / 2.0, _CAR_ID)
+    if hi <= lo:
+        return math.inf
+    ranges = np.asarray(scan[lo:hi + 1], dtype=float)
+    return racing_math.minimum_footprint_clearance(
+        ranges, _valid_returns(ranges), _body_boundaries(lo, hi, params))
+
+
+def _forward_body_clearance(scan, params) -> float:
+    """pure_pursuit_node._forward_body_clearance: the same minimum restricted to the
+    avoidance cone. Equal to _footprint_clearance means the worst contact is dead ahead."""
+    lo, hi = cone_indices(math.radians(float(params['body_clearance_fov_deg'])) / 2.0, _CAR_ID)
+    if hi <= lo:
+        return math.inf
+    ranges = np.asarray(scan[lo:hi + 1], dtype=float)
+    return racing_math.minimum_footprint_clearance_in_cone(
+        ranges, _valid_returns(ranges), _beam_angles(lo, hi),
+        _body_boundaries(lo, hi, params), math.radians(float(params['avoidance_fov_deg'])))
+
+
+def _emergency_escape(scan, body_clearance: float, clearance_floor: float, params):
+    """pure_pursuit_node._emergency_escape: (steering, speed) crawling toward a real
+    opening, or None when the caller must stop.
+
+    Same gates as the node: the escape speed must be positive, the whole body must keep
+    more than clearance_floor of room, and the avoidance cone must hold a gap deeper than
+    emergency_escape_min_gap. The gap's centre beam sets the steering, clipped to the
+    steering limit. NaN reads as blocked and +inf as open, as _sanitized_window does.
+    """
+    escape_speed = float(params['emergency_escape_speed'])
+    if escape_speed <= 0.0:
+        return None
+    if body_clearance <= clearance_floor:
+        return None
+    lo, hi = cone_indices(math.radians(float(params['avoidance_fov_deg'])) / 2.0, _CAR_ID)
+    if hi <= lo:
+        # _sanitized_window returns an empty window for a cone of one beam.
+        return None
+    max_range = float(params['max_range'])
+    window = np.asarray(scan[lo:hi + 1], dtype=float)
+    window = np.nan_to_num(window, nan=0.0, posinf=max_range, neginf=0.0)
+    window = np.clip(window, 0.0, max_range)
+    gap_start, gap_end = racing_math.find_best_gap(
+        window, float(params['emergency_escape_min_gap']))
+    if gap_start is None:
+        return None
+    target = lo + (gap_start + gap_end) // 2
+    lidar = _lidar()
+    steering = float(np.clip(lidar.angle_min + target * lidar.angle_increment,
+                             -STEERING_LIMIT, STEERING_LIMIT))
+    return steering, escape_speed
+
+
 def apply_map_safety(scan, steering: float, speed: float, car_id=None) -> tuple[float, float, str]:
-    """On the car's own map, walls do not trigger avoidance; retain raw emergency stop."""
+    """The emergency tiers of pure_pursuit_node._reactive_override, on the car's own map.
+
+    Walls do not trigger avoidance here (the map explains them), so only the emergency
+    tiers run. Returns (steering, speed, result), where result is:
+
+    * "escape": the node would crawl out (_emergency_escape): steering toward the best
+      opening at emergency_escape_speed, because the whole body still has room.
+    * "stop": the node would hard-stop. Tier 0 (body contact within emergency_stop_clearance)
+      stops unless the contact is dead ahead and a gap exists to crawl into; tier 1 (a return
+      inside emergency_stop_distance in the safety cone) stops unless the body clears
+      emergency_escape_clearance and a gap exists.
+    * "none": nothing is inside the emergency tiers, and the command passes through.
+    """
     _ensure_config(car_id)
     params = PURE_PURSUIT_PARAMS
+    body = _footprint_clearance(scan, params)
+    # Tier 0: body contact, measured over every beam in body_clearance_fov_deg.
+    if body <= float(params['emergency_stop_clearance']):
+        forward = _forward_body_clearance(scan, params)
+        # A flank contact is not made safer by steering toward a forward gap.
+        if math.isclose(forward, body, rel_tol=0.0, abs_tol=1e-6):
+            crawl = _emergency_escape(
+                scan, body, float(params['body_contact_escape_clearance']), params)
+            if crawl is not None:
+                return crawl[0], crawl[1], "escape"
+        return steering, 0.0, "stop"
+    # Tier 1: a return inside emergency_stop_distance in the safety cone.
     distance = closest_valid(
         scan, math.radians(float(params['safety_fov_deg']) / 2.0), _CAR_ID)
     if distance < float(params['emergency_stop_distance']):
+        crawl = _emergency_escape(scan, body, float(params['emergency_escape_clearance']), params)
+        if crawl is not None:
+            return crawl[0], crawl[1], "escape"
         return steering, 0.0, "stop"
     return steering, speed, "none"
 
@@ -864,6 +965,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     min_scan = math.inf
     avoid_steps = 0
     stop_steps = 0
+    escape_steps = 0
     lap_time_s = None
     lap_times: list[float] = []
     lap_times_clock: list[float] = []
@@ -902,12 +1004,21 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                 ego["scan"], steering, speed, car_id=car_id)
             avoid_steps += int(safety_result == "avoid")
             stop_steps += int(safety_result == "stop")
+            escape_steps += int(safety_result == "escape")
 
             if error > 1.0:
                 speed = 0.0
                 stop_steps += 1
 
-            hard_speed_cap = 1.0 if safety_result == "avoid" else command_shaper.max_speed
+            if safety_result == "avoid":
+                hard_speed_cap = 1.0
+            elif safety_result == "escape":
+                # The node clamps its ceiling to the override speed as well:
+                # hard_speed_cap = min(hard_speed_cap, speed_override).
+                hard_speed_cap = min(command_shaper.max_speed,
+                                     float(PURE_PURSUIT_PARAMS['emergency_escape_speed']))
+            else:
+                hard_speed_cap = command_shaper.max_speed
             steering, speed = command_shaper.command(
                 steering, speed, hard_speed_cap,
                 measured_speed=ego["std_state"][3])
@@ -957,6 +1068,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             "min_forward_scan_m": round(min_scan, 4),
             "avoid_steps": avoid_steps,
             "stop_steps": stop_steps,
+            "escape_steps": escape_steps,
             "profile_min_mps": round(float(plan.speed.min()), 3),
             "profile_max_mps": round(float(plan.speed.max()), 3),
             "estimated_lap_time_s": round(
