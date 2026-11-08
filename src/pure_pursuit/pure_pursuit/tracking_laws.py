@@ -988,7 +988,96 @@ class ServoLqrGainTable:
         return self._gains[lo] + t * (self._gains[hi] - self._gains[lo])
 
 
-class DelayLqrLaw:
+class DelayPredictor:
+    """Command history, servo estimate and sensed-pose rollout shared by delay laws.
+
+    The caller records its output only after a successful control computation;
+    an intervening shaped/fallback command therefore re-seeds the estimate.
+    """
+
+    # At 15/s and 40 Hz the unknown initial error decays by 0.625 per tick.
+    # Require lock-to-lock slew plus a 1e-3 settling tail to fit this window.
+    SERVO_WARMUP_TICKS = 40
+
+    def __init__(self, limits, params):
+        _check_delay('delay_lqr.sensing_delay', params.sensing_delay)
+        _check_delay('delay_lqr.actuation_delay', params.actuation_delay)
+        if not (math.isfinite(params.servo_rate) and params.servo_rate > 0.0):
+            raise ValueError(f'delay_lqr.servo_rate must be > 0, got {params.servo_rate}')
+        self.limits = limits
+        self.params = params
+        dt = limits.control_dt
+        servo_step = params.servo_gain * dt
+        if math.isfinite(servo_step) and 0.0 < servo_step < 1.0:
+            tail = math.log(1e-3) / math.log(1.0 - servo_step)
+        else:
+            tail = 1.0
+        slew = 2.0 * limits.max_steering_angle / (params.servo_rate * dt)
+        if slew + tail > self.SERVO_WARMUP_TICKS:
+            raise ValueError(
+                f'delay_lqr: the servo (gain {params.servo_gain}/s, rate {params.servo_rate} rad/s) '
+                f'needs {slew + tail:.0f} ticks to settle, more than the '
+                f'{self.SERVO_WARMUP_TICKS}-tick history the estimate runs over')
+        self.sensing_ticks = int(round(params.sensing_delay / dt))
+        self.actuation_ticks = int(round(params.actuation_delay / dt))
+        self.horizon_ticks = self.sensing_ticks + self.actuation_ticks
+        self._history: deque = deque(
+            maxlen=self.SERVO_WARMUP_TICKS + self.horizon_ticks + 1)
+        self._last_output = None
+
+    def reset(self):
+        self._history.clear()
+        self._last_output = None
+
+    def _wheel_angles(self):
+        sensing, actuation = self.sensing_ticks, self.actuation_ticks
+        gain, rate = self.params.servo_gain, self.params.servo_rate
+        dt = self.limits.control_dt
+        history = self._history
+        delta = float(history[-(actuation + sensing + self.SERVO_WARMUP_TICKS)])
+        angles = []
+        for offset in range(-(sensing + self.SERVO_WARMUP_TICKS), actuation):
+            if offset >= -sensing:
+                angles.append(delta)
+            command = history[-(actuation - offset)]
+            servo_velocity = min(max(gain * (command - delta), -rate), rate)
+            delta += servo_velocity * dt
+        return angles, delta
+
+    def action_state(self, inp, path):
+        """Return (projection, heading error, wheel angle) at command arrival."""
+        _require_finite(inp.x, inp.y, inp.yaw, inp.speed, inp.previous_steering)
+        L = self.limits.wheelbase
+        dt = self.limits.control_dt
+        previous = float(inp.previous_steering)
+        last = self._last_output
+        if self._history and last is not None and abs(previous - last) <= 1e-6:
+            self._history.append(previous)
+        else:
+            self._history.clear()
+            self._history.extend([previous] * self._history.maxlen)
+        angles, delta = self._wheel_angles()
+        v = max(float(inp.speed), 0.0)
+        x, y, psi = float(inp.x), float(inp.y), float(inp.yaw)
+        for angle in angles:
+            kappa = math.tan(angle) / L
+            dpsi = v * dt * kappa
+            if abs(kappa) < 1e-9:
+                x += v * dt * math.cos(psi)
+                y += v * dt * math.sin(psi)
+            else:
+                x += (math.sin(psi + dpsi) - math.sin(psi)) / kappa
+                y -= (math.cos(psi + dpsi) - math.cos(psi)) / kappa
+            psi += dpsi
+        walked = racing_math.find_lookahead_index(
+            path.seg_len, inp.nearest_idx, v * dt * self.horizon_ticks, closed=path.closed)
+        nearest, _ = racing_math.find_nearest_index(
+            path.xy, (x, y), closed=path.closed, prev_index=walked, search_window=6)
+        proj = racing_math.project_onto_path(path.xy, path.seg_len, (x, y), nearest, path.closed)
+        return proj, _wrap(psi - proj.heading), delta
+
+
+class DelayLqrLaw(DelayPredictor):
     """Steer for the command's effect, not the pose's age.
 
     A command computed now acts on the wheels `sensing_delay + actuation_delay`
@@ -1016,39 +1105,9 @@ class DelayLqrLaw:
 
     name = 'delay_lqr'
 
-    # Ticks of command history the servo estimate runs over. Its error from an
-    # unknown start shrinks by 1 - g*dt (0.625 at 15/s, 40 Hz) a tick, so 40 is
-    # ~1e-8 of the start error.
-    SERVO_WARMUP_TICKS = 40
-
     def __init__(self, limits: VehicleLimits, params: DelayLqrParams):
-        _check_delay('delay_lqr.sensing_delay', params.sensing_delay)
-        _check_delay('delay_lqr.actuation_delay', params.actuation_delay)
-        if not (math.isfinite(params.servo_rate) and params.servo_rate > 0.0):
-            raise ValueError(f'delay_lqr.servo_rate must be > 0, got {params.servo_rate}')
-        self.limits = limits
-        self.params = params
+        super().__init__(limits, params)
         dt = limits.control_dt
-        # The servo estimate is rebuilt each tick over SERVO_WARMUP_TICKS of
-        # history, starting at the oldest command in the window. It must be able
-        # to settle inside that window from any start: a full lock-to-lock slew
-        # at servo_rate, then the first-order tail down to 1e-3 of the step.
-        # A slower servo than that would leave a lasting wheel-angle error, so
-        # refuse it rather than predict with it.
-        servo_step = params.servo_gain * dt
-        if math.isfinite(servo_step) and 0.0 < servo_step < 1.0:
-            tail = math.log(1e-3) / math.log(1.0 - servo_step)
-        else:
-            tail = 1.0
-        slew = 2.0 * limits.max_steering_angle / (params.servo_rate * dt)
-        if slew + tail > self.SERVO_WARMUP_TICKS:
-            raise ValueError(
-                f'delay_lqr: the servo (gain {params.servo_gain}/s, rate {params.servo_rate} rad/s) '
-                f'needs {slew + tail:.0f} ticks to settle, more than the '
-                f'{self.SERVO_WARMUP_TICKS}-tick history the estimate runs over')
-        self.sensing_ticks = int(round(params.sensing_delay / dt))
-        self.actuation_ticks = int(round(params.actuation_delay / dt))
-        self.horizon_ticks = self.sensing_ticks + self.actuation_ticks
         self._table = ServoLqrGainTable(
             params.q_lateral, params.q_heading, params.r_steer, dt,
             limits.wheelbase, params.servo_gain, params.v_grid_max)
@@ -1057,41 +1116,6 @@ class DelayLqrLaw:
         # at 63% of a step after one time constant), so the curvature the wheels
         # need when they reach the command is the one further along the line.
         self.feedforward_lead = 1.0 / params.servo_gain
-        # Enough commands for the servo warm-up: the warm-up starts
-        # SERVO_WARMUP_TICKS + sensing ticks back, and the oldest command it
-        # reads is actuation ticks older than that.
-        self._history: deque = deque(
-            maxlen=self.SERVO_WARMUP_TICKS + self.horizon_ticks + 1)
-        self._last_output = None
-
-    def reset(self) -> None:
-        self._history.clear()
-        self._last_output = None
-
-    def _wheel_angles(self):
-        """(angles, delta_at_action): the wheel angle at each tick the sensed
-        pose is rolled through, and the angle when this command acts.
-
-        Tick offsets are relative to now (0). The pose is from -sensing ticks; the
-        command issued now enters the transport at 0 and reaches the servo at
-        +actuation ticks. Command `u` from q ticks ago is history[-q], and the
-        servo sees at tick j the command issued at j - actuation.
-        """
-        sensing, actuation = self.sensing_ticks, self.actuation_ticks
-        gain, rate = self.params.servo_gain, self.params.servo_rate
-        dt = self.limits.control_dt
-        history = self._history
-        # Start from the oldest command the warm-up reads, not from zero: after
-        # a re-seed every entry is that command and the estimate is exact.
-        delta = float(history[-(actuation + sensing + self.SERVO_WARMUP_TICKS)])
-        angles = []
-        for offset in range(-(sensing + self.SERVO_WARMUP_TICKS), actuation):
-            if offset >= -sensing:
-                angles.append(delta)
-            command = history[-(actuation - offset)]
-            servo_velocity = min(max(gain * (command - delta), -rate), rate)
-            delta += servo_velocity * dt
-        return angles, delta
 
     def steer(self, inp: TrackingInput, path: PathContext) -> SteeringResult:
         _require_finite(inp.x, inp.y, inp.yaw, inp.speed, inp.previous_steering)
@@ -1099,41 +1123,9 @@ class DelayLqrLaw:
         dt = self.limits.control_dt
         limit = self.limits.max_steering_angle
         previous = float(inp.previous_steering)
-        # The history is one entry per tick of *this law's* commands. If the
-        # command applied last tick is not what this law returned (a stop, a
-        # recovery, an escape or another law published in between), the gap's
-        # commands and timing are unknown: re-seed as if the rack had held the
-        # applied command, instead of replaying stale steering as recent.
-        last = getattr(self, '_last_output', None)
-        if self._history and last is not None and abs(previous - last) <= 1e-6:
-            self._history.append(previous)     # the command applied last tick
-        else:
-            self._history.clear()
-            self._history.extend([previous] * self._history.maxlen)
-        angles, delta = self._wheel_angles()
+        proj, theta, delta = self.action_state(inp, path)
         v = max(float(inp.speed), 0.0)
-
-        # Roll the sensed pose through the ticks until this command acts: each
-        # tick is a constant-curvature arc at that tick's wheel angle.
-        x, y, psi = float(inp.x), float(inp.y), float(inp.yaw)
-        for angle in angles:
-            kappa = math.tan(angle) / L
-            dpsi = v * dt * kappa
-            if abs(kappa) < 1e-9:
-                x += v * dt * math.cos(psi)
-                y += v * dt * math.sin(psi)
-            else:
-                x += (math.sin(psi + dpsi) - math.sin(psi)) / kappa
-                y -= (math.cos(psi + dpsi) - math.cos(psi)) / kappa
-            psi += dpsi
-
-        walked = racing_math.find_lookahead_index(
-            path.seg_len, inp.nearest_idx, v * dt * self.horizon_ticks, closed=path.closed)
-        nearest, _ = racing_math.find_nearest_index(
-            path.xy, (x, y), closed=path.closed, prev_index=walked, search_window=6)
-        proj = racing_math.project_onto_path(path.xy, path.seg_len, (x, y), nearest, path.closed)
         e = proj.lateral_error
-        theta = _wrap(psi - proj.heading)
         lead_arc = proj.arc_length + v * self.feedforward_lead
         kappa_at_action = sample_at_arc(path.curvature, path.cumulative, lead_arc, path.closed, path.seg_len)
         feedforward = math.atan(L * kappa_at_action)
