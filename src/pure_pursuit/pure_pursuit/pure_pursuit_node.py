@@ -68,7 +68,7 @@ from std_msgs.msg import String
 
 from drive_intent import predict, schema
 from drive_intent.throttle import FailureLatch, IntentThrottle
-from pure_pursuit import live_tuning, racing_math, tracking_laws
+from pure_pursuit import following, live_tuning, racing_math, tracking_laws
 from pure_pursuit.opponent_gate import OpponentGate, WallDistance
 
 
@@ -298,6 +298,7 @@ class PurePursuitNode(Node):
         # --- Opponent detection, tracking, and overtaking -- see
         # docs/racing-autonomy.md's "Racing against opponents" ---
         self.declare_parameter('enable_opponent_overtake', True)
+        self.declare_parameter('enable_opponent_following', False)
         self.declare_parameter('opponent_min_width', 0.15)
         self.declare_parameter('opponent_max_width', 0.7)
         self.declare_parameter('opponent_cluster_gap', 0.3)
@@ -518,6 +519,8 @@ class PurePursuitNode(Node):
         self.avoidance_speed = float(self.get_parameter('avoidance_speed').value)
 
         self.enable_opponent_overtake = bool(self.get_parameter('enable_opponent_overtake').value)
+        self.enable_opponent_following = bool(self.get_parameter('enable_opponent_following').value)
+        self.follow_speed_cap = None
         self.opponent_min_width = float(self.get_parameter('opponent_min_width').value)
         self.opponent_max_width = float(self.get_parameter('opponent_max_width').value)
         self.opponent_cluster_gap = float(self.get_parameter('opponent_cluster_gap').value)
@@ -1663,8 +1666,11 @@ class PurePursuitNode(Node):
         # the car is confidently on the line, and chasing a pass while
         # significantly off it would fight the recovery aim point instead
         # of helping reach it. ---
-        if not recovering and self.enable_lidar_safety and self.enable_opponent_overtake:
-            overtake_target = self._update_opponent_and_overtake(nearest_idx)
+        self.follow_speed_cap = None
+        if not recovering and self.enable_lidar_safety and (
+                self.enable_opponent_overtake or self.enable_opponent_following):
+            overtake_target = self._update_opponent_and_overtake(
+                nearest_idx, allow_pass=self.enable_opponent_overtake)
             if overtake_target is not None:
                 target_x, target_y = overtake_target
                 dx = target_x - self.car_x
@@ -1706,12 +1712,12 @@ class PurePursuitNode(Node):
             # steering_angle here is this tick's steering before the override:
             # Tier 1's arc check needs it as the arc the car is being steered onto.
             steering_override, speed_override, reactive_state, reactive_detail = self._reactive_override(
-                allow_avoidance=not self.overtake_active,
+                allow_avoidance=not self.overtake_active and self.follow_speed_cap is None,
                 desired_steering=steering_angle)
             if steering_override is not None:
                 steering_angle = steering_override
             if speed_override is not None:
-                speed_cmd = speed_override
+                speed_cmd = min(speed_cmd, speed_override) if reactive_state is None else speed_override
                 hard_speed_cap = min(hard_speed_cap, speed_override)
                 intent_reactive_cap = speed_override
             if reactive_state is not None:
@@ -1720,6 +1726,9 @@ class PurePursuitNode(Node):
             else:
                 decision_detail += f"; {reactive_detail}"
 
+        if self.follow_speed_cap is not None:
+            speed_cmd = min(speed_cmd, self.follow_speed_cap)
+            hard_speed_cap = min(hard_speed_cap, self.follow_speed_cap)
         desired_steering = steering_angle
         desired_speed = speed_cmd
         if desired_speed <= 0.0 or hard_speed_cap <= 0.0:
@@ -2481,7 +2490,7 @@ class PurePursuitNode(Node):
             return None
         return candidate
 
-    def _update_opponent_and_overtake(self, nearest_idx: int):
+    def _update_opponent_and_overtake(self, nearest_idx: int, *, allow_pass=True):
         """Look for another car in the live scan, track its progress along
         the racing line, and decide whether to start, continue, or end an
         overtake. Returns a (x, y) world-frame point to steer at instead
@@ -2490,6 +2499,7 @@ class PurePursuitNode(Node):
         docs/racing-autonomy.md for the full strategy this implements.
         """
         now_sec = self._now_sec()
+        self.follow_speed_cap = None
         detector_name = (
             'map subtraction'
             if self.opponent_detection_mode == 'map' and self.map_ray_caster is not None
@@ -2548,6 +2558,22 @@ class PurePursuitNode(Node):
                 detection = None
 
         ego_arc_length = float(self.cumulative_arc_length[nearest_idx])
+
+        if self.enable_opponent_following and self.opponent.arc_length is not None:
+            # The detector sees a surface, NOT the opponent's rear axle.
+            # Subtract our front extent; do not advance a lost car at its
+            # old speed. A hidden opponent may have stopped immediately.
+            ego_arc = following.project_arc(
+                self.xy, self.cumulative_arc_length, (self.car_x, self.car_y), nearest_idx)
+            gap = -racing_math.track_lead_distance(
+                ego_arc, self.opponent.arc_length, self.total_track_length)
+            self.follow_speed_cap = following.speed_ceiling(
+                gap - (self.car_length / 2 + self.wheelbase / 2),
+                self.opponent.progress_rate, self.opponent.seconds_since_seen(now_sec))
+            self.last_opponent_status += f'; following cap={self.follow_speed_cap:.2f}m/s'
+        if not allow_pass:
+            self.overtake_active = False
+            return None
 
         if not self.overtake_active:
             # Not committed to anything yet: only a *recent* sighting is

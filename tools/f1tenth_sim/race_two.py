@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_gap  # noqa: E402,F401
 import run_validation as rv  # noqa: E402
 import numpy as np  # noqa: E402
-from pure_pursuit import racing_math  # noqa: E402
+from pure_pursuit import following, racing_math  # noqa: E402
 from pure_pursuit.opponent_gate import OpponentGate  # noqa: E402
 from sim_fidelity import with_floor  # noqa: E402
 
@@ -53,7 +53,7 @@ def node_decisions():
     adapter = ast.ClassDef(name='Decisions', bases=[], keywords=[], body=methods, decorator_list=[])
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0),
                               tracker, adapter], type_ignores=[])
-    namespace = dict(math=math, np=np, racing_math=racing_math)
+    namespace = dict(math=math, np=np, racing_math=racing_math, following=following)
     exec(compile(ast.fix_missing_locations(module), str(NODE), 'exec'), namespace)
     return namespace['Decisions'], namespace['OpponentTracker']
 
@@ -86,6 +86,7 @@ class NodeDecisions(Decisions):
         self.log = []
         self.recovery_since = None
         self.recovery_exhausted = False
+        self.follow_speed_cap = None
 
     def _now_sec(self):
         return self.now
@@ -133,7 +134,7 @@ class NodeDecisions(Decisions):
         # The node advances its stateful law once, even if a pass
         # subsequently replaces the steering target.
         steering, speed, nearest, _, _ = follower.command(state, previous_steering=previous_steering)
-        target = self._update_opponent_and_overtake(nearest)
+        target = self._update_opponent_and_overtake(nearest, allow_pass=self.enable_opponent_overtake)
         if target is not None:
             steering, speed, nearest, _, _ = follower.command(
                 state, target_override=target, previous_steering=previous_steering)
@@ -210,7 +211,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     if pass_lookahead is not None:
         params['overtake_lookahead_distance'] = pass_lookahead
     followers = [rv.PathFollower(plan, law_name='delay_lqr', car_id='rb2')]
-    factor = {'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'gap': 1.0, 'solo': 1.0}[opponent]
+    factor = {'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'braking': 0.8, 'gap': 1.0, 'solo': 1.0}[opponent]
     opp_plan = rv.PathPlan(plan.xy, plan.seg_len, np.minimum(plan.speed * factor, 1.5) if opponent == 'blocker' else plan.speed * factor)
     followers.append(rv.PathFollower(opp_plan, law_name='delay_lqr', car_id='rb2'))
     shapers = [rv.CommandShaper('rb2', 5.0, 2.7) for _ in range(2)]
@@ -256,17 +257,24 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                         follower, state, shape.previous_steering)
                     desired.append(steering)
                     so, vo, safety, detail = d._reactive_override(
-                        allow_avoidance=not d.overtake_active, desired_steering=steering)
+                        allow_avoidance=not d.overtake_active and d.follow_speed_cap is None, desired_steering=steering)
                     cap = shape.max_speed
                     if so is not None:
                         steering = so
                     if vo is not None:
                         # Experimental ceiling correction, never a shipped node
                         # setting: preserve override targets for stop/escape/avoid.
-                        speed = min(speed, vo) if cap_only and safety is None else vo
+                        speed = min(speed, vo) if safety is None else vo
                         cap = min(cap, vo)
                     if base_state == 'off_racing_line':
                         speed, safety = 0.0, base_state
+                    if d.follow_speed_cap is not None:
+                        speed = min(speed, d.follow_speed_cap)
+                        cap = min(cap, d.follow_speed_cap)
+                    # Opponent commands a hard stop at 6s, holds until 9s,
+                    # then resumes. The real plant supplies its braking/lag.
+                    if i == 1 and opponent == 'braking' and 6 <= now < 9:
+                        speed, cap = 0.0, 0.0
                     steering, speed = shape.command(steering, speed, cap, measured_speed=state[3])
                 commands.append((steering, speed))
                 states.append(safety or base_state or 'none')
@@ -315,7 +323,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--track', required=True)
     ap.add_argument('--line', required=True)
-    ap.add_argument('--opponent', choices=('map80', 'map90', 'gap', 'blocker', 'solo'), required=True)
+    ap.add_argument('--opponent', choices=('map80', 'map90', 'gap', 'blocker', 'braking', 'solo'), required=True)
     ap.add_argument('--seeds', default='12345,12346,12347,12348,12349,12350')
     ap.add_argument('--head-start', type=float, default=3.0)
     ap.add_argument('--laps', type=int, default=4)

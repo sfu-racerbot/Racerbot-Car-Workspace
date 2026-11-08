@@ -323,6 +323,7 @@ pure_pursuit_node:
     # docs/racing-autonomy.md's "Racing against opponents" for the full
     # strategy. Requires enable_lidar_safety above to also be true. ---
     enable_opponent_overtake: true
+    enable_opponent_following: false  # car 2 enables the measured braking envelope
     opponent_min_width: 0.15          # meters -- narrower than this is noise/a thin post, not a car
     opponent_max_width: 0.7           # meters -- wider than this is treated as a wall, not a car
     opponent_cluster_gap: 0.3         # meters -- a range jump bigger than this splits one cluster into two
