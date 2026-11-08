@@ -504,6 +504,9 @@ SFU_COURSE_FIT_RUNS = ("20261030-185036", "20261030-184556", "20261030-175728",
 SFU_COURSE_HELD_OUT_RUNS = ("20261030-184826", "20261030-183134", "20261030-181003",
                             "20261030-181819", "20261030-184316", "20261030-175124")
 
+SFU_COURSE_2026_11_06_FIT_RUNS = ("20261106-163633", "20261106-164401", "20261106-170803")
+SFU_COURSE_2026_11_06_HELD_OUT_RUNS = ("20261106-171030", "20261106-184753")
+
 
 @dataclass(frozen=True)
 class Floor:
@@ -519,6 +522,68 @@ class Floor:
 
 
 FLOORS: dict[str, Floor] = {
+    "sfu_course_2026_11_06": Floor(
+        name="sfu_course_2026_11_06",
+        description="Car 2 on the 2026-11-06 floor and tyres; fitted only on course 06a, "
+                    "held out on 06a and 06b. See docs/sim-calibration.md and the adjacent measurement JSON.",
+        track="car2_course_2026_11_06a_scans",
+        fit_runs=SFU_COURSE_2026_11_06_FIT_RUNS,
+        held_out_runs=SFU_COURSE_2026_11_06_HELD_OUT_RUNS,
+        overrides=dict(
+            floor="sfu_course_2026_11_06",
+            # Slope 1.05 and trim from fit-only gyro replay, not the diluted binned table.
+            # Retain the 2026-10-16 full-stick and endpoint circle measurements outside
+            # the 0.349 rad range exercised by these runs; extrapolation is unvalidated.
+            steering_linkage=((-0.461, -0.448), (-0.436, -0.423),
+                              (-0.349, -0.36000714791229876), (0.0, 0.006442852087701211),
+                              (0.349, 0.37289285208770123),
+                              (0.436, 0.423), (0.528, 0.509)),
+            # Independent stock-tyre understeer remains, so replay selects a 1.05 scale.
+            grip_curve=tuple((asked, min(asked, achieved * 1.05)) for asked, achieved in (
+                (0.0, 0.0), (2.0, 2.0), (2.25, 2.1196167301547333), (2.75, 2.441124084767721),
+                (3.25, 2.5957683749493055), (3.75, 2.8700874781313486), (4.5, 3.051088703714249),
+                (5.5, 3.4256766650211903), (7.0, 3.797103059968375), (10.0, 4.655680540688182))),
+            steering_delay_ticks=3,
+            steering_rate_max=2.5,
+            steering_servo_gain=15.0,
+            speed_loop_accel_gain=7.0,
+            speed_loop_accel_max=4.0,
+            speed_loop_brake_gain=7.0,
+            speed_loop_brake_max=3.0,
+            speed_delay_ticks=4,
+            odom_speed_scale=1.0323453317475084,
+            speed_command_scale=4614.0 / 4447.983786 / 1.0323453317475084,
+            longitudinal_grip_coupling=0.0,
+            lidar_noise_std=0.003,
+            lidar_noise_per_metre=0.0015,
+            lidar_dropout_rate=0.0,
+            lidar_self_hits=(),
+        ),
+        sources=dict(
+            floor="2026-11-06 rb2 fit runs 163633, 164401, 170803; sfu_course_2026_11_06_split.json",
+            steering_linkage="fit-run straight trim (sfu_course_2026_11_06_measurement.json); slope 1.05 chosen by "
+                             "fit-plant gyro replay, not the binned linkage; endpoint circles 2026-10-16; "
+                             "sfu_course_2026_11_06_replay.json",
+            grip_curve="car_measure.py on 20261106-163633, -164401, -170803; scale 1.05 chosen by fit-plant "
+                       "gyro replay, sfu_course_2026_11_06_replay.json",
+            steering_delay_ticks="fit-plant gyro replay on 20261106-163633, -164401, -170803 selects 3 ticks; "
+                                 "sfu_course_2026_11_06_replay.json",
+            steering_rate_max="car_measure.py servo replay on 20261106-163633, -164401, -170803",
+            steering_servo_gain="car_measure.py servo replay on 20261106-163633, -164401, -170803",
+            speed_loop_accel_gain="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
+            speed_loop_accel_max="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
+            speed_loop_brake_gain="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
+            speed_loop_brake_max="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
+            speed_delay_ticks="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
+            odom_speed_scale="wheel / scan-to-map true speed, 20261106-163633, -164401, -170803",
+            speed_command_scale="fit-run wheel over-read and metadata vesc gains 4614 / 4447.983786",
+            longitudinal_grip_coupling="fit-run grip_by_long_accel: 2.779 braking below -3 vs 2.647 steady m/s^2",
+            lidar_noise_std="20261106-163633 stable parked window; sfu_course_2026_11_06_stable_lidar.json",
+            lidar_noise_per_metre="same Hokuyo's 2026-10-30 range slope, checked against 20261106-163633 stable window",
+            lidar_dropout_rate="20261106-163633 moving_no_echo = 0; sfu_course_2026_11_06_lidar.json",
+            lidar_self_hits="20261106-163633 stable parked window: no rear-right self hits",
+        ),
+    ),
     "sfu_course_2026_10_30": Floor(
         name="sfu_course_2026_10_30",
         description="The 2026-10-30 course's floor and the tyres on car 2 that day. Measured "

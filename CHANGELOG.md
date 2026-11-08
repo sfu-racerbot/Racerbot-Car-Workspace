@@ -6,7 +6,16 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): calibrated offline racing lines and a separate floor-test profile
+## 2026-11-07 (latest): measured November 6 simulator floor for car 2
+
+### No-ROS simulator
+
+- Add opt-in floor `sfu_course_2026_11_06`, fitted only to runs `163633`, `164401` and `170803`. Measured grip, linkage/servo response, speed loop, odometry and LiDAR evidence are committed as small JSON fixtures with per-value sources. The plain and 10-30 calibrations are unchanged.
+- Held-out command replay improves mean yaw-rate RMS from 0.1213 to 0.1032 rad/s and speed RMS from 0.2259 to 0.2027 m/s. Six-seed lap validation at each run's launched 0.349 rad cap remains mixed: 06b gives 9.33 s versus 9.14 s real with no wedges; 06a gives 13.84 s on completed flying laps, but five of six seeds eventually wedge near the hairpin approach. The profile is not tuned to lap time.
+- Add track `car2_course_2026_11_06b_scans`, retaining the original 06b map and centreline. Walls come from held-out run `184753` as course geometry, separate from plant fitting; in-sample contact/beam bias falls from +4.8/+4.8 cm to +1.6/+2.6 cm.
+- Document the approved split, measurements, exact reproduction commands and remaining mismatch in [Simulator calibration](docs/sim-calibration.md#car-2-floor-of-2026-11-06). Six regression tests pin provenance and measured/fitted values; all were seen to fail under deliberate breaks, then restored. No driving node, configuration or safety code changes.
+
+## 2026-11-07: calibrated offline racing lines and a separate floor-test profile
 
 ### pure_pursuit, racerbot_car
 
