@@ -1,0 +1,16 @@
+[
+ {
+  "run": "20261106-163633",
+  "scans": 5693,
+  "rate_hz": 39.012063657418175,
+  "stamp_age_ms": -2.44903564453125,
+  "parked_scans": 3265,
+  "moving_no_echo": 0.0,
+  "moving_jumps": 5.270181219110379,
+  "moving_isolated": 8.738056013179571,
+  "parked_noise": 0.8068185566640255,
+  "parked_noise_near": 0.3524367434259648,
+  "parked_noise_far": 3.29714747022737,
+  "self_hits": []
+ }
+]

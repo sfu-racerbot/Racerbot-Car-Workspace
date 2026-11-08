@@ -1,0 +1,20 @@
+{
+  "car": "rb2",
+  "fit_runs": ["20261106-163633", "20261106-164401", "20261106-170803"],
+  "held_out_runs": ["20261106-171030", "20261106-184753"],
+  "courses": {
+    "06a": {"map": "20261106-164002-rebuilt", "fit": ["20261106-163633", "20261106-164401", "20261106-170803"], "held_out": ["20261106-171030"]},
+    "06b": {"map": "20261106-184753-rebuilt", "fit": [], "held_out": ["20261106-184753"]}
+  },
+  "controllers": {
+    "20261106-163633": "gap_follow_node",
+    "20261106-164401": "pure_pursuit_node",
+    "20261106-170803": "gap_follow_node",
+    "20261106-171030": "gap_follow_node",
+    "20261106-184753": "gap_follow_node via auto_map_race_node, finish_after_mapping=true"
+  },
+  "split_reason": "User-approved run-level split: plant parameters describe floor and tyres, not layout. All of 184753 is held out, providing an independent different-course check. No usable later 06b driving run exists.",
+  "excluded": {"20261106-185425": "No LB-held samples or nonzero /drive speed; MCAP truncation reported", "20261106-181002": "Different layout, not course 06b"},
+  "localization": {"output": ".oc-runs/sim-floor-06/loc", "mean_beams_within_10cm": {"20261106-163633": 0.99, "20261106-164401": 1.00, "20261106-170803": 0.96, "20261106-171030": 0.96, "20261106-184753": 1.00}},
+  "raw_data": "Read-only absolute paths under the parent map-racer-faster-than-gap checkout; no raw bags copied or committed"
+}

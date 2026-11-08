@@ -1,0 +1,15 @@
+{
+  "run": "20261106-163633",
+  "method": "Longest contiguous wheel-parked segment; split when median adjacent-scan range change exceeds 0.02 m; abs(wheel speed) < 0.01 m/s. Apply car_measure.scan_statistics to that segment. Whole-run --lidar report mixes parked poses and is not a noise measurement.",
+  "start_s": 1794011831.1288083,
+  "end_s": 1794011887.4176183,
+  "scans": 2250,
+  "near_std_m": 0.00298140841959815,
+  "far_std_m": 0.011872459702255074,
+  "noise_m": 0.0032535033357874504,
+  "self_hits": [],
+  "moving_no_echo": 0.0,
+  "profile_noise_std_m": 0.003,
+  "profile_noise_per_metre": 0.0015,
+  "noise_model_reason": "3 mm near; retain the 1.5 mm/m range slope of the same Hokuyo sensor measured 2026-10-30, consistent with 12 mm beyond 4 m here. No rear-right self returns in this stationary window."
+}
