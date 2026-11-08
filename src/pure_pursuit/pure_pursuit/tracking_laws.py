@@ -98,7 +98,8 @@ class TrackingLaw(Protocol):
         ...
 
 
-LAW_NAMES = ('pure_pursuit', 'stanley', 'lqr', 'mpc', 'delay_lqr')
+LAW_NAMES = ('pure_pursuit', 'stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
+DEADLINE_LAWS = frozenset({'mpc', 'delay_mpc'})
 
 
 def _require_finite(*values):
@@ -999,11 +1000,11 @@ class DelayPredictor:
     # Require lock-to-lock slew plus a 1e-3 settling tail to fit this window.
     SERVO_WARMUP_TICKS = 40
 
-    def __init__(self, limits, params):
-        _check_delay('delay_lqr.sensing_delay', params.sensing_delay)
-        _check_delay('delay_lqr.actuation_delay', params.actuation_delay)
+    def __init__(self, limits, params, label='delay_lqr'):
+        _check_delay(label + '.sensing_delay', params.sensing_delay)
+        _check_delay(label + '.actuation_delay', params.actuation_delay)
         if not (math.isfinite(params.servo_rate) and params.servo_rate > 0.0):
-            raise ValueError(f'delay_lqr.servo_rate must be > 0, got {params.servo_rate}')
+            raise ValueError(f'{label}.servo_rate must be > 0, got {params.servo_rate}')
         self.limits = limits
         self.params = params
         dt = limits.control_dt
@@ -1015,7 +1016,7 @@ class DelayPredictor:
         slew = 2.0 * limits.max_steering_angle / (params.servo_rate * dt)
         if slew + tail > self.SERVO_WARMUP_TICKS:
             raise ValueError(
-                f'delay_lqr: the servo (gain {params.servo_gain}/s, rate {params.servo_rate} rad/s) '
+                f'{label}: the servo (gain {params.servo_gain}/s, rate {params.servo_rate} rad/s) '
                 f'needs {slew + tail:.0f} ticks to settle, more than the '
                 f'{self.SERVO_WARMUP_TICKS}-tick history the estimate runs over')
         self.sensing_ticks = int(round(params.sensing_delay / dt))
@@ -1146,6 +1147,201 @@ class DelayLqrLaw(DelayPredictor):
 # Factory
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class DelayMpcParams:
+    dt: float = 0.025
+    horizon_steps: int = 32
+    q_lateral: float = 4.0
+    q_heading: float = 1.0
+    r_steer: float = 1.0
+    r_rate: float = 0.001
+    deadline_sec: float = 0.008
+    max_iter: int = 4000
+    max_consecutive_misses: int = 3
+    sensing_delay: float = 0.05
+    actuation_delay: float = 0.075
+    servo_gain: float = 15.0
+    servo_rate: float = 2.5
+
+
+class DelayMpcLaw:
+    """Preview MPC from the shared predictor's action point, including the rack.
+
+    State [e, theta, delta], command u; tan(delta) is linearised at the
+    local feedforward. Servo velocity is constrained inside its linear region
+    rather than allowing the optimizer to assume an impossible saturated step.
+    The condensed QP has N commands and 3N angle/command-rate/servo-rate rows.
+    """
+
+    name = 'delay_mpc'
+
+    def __init__(self, limits, params):
+        import scipy.linalg
+        import scipy.sparse
+        import osqp
+
+        for key in ('q_lateral', 'q_heading', 'r_steer', 'deadline_sec',
+                    'servo_gain', 'servo_rate'):
+            value = getattr(params, key)
+            if not (math.isfinite(value) and value > 0):
+                raise ValueError(f'delay_mpc.{key} must be finite and > 0')
+        if not (math.isfinite(params.dt) and 0 < params.dt <= 0.2):
+            raise ValueError('delay_mpc.dt must be in (0, 0.2]')
+        if not (0 < params.servo_gain * params.dt <= 1 and
+                0 < params.servo_gain * limits.control_dt <= 1):
+            raise ValueError('delay_mpc.servo_gain * dt must be in (0, 1]')
+        if not (isinstance(params.horizon_steps, int) and 2 <= params.horizon_steps <= 60):
+            raise ValueError('delay_mpc.horizon_steps must be an int in [2, 60]')
+        if not (isinstance(params.max_iter, int) and params.max_iter >= 1):
+            raise ValueError('delay_mpc.max_iter must be an int >= 1')
+        if not (math.isfinite(params.r_rate) and params.r_rate >= 0):
+            raise ValueError('delay_mpc.r_rate must be finite and >= 0')
+        for key in ('sensing_delay', 'actuation_delay'):
+            _check_delay('delay_mpc.' + key, getattr(params, key))
+        self.limits, self.params = limits, params
+        self._delay = DelayPredictor(limits, params, label=self.name)
+        self.miss_policy = MissPolicy(params.max_consecutive_misses)
+        self._sparse = scipy.sparse
+        self._warm_start = None
+        self.solves_since_reset = 0
+        self.last_elapsed_sec = 0.0
+        # The same servo DARE as ServoLqrGainTable, at the prediction dt.
+        self._terminal_speeds = np.arange(0.1, 6.101, 0.05)
+        Q = np.diag([params.q_lateral, params.q_heading, 0.0])
+        self._terminal = []
+        for v in self._terminal_speeds:
+            A, B = self._ab(v, 0.0)
+            self._terminal.append(scipy.linalg.solve_discrete_are(
+                A, B[:, None], Q, np.array([[params.r_steer]])))
+        n = params.horizon_steps
+        self._P_coo = scipy.sparse.csc_matrix(np.triu(np.ones((n, n)))).tocoo()
+        pattern = scipy.sparse.csc_matrix(np.vstack([
+            np.eye(n), np.eye(n) - np.eye(n, k=-1), np.tril(np.ones((n, n)))]))
+        self._A_coo = pattern.tocoo()
+        self._solver = osqp.OSQP()
+        self._solver.setup(
+            P=scipy.sparse.csc_matrix(np.triu(np.ones((n, n)))), q=np.zeros(n),
+            A=pattern, l=np.zeros(3 * n), u=np.zeros(3 * n),
+            eps_abs=1e-8, eps_rel=1e-8, max_iter=params.max_iter,
+            polishing=False, warm_starting=True, time_limit=params.deadline_sec,
+            verbose=False)
+
+    def _ab(self, v, ff):
+        dt = self.params.dt
+        b = v * dt / (self.limits.wheelbase * math.cos(ff) ** 2)
+        a = self.params.servo_gain * dt
+        return (np.array([[1., v * dt, 0.], [0., 1., b], [0., 0., 1. - a]]),
+                np.array([0., 0., a]))
+
+    def reset(self):
+        self._delay.reset()
+        self._warm_start = None
+        self.solves_since_reset = 0
+
+    def _build_qp(self, inp, path):
+        proj, theta, delta = self._delay.action_state(inp, path)
+        n, p = self.params.horizon_steps, self.params
+        state = np.array([proj.lateral_error, theta, delta])
+        self.initial_state = state.copy()
+        s = proj.arc_length
+        speeds, ff = np.empty(n), np.empty(n)
+        for k in range(n):
+            speeds[k] = max(0.1, sample_at_arc(
+                path.speed_profile, path.cumulative, s, path.closed, path.seg_len))
+            ff[k] = math.atan(self.limits.wheelbase * sample_at_arc(
+                path.curvature, path.cumulative, s, path.closed, path.seg_len))
+            s += speeds[k] * p.dt
+        _require_finite(*state, *speeds, *ff)
+        self.reference_speeds, self.reference_ff = speeds, ff
+        # x_k = offset_k + G_k u, with absolute wheel angle (not delta-ff).
+        G = np.zeros((3, n))
+        offset = state.copy()
+        H = p.r_steer * np.eye(n)
+        q = -2 * p.r_steer * ff
+        servo_A, servo_offset = np.zeros((n, n)), np.empty(n)
+        Q = np.diag([p.q_lateral, p.q_heading, 0.])
+        for k in range(n):
+            # g*(u_k-delta_k) must fit the physical servo velocity ceiling.
+            servo_A[k] = -p.servo_gain * G[2]
+            servo_A[k, k] += p.servo_gain
+            servo_offset[k] = p.servo_gain * offset[2]
+            A, B = self._ab(speeds[k], ff[k])
+            offset = A @ offset
+            offset[1] -= A[1, 2] * ff[k]
+            G = A @ G
+            G[:, k] += B
+            target = np.array([0., 0., ff[k]])
+            weight = Q
+            if k == n - 1:
+                pos = np.clip((speeds[k] - 0.1) / 0.05, 0, len(self._terminal) - 1)
+                lo = int(pos)
+                hi = min(lo + 1, len(self._terminal) - 1)
+                weight = self._terminal[lo] + (pos - lo) * (
+                    self._terminal[hi] - self._terminal[lo])
+            H += G.T @ weight @ G
+            q += 2 * G.T @ weight @ (offset - target)
+        D = np.eye(n) - np.eye(n, k=-1)
+        tau = np.full(n, p.dt)
+        tau[0] = self.limits.control_dt
+        previous = float(np.clip(inp.previous_steering,
+                                 -self.limits.max_steering_angle,
+                                 self.limits.max_steering_angle))
+        start = np.zeros(n)
+        start[0] = previous
+        Drate = D / tau[:, None]
+        H += p.r_rate * Drate.T @ Drate
+        q -= 2 * p.r_rate * Drate.T @ (start / tau)
+        A = np.vstack([np.eye(n), D, servo_A])
+        l = np.concatenate([
+            np.full(n, -self.limits.max_steering_angle),
+            start - self.limits.max_steering_rate * tau,
+            servo_offset - p.servo_rate])
+        u = np.concatenate([
+            np.full(n, self.limits.max_steering_angle),
+            start + self.limits.max_steering_rate * tau,
+            servo_offset + p.servo_rate])
+        return H, q, A, l, u
+
+    def steer(self, inp, path):
+        _require_finite(inp.x, inp.y, inp.yaw, inp.speed, inp.previous_steering)
+        started = time.perf_counter()
+        H, q, A, l, u = self._build_qp(inp, path)
+        n = self.params.horizon_steps
+        P = self._sparse.csc_matrix((
+            2 * H[self._P_coo.row, self._P_coo.col],
+            (self._P_coo.row, self._P_coo.col)), shape=(n, n))
+        C = self._sparse.csc_matrix((
+            A[self._A_coo.row, self._A_coo.col],
+            (self._A_coo.row, self._A_coo.col)), shape=(3 * n, n))
+        self._solver.update(Px=P.data, q=q, Ax=C.data, l=l, u=u)
+        if self._warm_start is not None:
+            self._solver.warm_start(x=self._warm_start)
+        result = self._solver.solve()
+        elapsed = time.perf_counter() - started
+        self.last_elapsed_sec = elapsed
+        self._warm_start = None
+        if result.info.status != 'solved':
+            raise MpcMiss(f'status: osqp returned "{result.info.status}"')
+        if elapsed > self.params.deadline_sec:
+            raise MpcMiss(f'deadline: solve took {elapsed * 1e3:.1f}ms')
+        commands = np.asarray(result.x, dtype=float).reshape(-1)
+        if len(commands) != n or not np.all(np.isfinite(commands)):
+            raise MpcMiss('solution: non-finite or wrong-size decision vector')
+        if np.any(A @ commands < l - BOUND_TOLERANCE) or np.any(
+                A @ commands > u + BOUND_TOLERANCE):
+            raise MpcMiss('solution: violates steering or servo bounds')
+        planned = MpcLaw._project_onto_limits(
+            commands, inp.previous_steering, self.limits.max_steering_angle,
+            self.limits.max_steering_rate,
+            [self.limits.control_dt] + [self.params.dt] * (n - 1))
+        self._warm_start = commands
+        self.solves_since_reset += 1
+        self._delay._last_output = planned[0]
+        detail = (f'delay_mpc e={self.initial_state[0]:+.3f}m '
+                  f'th={self.initial_state[1]:+.3f}rad '
+                  f'solve={elapsed * 1e3:.1f}ms it={result.info.iter}')
+        return SteeringResult(planned[0], float(commands[0]), detail, tuple(planned))
+
 def make_law(name: str, limits: VehicleLimits,
              params: Mapping[str, float]) -> TrackingLaw:
     """Build one law by name. `params` carries the law-specific knobs,
@@ -1205,5 +1401,12 @@ def make_law(name: str, limits: VehicleLimits,
             servo_gain=float(params.get('delay_lqr.servo_gain', d.servo_gain)),
             servo_rate=float(params.get('delay_lqr.servo_rate', d.servo_rate)),
         ))
+    if name == 'delay_mpc':
+        from dataclasses import fields
+        defaults = DelayMpcParams()
+        values = {f.name: type(getattr(defaults, f.name))(
+            params.get('delay_mpc.' + f.name, getattr(defaults, f.name)))
+            for f in fields(defaults)}
+        return DelayMpcLaw(limits, DelayMpcParams(**values))
     raise ValueError(
         f"unknown steering_law '{name}' (expected one of {LAW_NAMES})")

@@ -373,6 +373,19 @@ class PurePursuitNode(Node):
         self.declare_parameter('delay_lqr.actuation_delay', 0.075)
         self.declare_parameter('delay_lqr.servo_gain', 15.0)
         self.declare_parameter('delay_lqr.servo_rate', 2.5)
+        self.declare_parameter('delay_mpc.dt', 0.025)
+        self.declare_parameter('delay_mpc.horizon_steps', 32)
+        self.declare_parameter('delay_mpc.q_lateral', 4.0)
+        self.declare_parameter('delay_mpc.q_heading', 1.0)
+        self.declare_parameter('delay_mpc.r_steer', 1.0)
+        self.declare_parameter('delay_mpc.r_rate', 0.001)
+        self.declare_parameter('delay_mpc.deadline_sec', 0.008)
+        self.declare_parameter('delay_mpc.max_iter', 4000)
+        self.declare_parameter('delay_mpc.max_consecutive_misses', 3)
+        self.declare_parameter('delay_mpc.sensing_delay', 0.05)
+        self.declare_parameter('delay_mpc.actuation_delay', 0.075)
+        self.declare_parameter('delay_mpc.servo_gain', 15.0)
+        self.declare_parameter('delay_mpc.servo_rate', 2.5)
 
         # --- Opponent detection mode: 'heuristic' (shape-based, no map
         # needed) or 'map' (ray-cast map subtraction via range_libc --
@@ -657,7 +670,7 @@ class PurePursuitNode(Node):
             'max_lookahead': self.max_lookahead,
             'lookahead_speed_gain': self.lookahead_speed_gain,
         }
-        for prefix in ('stanley', 'lqr', 'mpc', 'delay_lqr'):
+        for prefix in ('stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc'):
             for full_name in self._declared_law_param_names(prefix):
                 self._law_params[full_name] = self.get_parameter(full_name).value
         try:
@@ -673,7 +686,7 @@ class PurePursuitNode(Node):
             + (f" {law_params}" if law_params is not None else ""))
         # MPC's single-tick fallback (only built when MPC is the active law).
         self._mpc_fallback_law = None
-        if self.steering_law_name == 'mpc':
+        if self.steering_law_name in tracking_laws.DEADLINE_LAWS:
             self._mpc_fallback_law = tracking_laws.make_law(
                 'pure_pursuit', self._vehicle_limits, self._law_params)
             self._mpc_timing = []  # rolling window of per-solve ms
@@ -895,6 +908,13 @@ class PurePursuitNode(Node):
                       'delay_lqr.v_grid_max', 'delay_lqr.sensing_delay',
                       'delay_lqr.actuation_delay', 'delay_lqr.servo_gain',
                       'delay_lqr.servo_rate'),
+        'delay_mpc': ('delay_mpc.dt', 'delay_mpc.horizon_steps',
+                      'delay_mpc.q_lateral', 'delay_mpc.q_heading',
+                      'delay_mpc.r_steer', 'delay_mpc.r_rate',
+                      'delay_mpc.deadline_sec', 'delay_mpc.max_iter',
+                      'delay_mpc.max_consecutive_misses', 'delay_mpc.sensing_delay',
+                      'delay_mpc.actuation_delay', 'delay_mpc.servo_gain',
+                      'delay_mpc.servo_rate'),
     }
 
     def _declared_law_param_names(self, prefix: str):
@@ -1089,7 +1109,7 @@ class PurePursuitNode(Node):
             # built once in __init__ and cached, so accepting a runtime change
             # would report a value the control loop never uses. Refuse loudly.
             if (parameter.name == 'steering_law'
-                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.', 'delay_lqr.'))
+                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.', 'delay_lqr.', 'delay_mpc.'))
                     or parameter.name == 'tracking_curvature_smoothing'):
                 return SetParametersResult(
                     successful=False,
@@ -1392,7 +1412,7 @@ class PurePursuitNode(Node):
             # off-line recovery; the next hold may try once more.
             self._off_line_recovery_exhausted = False
             # Same for MPC's miss latch: the operator re-arms the controller.
-            if self.steering_law_name == 'mpc':
+            if self.steering_law_name in tracking_laws.DEADLINE_LAWS:
                 self.tracking_law.miss_policy.clear()
             self._stop(stop_state, stop_detail)
             return
@@ -1730,7 +1750,7 @@ class PurePursuitNode(Node):
 
         # MPC: one rolling timing line every 5 s while running, so G2 reads the
         # solve-time distribution from the log without a separate profiler.
-        if self.steering_law_name == 'mpc' and self._mpc_timing:
+        if self.steering_law_name in tracking_laws.DEADLINE_LAWS and self._mpc_timing:
             now_mono = time.monotonic()
             if (self._mpc_last_timing_log is None
                     or now_mono - self._mpc_last_timing_log >= 5.0):
@@ -1807,7 +1827,7 @@ class PurePursuitNode(Node):
         # The intent must never run the MPC solver itself (drive-intent safety
         # contract: read only what the control path computed). Without a plan
         # to replay, it re-asks MPC's own pure-pursuit fallback instead.
-        mpc = (self.tracking_law if self.steering_law_name == 'mpc' else None)
+        mpc = (self.tracking_law if self.steering_law_name in tracking_laws.DEADLINE_LAWS else None)
         mpc_plan = self._last_law_predicted
         mpc_dt = mpc.params.dt if mpc is not None and mpc_plan else None
         replay_law = self._mpc_fallback_law if mpc is not None else self.tracking_law
@@ -2720,7 +2740,7 @@ class PurePursuitNode(Node):
         not yet latched falls back to pure pursuit for this tick only and sets
         decision state 'mpc_fallback'; one that latches raises _stop directly.
         """
-        if self.steering_law_name != 'mpc':
+        if self.steering_law_name not in tracking_laws.DEADLINE_LAWS:
             return self.tracking_law.steer(tracking_input, self.path_context)
         policy = self.tracking_law.miss_policy
         if policy.latched():
