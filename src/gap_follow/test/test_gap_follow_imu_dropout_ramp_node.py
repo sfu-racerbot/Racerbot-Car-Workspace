@@ -15,7 +15,10 @@ from test_gap_follow_corners_node import _corridor, _raycast
 
 def _run(feature, mode, seed=None):
     enabled = mode == 'dropout'
-    with _node(False, ['-p', f'enable_imu_{feature}:={str(enabled).lower()}']) as n:
+    # The scene's steering, and so which ceiling binds first, was set with the
+    # steering gain reduced above 1.8 m/s (the shipped value until 2026-11-07).
+    with _node(False, ['-p', f'enable_imu_{feature}:={str(enabled).lower()}',
+                       '-p', 'steering_gain_speed_ref:=1.8']) as n:
         commands = _capture(n)
         scan = _raycast(_corridor(1.4, .6)) if feature == 'understeer' else _scan()
         _joy(n)

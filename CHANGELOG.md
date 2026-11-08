@@ -6,7 +6,13 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): gap_follow's forward reserve 0.20 -> 0.12 m, and car 2 steers to 0.42 rad
+## 2026-11-07 (latest): gap_follow reaches full lock sooner in sharp corners
+
+### gap_follow
+
+- **Behavior change: `steering_gain_speed_ref` is 3.5 m/s (was 1.8).** At 1.8 the steering response halved by ~3.3 m/s, so the car turned into sharp corners late and reached full lock only after slowing. Simulator, car 2 at 0.42 rad, 6 seeds: 06a 11.35 -> 11.09 s, 06b 8.46 -> 8.20 s, no contact. Off entirely was 10.94 / 8.20 s; kept at 3.5 until a floor test shows the weave it prevents (run 20261019-200703) is gone. Not yet driven.
+
+## 2026-11-07: gap_follow's forward reserve 0.20 -> 0.12 m, and car 2 steers to 0.42 rad
 
 ### gap_follow, racerbot_car
 
