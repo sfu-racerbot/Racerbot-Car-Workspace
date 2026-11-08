@@ -6,7 +6,23 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-07 (latest): gap_follow reaches full lock sooner in sharp corners
+## 2026-11-07 (latest): calibrated offline racing lines and a separate floor-test profile
+
+### pure_pursuit, racerbot_car
+
+- Both cars use the offline `race_line` builder after `map_course` and during `rebuild_run`. The default `fastest` mode compares recorded, minimum-curvature and minimum-time candidates against final-waypoint steering, body and forward-cone checks. The driving supervisor retains its existing profile generation.
+- Supervisor configuration is layered by car in mapping launches, including the simulator's included launch. Car 2's new calibration sets planner steering to 0.38 rad, lateral acceleration to 2.9 m/s² on both sides, acceleration to 4.0 m/s² and steering linkage gain to 0.99. Its controller also uses 2.9 m/s². Sources: the 6 Nov `car_measure.py` runs and simulator evidence in [Racing autonomy](docs/racing-autonomy.md#minimum-time-racing-line). Car 1 retains shared physics values and has no supervisor overlay.
+- Shared `profile_max_speed` and controller `max_speed` rise from 4.0 to 5.0 m/s. New supervisor keys: `race_line_mode`, `profile_max_lateral_accel_right`, `profile_steering_linkage_gain`, `profile_steering_rate`, `profile_steering_delay`, `profile_speed_delay`, `race_line_wall_margin`, `race_line_cone_margin`, `race_line_body_floor` and `floor_test_speed`.
+- `RaceLineConfig.from_params` maps effective parameters to builder physics. `race_line --car ID` defaults to the current car; the hand-run curvature optimizer takes its steering default from that car's effective planner limit. The apex editor also reads effective calibration.
+
+### racerbot_launch, run-analysis tools
+
+- `map_course` runs the builder after shutdown, logs candidate output and prints a one-line result. On failure it restores the node's profile and any pre-existing builder outputs. A custom `supervisor_config:=` base is passed to both offline paths.
+- `race_launch.py` gains `profile`, default `raceline_profiled.csv`. First use `profile:=raceline_floor_test.csv`, after the wheels-off-the-ground check, for the 1.5 m/s capped copy. Missing selected files are refused by name. Generated commands put this floor test before the default-speed commands.
+- Rebuilds use recorded car identity, then the car-partitioned run path, then the current car; `--car` selects explicitly. They write the selected line, the floor-test copy and candidate verdicts, including in `rebuild.json`. The old 1.5 m/s default for the full profile and the `raceline_2p5.csv` / `raceline_4p0.csv` copies are removed. `--max-speed` remains an optional lower ceiling.
+- Tests now check effective per-car planner limits, exact permitted shared physics defaults, calibrated CLI inputs, post-shutdown building, failure restoration and selected-profile launch wiring. Rebuild geometry tests make optimized candidates ineligible with an oversized wall margin, preserving their known recorded-path oracle; a measured-course test separately checks fastest-candidate selection. Existing mutation targets follow the new writer and speed-cap paths.
+
+## 2026-11-07: gap_follow reaches full lock sooner in sharp corners
 
 ### gap_follow
 

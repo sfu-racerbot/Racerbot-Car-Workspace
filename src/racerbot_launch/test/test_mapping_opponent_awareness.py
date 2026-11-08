@@ -111,3 +111,32 @@ def test_map_course_forwards_opponent_argument(tmp_path, monkeypatch):
     assert args.read_text().splitlines() == [
         'launch', 'racerbot_launch', 'map_course_launch.py',
         'opponent_awareness:=true', 'imu_hardware:=false']
+
+
+@pytest.mark.parametrize('filename', ['map_course_launch.py', 'auto_map_race_launch.py'])
+@pytest.mark.parametrize('car,angle', [('rb1', 0.30), ('rb2', 0.38)])
+def test_supervisor_uses_car_calibration_over_custom_base(filename, car, angle, tmp_path, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', car)
+    module = _load(PACKAGE / 'launch' / filename)
+    description = module.generate_launch_description()
+    context = LaunchContext()
+    for action in description.entities:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+    base = tmp_path / 'supervisor.yaml'
+    base.write_text('auto_map_race_node:\n  ros__parameters:\n'
+                    '    profile_max_steering_angle: 0.30\n    profile_max_speed: 1.7\n')
+    context.launch_configurations['supervisor_config'] = str(base)
+    nodes = []
+    for action in description.entities:
+        actions = action.execute(context) if isinstance(action, OpaqueFunction) else [action]
+        nodes.extend(a for a in actions if isinstance(a, Node)
+                     and a.node_executable == 'auto_map_race_node')
+    assert len(nodes) == 1
+    from racerbot_car.layers import effective_values
+    files = [entry.evaluate(context) for entry in nodes[0]._Node__parameters
+             if isinstance(entry, ParameterFile)]
+    params = effective_values(files, 'auto_map_race_node')
+    # oracle: layering contract docs/car-profiles.md; calibration wins over a custom base.
+    assert params['profile_max_steering_angle'] == angle
+    assert params['profile_max_speed'] == 1.7

@@ -21,7 +21,13 @@ CALIBRATION_KEYS = {
         'human_control.axis_mappings.drive-steering_angle.scale': 'required'}},
     'gap_follow.yaml': {'gap_follow_node': {
         'max_steering_angle': 'required', 'arc_guard_max_correction': 'required'}},
-    'pure_pursuit.yaml': {'pure_pursuit_node': {'max_steering_angle': 'required'}},
+    'pure_pursuit.yaml': {'pure_pursuit_node': {
+        'max_steering_angle': 'required', 'max_lateral_accel': 'optional'}},
+    'auto_map_race.yaml': {'auto_map_race_node': {key: 'optional' for key in (
+        'profile_max_steering_angle', 'profile_wheelbase',
+        'profile_max_lateral_accel', 'profile_max_lateral_accel_right',
+        'profile_max_accel', 'profile_max_brake', 'profile_steering_linkage_gain',
+        'profile_steering_rate', 'profile_steering_delay', 'profile_speed_delay')}},
     'neural_racer.yaml': {'neural_racer_node': {'max_steering_angle': 'required'}},
     'odom_calibration.yaml': {'odom_calibration_node': {key: 'required' for key in (
         'vehicle_model', 'planner_max_steering_rad', 'speed_to_erpm_gain',

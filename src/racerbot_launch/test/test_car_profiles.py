@@ -355,8 +355,9 @@ def test_steering_limits_match_hardware_doc(car):
     for config, node in (('gap_follow.yaml', 'gap_follow_node'),
                          ('pure_pursuit.yaml', 'pure_pursuit_node')):
         assert effective_config(config, node, car_id=car)['max_steering_angle'] == controller
-    planner = read_yaml(SRC / 'pure_pursuit/config/auto_map_race.yaml')
-    assert planner['auto_map_race_node']['ros__parameters']['profile_max_steering_angle'] == doc_number(
+    # oracle: spec docs/hardware-reference.md, per-car planner calibration.
+    planner = effective_config('auto_map_race.yaml', 'auto_map_race_node', car_id=car)
+    assert planner['profile_max_steering_angle'] == doc_number(
         car, r'`profile_max_steering_angle` is \*\*([0-9.]+) rad')
 
 

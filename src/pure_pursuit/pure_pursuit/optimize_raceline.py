@@ -54,6 +54,9 @@ from pure_pursuit import racing_math, raceline_optimizer
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
+    from racerbot_car.layers import effective_config
+    planner_limit = effective_config('auto_map_race.yaml', 'auto_map_race_node')[
+        'profile_max_steering_angle']
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 
@@ -114,7 +117,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                               'paint (default: %(default)s).')
     vehicle.add_argument('--wheelbase', type=float, default=0.36,
                          help='Wheelbase, m (default: %(default)s).')
-    vehicle.add_argument('--max-steering-angle', type=float, default=0.30,
+    vehicle.add_argument('--max-steering-angle', type=float, default=planner_limit,
                          help='Steering limit, rad. With the wheelbase this sets the tightest '
                               'curvature the car can physically drive, which the finished line '
                               'is checked against. Matches auto_map_race.yaml\'s '

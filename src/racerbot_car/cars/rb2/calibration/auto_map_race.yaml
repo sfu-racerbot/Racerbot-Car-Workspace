@@ -1,0 +1,14 @@
+auto_map_race_node:
+  ros__parameters:
+    # 2026-11-06 courses, 3 simulator seeds: 0.38 had no contact; 0.42
+    # contacted or wedged. Leaves 0.04 rad below the controller's 0.42 cap.
+    profile_max_steering_angle: 0.38
+    # car_measure.py, 20261106-{163633,170803,171030}: 2.9-3.1 m/s^2
+    # achieved at hard requests (3.5-5 m/s^2), left turns.
+    profile_max_lateral_accel: 2.9
+    # Same three measured runs: 2.9-3.1 m/s^2 achieved, right turns.
+    profile_max_lateral_accel_right: 2.9
+    # Same runs, fitted speed loop: accel 4.0, brake 3.0 m/s^2.
+    profile_max_accel: 4.0
+    # Same runs: 0.349 rad commanded gave 0.345 at the wheels (0.99 ratio).
+    profile_steering_linkage_gain: 0.99

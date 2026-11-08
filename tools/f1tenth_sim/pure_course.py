@@ -56,16 +56,37 @@ def main(argv=None) -> int:
     ap.add_argument("--laps", type=int, default=1)
     ap.add_argument("--brake", type=float, default=8.0, help="profile braking limit, m/s^2 (car 2 measured 3.0-4.5)")
     ap.add_argument("--accel", type=float, default=3.0, help="profile acceleration limit, m/s^2")
+    ap.add_argument("--profiled", action="store_true",
+                    help="--line is a profiled x,y,speed CSV: drive its own speeds instead of re-profiling it "
+                         "(--speed and --lateral then only set the controller's ceilings)")
+    ap.add_argument("--law", default="pure_pursuit", choices=("pure_pursuit", "stanley", "lqr", "mpc"),
+                    help="steering law, as pure_pursuit_node's steering_law")
+    ap.add_argument("--set", action="append", default=[],
+                    help="a pure_pursuit.yaml steering-law parameter, name=value (e.g. lookahead_speed_gain=0.25)")
+    ap.add_argument("--online-lateral", type=float, default=None,
+                    help="lateral limit of the controller's online curvature ceiling, m/s^2 (default: the planned one)")
     ap.add_argument("--steering-limit", type=float,
                     help="steering limit in radians (default: car configuration)")
     args = ap.parse_args(argv)
     calibration = with_friction(args.friction, with_floor(args.floor))
     track = eval_gap.track_path(args.track)
     xy = load_line(args.line) if args.line else None
+    profiled = None
+    if args.profiled:
+        from pure_pursuit import racing_math
+        if not args.line:
+            ap.error("--profiled needs --line")
+        xy, profiled = racing_math.load_profiled_csv(args.line)
     for top, lateral in itertools.product(*([float(v) for v in s.split(",")] for s in (args.speed, args.lateral))):
-        plan = plan_line(xy, top, lateral, args.brake, args.accel) if xy is not None else None
-        r = rv.run_pure_solo(track, args.seed, args.timeout, calibration=calibration, plan=plan,
-                             max_speed=top, max_lateral_accel=lateral, safety=args.safety,
+        if profiled is not None:
+            from pure_pursuit import racing_math
+            plan = rv.PathPlan(xy=np.asarray(xy, float), seg_len=racing_math.compute_segment_lengths(xy, closed=True),
+                               speed=np.minimum(profiled, top))
+        else:
+            plan = plan_line(xy, top, lateral, args.brake, args.accel) if xy is not None else None
+        r = rv.run_pure_solo(track, args.seed, args.timeout, calibration=calibration, plan=plan, law_name=args.law,
+                             law_params={k: float(v) for k, v in (item.split("=", 1) for item in args.set)} or None,
+                             max_speed=top, max_lateral_accel=args.online_lateral or lateral, safety=args.safety,
                              laps=args.laps, steering_limit=args.steering_limit)
         print(f"top {top:.1f} lateral {lateral:.1f}: lap {r['lap_time_s']} finished {r['passed']} contact {r['contact_steps']} "
               f"cross-track max {r['max_cross_track_m']} safety avoid {r['avoid_steps']} stop {r['stop_steps']} "

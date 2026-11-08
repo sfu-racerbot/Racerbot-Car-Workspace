@@ -181,9 +181,23 @@ auto_map_race_node:
     # `supervisor_config:=` with a copy holding the old 2.0 / 1.2 / 3.0 for
     # anywhere tight; this default now assumes a course wide enough to
     # absorb half a metre of running wide.
-    profile_max_speed: 4.0
+    # 2026-11-07: 5.0 m/s ceiling, matching gap_follow. On the 6 Nov car 2
+    # courses, 0.38 rad / 2.9 m/s^2 minimum-time lines had no contact in 3 seeds:
+    # 06a 10.97-11.10 s flying; 06b 9.15-9.40 s. Floor validation still required.
+    profile_max_speed: 5.0
     profile_min_speed: 0.5
     profile_max_lateral_accel: 2.5
+    profile_max_lateral_accel_right: 2.5
+    # Offline builder settings; optimization runs only after driving shuts down.
+    race_line_mode: fastest
+    profile_steering_linkage_gain: 1.0
+    profile_steering_rate: 1.0  # rad/s, pure_pursuit max_steering_rate
+    profile_steering_delay: 0.10  # s
+    profile_speed_delay: 0.10  # s
+    race_line_wall_margin: 0.15  # m
+    race_line_cone_margin: 0.10  # m beyond the unchanged forward stop distance
+    race_line_body_floor: 0.08  # m
+    floor_test_speed: 1.5  # m/s, cap of raceline_floor_test.csv only
     profile_max_accel: 6.0
     # SAFETY-CRITICAL, and NOT the same knob as pure_pursuit.yaml's
     # max_braking_decel. Here it is the braking authority the *profile

@@ -47,7 +47,8 @@ def generate_launch_description():
             'supervisor_config', default_value=os.path.join(
                 get_package_share_directory('pure_pursuit'),
                 'config', 'auto_map_race.yaml'),
-            description='Passed straight through, so a sweep can vary the racing profile.'),
+            description='Shared supervisor base; auto_map_race_launch layers the selected '
+                        'car calibration and tuning over it, just as on the car.'),
         DeclareLaunchArgument('dashboard', default_value='false'),
     ]
 
