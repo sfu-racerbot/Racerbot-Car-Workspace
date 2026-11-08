@@ -299,6 +299,12 @@ class PurePursuitNode(Node):
         # docs/racing-autonomy.md's "Racing against opponents" ---
         self.declare_parameter('enable_opponent_overtake', True)
         self.declare_parameter('enable_opponent_following', False)
+        self.declare_parameter('following_brake', 3.0)
+        self.declare_parameter('following_response_sec', 0.45)
+        self.declare_parameter('following_reserve', 0.65)
+        self.declare_parameter('following_speed_uncertainty', 1.0)
+        self.declare_parameter('following_reacquire_speed', 0.25)
+        self.declare_parameter('following_stop_speed', 0.30)
         self.declare_parameter('opponent_min_width', 0.15)
         self.declare_parameter('opponent_max_width', 0.7)
         self.declare_parameter('opponent_cluster_gap', 0.3)
@@ -521,6 +527,14 @@ class PurePursuitNode(Node):
         self.enable_opponent_overtake = bool(self.get_parameter('enable_opponent_overtake').value)
         self.enable_opponent_following = bool(self.get_parameter('enable_opponent_following').value)
         self.follow_speed_cap = None
+        self._following_last_seen_ahead = True
+        for name in ('following_brake', 'following_response_sec',
+                     'following_reserve', 'following_speed_uncertainty',
+                     'following_reacquire_speed', 'following_stop_speed'):
+            value = float(self.get_parameter(name).value)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f'{name} must be positive and finite')
+            setattr(self, name, value)
         self.opponent_min_width = float(self.get_parameter('opponent_min_width').value)
         self.opponent_max_width = float(self.get_parameter('opponent_max_width').value)
         self.opponent_cluster_gap = float(self.get_parameter('opponent_cluster_gap').value)
@@ -1670,7 +1684,7 @@ class PurePursuitNode(Node):
         if not recovering and self.enable_lidar_safety and (
                 self.enable_opponent_overtake or self.enable_opponent_following):
             overtake_target = self._update_opponent_and_overtake(
-                nearest_idx, allow_pass=self.enable_opponent_overtake)
+                nearest_idx, allow_pass=self.enable_opponent_overtake, desired_steering=steering_angle)
             if overtake_target is not None:
                 target_x, target_y = overtake_target
                 dx = target_x - self.car_x
@@ -2485,12 +2499,14 @@ class PurePursuitNode(Node):
 
         if candidate is None:
             return None
-        half_fov = math.radians(self.avoidance_fov_deg) / 2.0
+        # Following needs the car through bends, not just the +/-30 degree
+        # avoidance cone. Confirmation/wall rejection remain unchanged.
+        half_fov = math.pi / 2 if self.enable_opponent_following else math.radians(self.avoidance_fov_deg) / 2.0
         if not (-half_fov <= candidate[3] <= half_fov):
             return None
         return candidate
 
-    def _update_opponent_and_overtake(self, nearest_idx: int, *, allow_pass=True):
+    def _update_opponent_and_overtake(self, nearest_idx: int, *, allow_pass=True, desired_steering=None):
         """Look for another car in the live scan, track its progress along
         the racing line, and decide whether to start, continue, or end an
         overtake. Returns a (x, y) world-frame point to steer at instead
@@ -2549,8 +2565,17 @@ class PurePursuitNode(Node):
                 self.total_track_length, wall_distance=wall_distance)
             if verdict.confirmed:
                 self.opponent.prev_nearest_index = opp_idx
+                observed_arc = float(self.cumulative_arc_length[opp_idx])
+                if self.enable_opponent_following:
+                    observed_arc = following.project_arc(
+                        self.xy, self.cumulative_arc_length, (opponent_x, opponent_y), opp_idx)
+                    observed_gap = -racing_math.track_lead_distance(
+                        float(self.cumulative_arc_length[nearest_idx]), observed_arc,
+                        self.total_track_length)
+                    self._following_last_seen_ahead = (
+                        -self.car_length <= observed_gap <= self.opponent_engagement_range + self.car_length)
                 self.opponent.update(
-                    float(self.cumulative_arc_length[opp_idx]), now_sec, self.total_track_length)
+                    observed_arc, now_sec, self.total_track_length)
             else:
                 # Not a car yet (or not one at all): nothing to track or
                 # pass. The reactive safety net still reads the raw scan.
@@ -2559,7 +2584,8 @@ class PurePursuitNode(Node):
 
         ego_arc_length = float(self.cumulative_arc_length[nearest_idx])
 
-        if self.enable_opponent_following and self.opponent.arc_length is not None:
+        if (self.enable_opponent_following and self.opponent.arc_length is not None
+                and getattr(self, '_following_last_seen_ahead', True)):
             # The detector sees a surface, NOT the opponent's rear axle.
             # Subtract our front extent; do not advance a lost car at its
             # old speed. A hidden opponent may have stopped immediately.
@@ -2567,9 +2593,56 @@ class PurePursuitNode(Node):
                 self.xy, self.cumulative_arc_length, (self.car_x, self.car_y), nearest_idx)
             gap = -racing_math.track_lead_distance(
                 ego_arc, self.opponent.arc_length, self.total_track_length)
+            age = self.opponent.seconds_since_seen(now_sec)
+            if self.last_scan is not None and self._seconds_since(self.last_scan_time) <= self.scan_timeout_sec:
+                # A frozen last-seen car need not pin us forever after it
+                # rounds a bend: only measured empty corridor can extend
+                # this bound, never dead-reckoned opponent progress.
+                visible = following.visible_arc(
+                    self.xy, self.seg_len, nearest_idx,
+                    (self.car_x, self.car_y, self.car_yaw), self.last_scan.ranges,
+                    self.last_scan.angle_min, self.last_scan.angle_increment,
+                    self.laser_offset_x, self.laser_offset_y, self.car_width / 2 + 0.10)
+                if visible > gap:
+                    gap, age = visible, 0.0
             self.follow_speed_cap = following.speed_ceiling(
                 gap - (self.car_length / 2 + self.wheelbase / 2),
-                self.opponent.progress_rate, self.opponent.seconds_since_seen(now_sec))
+                self.opponent.progress_rate, age, brake=self.following_brake,
+                delay=self.following_response_sec, reserve=self.following_reserve,
+                speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed)
+            if (age > self.opponent_lost_timeout_sec and self.last_scan is not None
+                    and self._seconds_since(self.last_scan_time) <= self.scan_timeout_sec
+                    and len(self.last_scan.ranges) >= 2
+                    and np.all(np.isfinite(self.last_scan.ranges))
+                    and np.all(np.asarray(self.last_scan.ranges) > self.last_scan.range_min)):
+                # An occluding corner can make the line corridor invisible
+                # even when the actual commanded swept body is clear. Crawl
+                # only within the same delayed-stopping envelope on BOTH
+                # current-rack and commanded arcs; never blindly time out a
+                # remembered car. This keeps delay_lqr steering throughout.
+                arc = min(self._arc_clearance(
+                    self.last_scan, self.steering_basis if desired_steering is None else desired_steering),
+                          self.emergency_arc_length)
+                crawl = min(self.following_reacquire_speed, following.speed_ceiling(
+                    arc, 0.0, 0.0, brake=self.following_brake,
+                    delay=self.following_response_sec, reserve=self.following_reserve,
+                    speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed))
+                self.follow_speed_cap = max(self.follow_speed_cap, crawl)
+            # Once following a confirmed car, a narrower near-field return
+            # can still be that car's rear. Losing the detector's minimum
+            # cluster width must not let an older, larger gap win. This can
+            # only brake; it does not confirm a new car or authorise a pass.
+            if self.last_scan is not None:
+                raw_gap = self._dynamic_closest_in_cone(self.last_scan, self.avoidance_fov_deg)
+                if raw_gap is None:
+                    raw_gap = self._closest_in_cone(self.last_scan, self.avoidance_fov_deg)
+                if math.isfinite(raw_gap):
+                    cap = following.speed_ceiling(
+                        raw_gap + self.laser_offset_x - (self.car_length + self.wheelbase) / 2,
+                        self.opponent.progress_rate, 0.0, brake=self.following_brake,
+                        delay=self.following_response_sec, reserve=self.following_reserve,
+                        speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed)
+                    self.follow_speed_cap = min(self.follow_speed_cap, cap)
             self.last_opponent_status += f'; following cap={self.follow_speed_cap:.2f}m/s'
         if not allow_pass:
             self.overtake_active = False

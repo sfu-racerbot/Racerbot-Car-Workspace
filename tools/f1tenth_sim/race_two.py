@@ -112,6 +112,7 @@ class NodeDecisions(Decisions):
 
     def base_command(self, follower, state, previous_steering):
         """Node control_step's bounded off-line recovery, before opponents/safety."""
+        self.follow_speed_cap = None
         nearest, error = racing_math.find_nearest_index(
             self.xy, state[:2], closed=True, prev_index=follower.previous_index,
             search_window=self.nearest_search_window)
@@ -134,7 +135,8 @@ class NodeDecisions(Decisions):
         # The node advances its stateful law once, even if a pass
         # subsequently replaces the steering target.
         steering, speed, nearest, _, _ = follower.command(state, previous_steering=previous_steering)
-        target = self._update_opponent_and_overtake(nearest, allow_pass=self.enable_opponent_overtake)
+        target = self._update_opponent_and_overtake(
+            nearest, allow_pass=self.enable_opponent_overtake, desired_steering=steering)
         if target is not None:
             steering, speed, nearest, _, _ = follower.command(
                 state, target_override=target, previous_steering=previous_steering)
@@ -287,12 +289,19 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
             rows.append(dict(time=(step + 1) * rv.CONTROL_DT, ego_progress=p[0], opp_progress=p[1] if count == 2 else 0,
                              head_start=actual_head, ego_speed=float(plant.truth(0)[3]),
                              opp_speed=float(plant.truth(1)[3]) if count == 2 else 0, ego_command=commands[0][1],
+                             opp_command=commands[1][1] if count == 2 else None,
                              steering=commands[0][0], profile_speed=float(plan.speed[progress[0].index]),
                              ego_x=float(plant.truth(0)[0]), ego_y=float(plant.truth(0)[1]),
                              opp_x=float(plant.truth(1)[0]) if count == 2 else None,
                              opp_y=float(plant.truth(1)[1]) if count == 2 else None,
                              active=decisions[0].overtake_active, status=statuses[0], safety=states[0],
                              target=targets[0], desired_steering=desired[0],
+                             follow_cap=decisions[0].follow_speed_cap,
+                             tracked_arc=decisions[0].opponent.arc_length,
+                             tracked_speed=decisions[0].opponent.progress_rate,
+                             track_age=decisions[0].opponent.seconds_since_seen(now),
+                             opp_status=statuses[1] if count == 2 else None,
+                             opp_follow_cap=decisions[1].follow_speed_cap if count == 2 else None,
                              body_clearance=decisions[0]._footprint_clearance(decisions[0].last_scan),
                              arc_clearance=decisions[0]._arc_clearance(decisions[0].last_scan, desired[0]),
                              mapped_forward=decisions[0]._static_closest_in_cone(
@@ -312,6 +321,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                   ego_laps=rows[-1]['ego_progress'] / progress[0].length,
                   opponent_laps=rows[-1]['opp_progress'] / progress[0].length if count == 2 else None,
                   node_sha256=hashlib.sha256(NODE.read_bytes()).hexdigest(),
+                  following_sha256=hashlib.sha256(Path(following.__file__).read_bytes()).hexdigest(),
+                  controller_parameters=params,
                   harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                   setup='standing start; frozen map and line settled before LB; both cars rb2',
                   line_sha256=hashlib.sha256(Path(line).read_bytes()).hexdigest(),

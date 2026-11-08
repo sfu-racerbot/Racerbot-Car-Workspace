@@ -139,3 +139,89 @@ def test_source_safety_adapter_denies_blind_or_flank_contact(scan_kind):
     assert speed == 0.0
     assert steer is None
     assert state in ('lidar_scan_missing', 'lidar_scan_stale', 'body_contact')
+
+
+def test_shipped_car2_follows_after_confirmation_without_an_offset_target():
+    d, scan = decisions()
+    follower = race.rv.PathFollower(rectangle(), law_name='delay_lqr', car_id='rb2')
+    for now in np.arange(0, .125, .025):
+        d.observe([0, 0, 0, 1, 0], scan, float(now), 0)
+        _, _, _, target, _ = d.base_command(follower, [0, 0, 0, 1, 0], 0)
+        # oracle: spec; the shipped confirmation gate still spans .15s.
+        assert d.follow_speed_cap is None
+        assert target is None
+    for now in np.arange(.125, .3, .025):
+        d.observe([0, 0, 0, 1, 0], scan, float(now), 0)
+        _, _, _, target, _ = d.base_command(follower, [0, 0, 0, 1, 0], 0)
+    # oracle: invariant; a real confirmed car gets a physical-braking cap,
+    # never a point-offset target, in car 2's shipped configuration.
+    assert 0 < d.follow_speed_cap < 2
+    assert target is None
+    assert not d.overtake_active
+    assert d.enable_opponent_following and not d.enable_opponent_overtake
+
+
+@pytest.mark.parametrize('kind', ['clear', 'blocked', 'stale', 'invalid', 'nan', 'zero', 'short'])
+def test_lost_opponent_reacquisition_requires_a_visible_stopping_arc(kind):
+    d, scan = decisions()
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    # Map/scan input boundary: a known wall at y=.20. A 0.31m-wide car
+    # fits, but the inflated line corridor is occluded. All math is real.
+    def wall(x, y, yaw, beam_angles):
+        sine = np.sin(yaw + beam_angles)
+        return np.where(sine > .001, np.minimum(10, .2 / np.maximum(sine, .001)), 10)
+    scan[:] = wall(0, 0, 0, angles)
+    d.map_ray_caster.expected_ranges = wall
+    d.opponent.arc_length, d.opponent.last_update_time = 2.0, 0.0
+    d.opponent.progress_rate = 1.0
+    if kind == 'blocked':
+        scan[np.abs(angles) < .1] = .8
+    elif kind == 'invalid':
+        scan[:] = math.inf
+    elif kind == 'nan':
+        scan[:] = math.nan
+    elif kind == 'zero':
+        scan[:] = 0
+    elif kind == 'short':
+        scan = np.array([10.0])
+    d.observe([0, 0, 0, .1, 0], scan, 3.0, 0)
+    if kind == 'stale':
+        d.last_scan_time = 0.0
+    d._update_opponent_and_overtake(0, allow_pass=False, desired_steering=0)
+    # oracle: invariant; no blind timeout or escape from a blocked arc.
+    # The only permitted lost-track motion is the specified .25m/s crawl.
+    assert d.follow_speed_cap == (.25 if kind == 'clear' else 0.0)
+    assert not d.overtake_active
+
+
+def test_confirmed_car_behind_on_the_line_does_not_create_a_forward_follow_cap():
+    d, scan = decisions()
+    # Ego faces backwards here: the real detected object is in its scan's
+    # forward cone, but behind it along the racing line. This isolates
+    # the longitudinal gate used at folded/adjacent track sections.
+    for now in np.arange(0, .3, .025):
+        d.observe([5, 0, 0, 1, math.pi], scan, float(now), 0)
+        d._update_opponent_and_overtake(50, allow_pass=False)
+    # oracle: invariant; only an opponent ahead on the line triggers following.
+    assert d.opponent.arc_length < 5
+    assert d.follow_speed_cap is None
+    assert not d.overtake_active
+
+
+def test_following_retains_an_ahead_car_round_a_bend_outside_the_avoidance_cone():
+    d, scan = decisions()
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    # Rectangle's next leg is x=10, y increasing. Ego is at (8.5,0),
+    # opponent surface at (10,2): 3.5m ahead along the line, bearing >30°.
+    scan[:] = 10
+    bearing = math.atan2(2, 10 - 8.5 - d.laser_offset_x)
+    distance = math.hypot(2, 10 - 8.5 - d.laser_offset_x)
+    scan[np.abs(angles - bearing) < .08] = distance
+    for now in np.arange(0, .3, .025):
+        d.observe([8.5, 0, 0, 1, 0], scan, float(now), 0)
+        d._update_opponent_and_overtake(85, allow_pass=False)
+    # oracle: known geometry and confirmation spec; following must retain
+    # the real ahead car without borrowing the narrow avoidance aim cone.
+    assert d.opponent.arc_length == pytest.approx(12, abs=.05)  # 5cm surface-centroid discretisation
+    assert 0 < d.follow_speed_cap < d.max_speed
+    assert not d.overtake_active
