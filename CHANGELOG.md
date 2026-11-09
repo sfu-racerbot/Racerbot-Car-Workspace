@@ -11,7 +11,26 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-08 (latest): approved measured pass-completion contract
+## 2026-11-08 (latest): stage-2 passing planner, off by default
+
+### pure_pursuit
+
+- Add `pass_planner.py` (ROS-free): passes round a slower car on a path anchored to the track, committing only while a delayed 3 m/s² stop along it stays clear of the walls (whole-chassis distance-field check; unsteerable poses count as walls) and of everywhere the other car could reach. Rejoin uses the other car's last sighting pushed forward at its measured speed + `pass_speed_uncertainty` for at most 1 s out of sight, with a `pass_clear_margin` body lead (tech lead, 2026-11-08: car 2's ±135° LiDAR loses a passed car ~0.35 m after drawing level, so a measured lead can never be confirmed on a straight; then "as long as the car physically fits it should attempt to pass").
+- Node: new state machine (`_local_pass_update`: idle -> pass -> return, abort brakes to zero in the approved order lane / checked rejoin / hold steering, never forgetting the car); the steering law tracks the pass path through the existing miss-policy wrapper, once per tick; mid-pass, "lost" is judged against the pass path as well as the line.
+- New parameters: `enable_local_pass_planner` (**false**), `pass_speed_uncertainty` 0.5 m/s, `pass_clear_margin` 0.5 m, `pass_standoff` 2.5 m. The node refuses the planner together with the legacy `enable_opponent_overtake`, or without `enable_opponent_following`.
+- `WallDistance.at_many` for vectorised wall lookups.
+- **Car 2 is not enabled.** With the planner off the stage-1 matrix is identical in all 72 races. With it on, the 6 Nov courses have zero contact and stage-1 following times but no passes (no room: single-side stretches with space for a second car are at most 8.4 m on 06a and 6.0 m on 06b). On the 2.6 m `indoor_wide` track 5 of 6 blocker races ended in wall contact (pass paths too close to the steering limit to track), so it stays off. See docs/racing-autonomy.md, "Passing: stage 2".
+
+### tools/f1tenth_sim
+
+- `race_two.py`: `--pass-planner` (car 2 only), a `stalled` opponent that stops for good at one of six evenly spaced points per seed, per-tick `pass_state` and abort branch in the trace, and the node's planner methods in the source adapter.
+- Evidence: `race_two_pass_planner_2026_11_08.json`.
+
+### Validation
+
+- New tests seen failing under deliberate breaks (break table in the docs): `test_pass_planner.py` (28, ROS-free), `test_pass_planner_node.py` (real node: refusals, the four LB deny paths with the planner on plus one mid-pass, the pass plan tracked, solo commands unchanged), and the state machine through the node's own methods in `test_race_two.py`.
+
+## 2026-11-08: approved measured pass-completion contract
 
 ### pure_pursuit
 

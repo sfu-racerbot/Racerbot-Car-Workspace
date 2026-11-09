@@ -367,7 +367,104 @@ rb colcon test-result --verbose
 
 Stage 2 remains the [proposed local passing planner](#proposed-local-passing-planner). The delivered traffic controller attempted zero passes and completed zero physical passes in 60 traffic races, including 0/12 against map ×0.8 and 0/12 against the blocker. No local-planner race or promotion claim is included.
 
+**Update, later on 2026-11-08:** the planner is now built, off by default; see [Passing: stage 2](#passing-stage-2-local-passing-planner-2026-11-08).
+
 The completion correction does not supply entry, alongside or rejoin trajectories, swept-body feasibility or a temporary path for `delay_lqr`. Car 2 therefore retains passing disabled. A future planner must also account for whether the opponent remains observable while establishing the required clear lead.
+
+## Passing: stage 2 (local passing planner), 2026-11-08
+
+**Status: built and tested, off by default, not enabled on car 2.** With `enable_local_pass_planner: false`, which is the shipped setting, car 2 drives exactly as in stage 1. A re-run of the stage-1 matrix gave the same result in all 72 races. Turn it on only in the simulator until the open items below are closed.
+
+What it does: when car 2 is following a slower car, it looks for a path round it that the car can physically drive. It commits to a pass only if, at every moment of that pass, it could still brake to a stop clear of the walls and of everywhere the other car could reach. It rejoins the racing line only once it is clearly ahead.
+
+Why it is off: on the 6 Nov courses there is almost nowhere two cars fit side by side, and on a wider simulated track the latest margins still produced wall contact in 5 of 6 blocker races (below).
+
+### Highlights
+
+- **A stop-checked path, every tick.** Each 25 ms tick re-asks one question: from this speed, coasting 0.45 s and then braking at car 2's measured 3 m/s², does the body stay clear of the walls and of the other car's *reachable box*? A pass continues only while the answer is yes.
+- **Anchored manoeuvres.** A pass is a smooth sideways shift, a hold, and a smooth shift back, fixed to the track when it starts. Re-planning from the car's own position each tick would restart the shift every time and the car would never move across.
+- **A wall map with no blind spots between samples.** The whole chassis is checked at 45 points per pose, with slack for the gaps between points and between poses, against the map's distance field. A pose that would need more steering than the car has counts as a wall.
+- **Honest about what it cannot see.** Car 2's ±135° LiDAR loses a car it is passing about 0.35 m after drawing level. The rejoin therefore uses the car's last sighting, pushed forward at its measured speed + 0.5 m/s for as long as it has been out of sight (at most 1 s), and needs a 0.5 m body lead over that bound.
+- **Approved abort order.** If a pass loses its checked stop, car 2 brakes to zero: in its own lane if that is clear, else on a checked rejoin, else holding its steering. It never forgets the other car.
+- **ROS-free and tested.** The geometry lives in `pass_planner.py` with no ROS; the node holds only the state machine, and the two-car harness runs the node's own method bodies.
+
+### Why passing barely happens on the 6 Nov courses
+
+Two measurements, both in [`race_two_pass_planner_2026_11_08.json`](../tools/f1tenth_sim/race_two_pass_planner_2026_11_08.json):
+
+- **Room.** The corridor's median width is 1.60 m on 06a and 1.78 m on 06b, for cars 0.31 m wide. Stretches with at least 0.95 m between the racing line and one wall, enough for a car alongside, are at most 8.4 m long on 06a and 6.0 m on 06b, and almost all on the left. Passing a 1.5 m/s car takes about 12 m.
+- **Sight.** The sensor geometry above means a pass can never be *confirmed* by measurement on a straight. The tech lead approved the worst-case-bound rejoin for that reason (2026-11-08), then asked for racing margins: "as long as the car physically fits it should attempt to pass".
+
+So on these courses the planner nearly always declines and car 2 follows. On a wider track it passes.
+
+### Results, commit `807a30b`
+
+`race_two.py`, four laps, seeds 12345-12350, timeout 120 s, `--pass-planner` on car 2 only. Contact is the harness's own body check, never gym's flag. "Passes" counts physical passes from ground truth: car 2 at least 1 m ahead for 0.5 s. The **stalled** opponent is an 80 % car that stops for good at one of six evenly spaced points round the lap, one per seed; `indoor_wide` is the simulator's 2.6 m-corridor indoor track with its centreline profiled for car 2.
+
+| Track | Opponent | Finished | Car / wall contact runs | Passes | Race time, s |
+|---|---|---|---|---|---|
+| 06a | map ×0.8 / ×0.9 / gap_follow | 6 / 6 / 6 | 0 / 0 | 0 | 53.33-53.65 / 50.23-50.98 / 50.15-50.95 |
+| 06a | 1.5 m/s blocker / braking | 6 / 6 | 0 / 0 | 0 | 90.05-90.95 / 55.80-56.30 |
+| 06a | stalled | 0 | 0 / 0 | 0 | stuck behind it, as in stage 1 |
+| 06b | map ×0.8 / ×0.9 / gap_follow | 6 / 6 / 6 | 0 / 0 | 0 | 40.25-40.62 / 39.78-40.25 / 40.35-40.70 |
+| 06b | 1.5 m/s blocker / braking | 6 / 6 | 0 / 0 | 0 | 62.25-62.30 / 43.38-43.55 |
+| 06b | stalled | 0 | 0 / 0 | 0 | stuck behind it, as in stage 1 |
+| 06a / 06b | solo | 6 / 6 | 0 / 0 | - | 46.35-46.40 / 36.50-36.83 |
+| indoor_wide | stalled | 0 | 0 / 0 | 3 | - |
+| indoor_wide | 1.5 m/s blocker | 1 | **0 / 5** | 1 | 75.98 |
+| indoor_wide | map ×0.8 | 2 | 0 / 0 | 0 | 68.53-99.30 |
+
+With the planner on, following on the 6 Nov courses matches stage 1 within a few tenths, and nothing touches anything. On `indoor_wide` it is not ready: five blocker races ended in wall contact. An earlier build with tighter margins, `a51598b`, passed the stalled car and finished in all six `indoor_wide` seeds (67.9-94.9 s) with no contact, so passes do work; the margins are not settled.
+
+**Why the wall contacts happen.** Each began within a second or two of the start, as car 2 shifted out to pass the blocker while the track bent. The pass path used close to the car's full 0.42 rad of steering, line bend plus shift; with `delay_lqr`'s modelled steering delays the car could not follow it, sat at full lock and ran wide into the wall. The next step is to keep steering headroom for tracking: no pass path may need more than about 80 % of the steering limit, bend included.
+
+### Open items before enabling it
+
+1. Steering headroom on pass paths (the wall contacts above), then re-run this matrix.
+2. Zero car and wall contact on every row, including `indoor_wide`, before car 2's tuning overlay turns it on.
+3. Node timing on the Jetson: a pass re-plans every tick (wall lookups for ~45 body points per pose along the path, plus the stop checks). Measure before trusting it at 40 Hz.
+4. Floor tests: none of this has run on a car.
+
+### Parameters
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `enable_local_pass_planner` | `false` | Turn the planner on. Needs `enable_opponent_following`; the node refuses it together with the legacy `enable_opponent_overtake`. |
+| `pass_speed_uncertainty` | 0.5 m/s | Added to the other car's measured speed while it is out of sight (the rejoin bound). |
+| `pass_clear_margin` | 0.5 m | Worst-case body lead before moving back across in front of it. |
+| `pass_standoff` | 2.5 m | With the planner on, follow a car moving at under half car 2's pace this far back, so it can be steered round even if it stops dead. Behind anything faster, following is stage 1's exactly. |
+
+The planner's geometric margins live in `pass_planner.Limits`: 0.10 m to walls, 0.08 m beside the other car's box, 0.15 m along it, its sideways drift at up to 0.10 rad of heading, and at most 2.0 m/s of closing speed while a pass is under way.
+
+### Reproduce
+
+In a development terminal at the workspace root, with the race lines from [Reproduce stage 1](#reproduce-stage-1):
+
+```bash
+export RB_NO_QUEUE=1 RACERBOT_CAR=rb2 RB_WS="$PWD"
+rb env RACERBOT_CAR=rb2 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  python3 tools/f1tenth_sim/race_two.py --track car2_course_2026_11_06b_scans \
+  --line "$LINES/b06/raceline_profiled.csv" --opponent stalled --laps 4 --timeout 120 \
+  --seeds 12345 --output /tmp/stage2-check --pass-planner
+```
+
+**Working when:** the run prints one JSON line with `car_contact_ticks: 0` and `wall_contact_ticks: 0`; the per-tick trace in `/tmp/stage2-check/12345.csv` carries the planner's `pass_state`, its abort branch, and why it declined (`status`).
+
+Each run is one single-threaded process. Running one process per seed in parallel, six at a time on an 8-thread machine, cuts a matrix from about 75 to about 25 minutes.
+
+### Stage-2 test break table
+
+Runners: `python3 -m pytest src/pure_pursuit/test/` (`test_pass_planner.py`, ROS-free; `test_pass_planner_node.py`, real node) and `python3 -m pytest tools/f1tenth_sim/tests/` (`test_race_two.py`, the node's method bodies). Every new test was seen failing under a deliberate break first, on an isolated copy of the code.
+
+| Coverage | Deliberate breaks caught |
+|---|---|
+| Stopping and reach kinematics | brake doubled in the stop distance; response time ignored; reaction phase dropped; unseen travel dropped; box start mis-signed |
+| The stop check | long margin dropped; overlap test flipped; car margin dropped; wall margin to zero; stopped pose not checked; a plan shorter than the stop accepted; start-time offset ignored |
+| Rejoin bound | the 1 s sighting limit dropped; unseen motion dropped from the lead |
+| Pass geometry | car margin dropped from the target; max offset ignored; pace gate dropped; car-behind check dropped; wall slack dropped; Frenet side flipped; unsigned path curvature (the steering laws feed it forward); shift steering budget +10 % |
+| Entry and speed | the current-speed check skipped; the crawl-progress check skipped or always clear; heading share dropped |
+| Node | LB deadman bypassed (all four deny paths, plus mid-pass); planner allowed beside the legacy pass or without following; a stray speed cap from the planner; the law steered on a stale input; the pass plan never tracked |
+| Harness state machine | the acceleration gate as a window-length speed difference (a car pulling away at 2 m/s² was passed) |
 
 ## Two-car racing on the 6 Nov courses, 2026-11-08
 

@@ -1,0 +1,1201 @@
+{
+ "date": "2026-11-08",
+ "commit": "807a30b",
+ "setup": "race_two.py, 4 laps, 6 seeds (12345-12350), standing start, both cars rb2; contact = the harness body check, never gym's flag",
+ "planner_on_matrix": {
+  "timeout_s": 120,
+  "table": [
+   {
+    "mode": "baseline",
+    "track": "06a",
+    "opponent": "stalled",
+    "runs": 6,
+    "errors": 0,
+    "finished": 0,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": null,
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "baseline",
+    "track": "06b",
+    "opponent": "stalled",
+    "runs": 6,
+    "errors": 0,
+    "finished": 0,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": null,
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "baseline",
+    "track": "wide",
+    "opponent": "blocker",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     109.7,
+     109.7
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "baseline",
+    "track": "wide",
+    "opponent": "stalled",
+    "runs": 6,
+    "errors": 0,
+    "finished": 0,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": null,
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06a",
+    "opponent": "blocker",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     90.05000000000001,
+     90.95
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06a",
+    "opponent": "braking",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     55.800000000000004,
+     56.300000000000004
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06a",
+    "opponent": "gap",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     50.150000000000006,
+     50.95
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06a",
+    "opponent": "map80",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     53.325,
+     53.650000000000006
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06a",
+    "opponent": "map90",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     50.225,
+     50.975
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06a",
+    "opponent": "solo",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     46.35,
+     46.400000000000006
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06a",
+    "opponent": "stalled",
+    "runs": 6,
+    "errors": 0,
+    "finished": 0,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": null,
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06b",
+    "opponent": "blocker",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     62.25,
+     62.300000000000004
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06b",
+    "opponent": "braking",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     43.375,
+     43.550000000000004
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06b",
+    "opponent": "gap",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     40.35,
+     40.7
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06b",
+    "opponent": "map80",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     40.25,
+     40.625
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06b",
+    "opponent": "map90",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     39.775000000000006,
+     40.25
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06b",
+    "opponent": "solo",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 1,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     36.5,
+     36.825
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "06b",
+    "opponent": "stalled",
+    "runs": 6,
+    "errors": 0,
+    "finished": 0,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": null,
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "wide",
+    "opponent": "blocker",
+    "runs": 6,
+    "errors": 0,
+    "finished": 1,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 5,
+    "emergency_stop_ticks": 64,
+    "attempted": 8,
+    "completed": 1,
+    "runs_with_abort": {
+     "brake_in_lane": 3,
+     "checked_rejoin": 2,
+     "zero_stop": 2
+    },
+    "race_time_range_s": [
+     75.97500000000001,
+     75.97500000000001
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "wide",
+    "opponent": "map80",
+    "runs": 6,
+    "errors": 0,
+    "finished": 2,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 4729,
+    "attempted": 8,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 6,
+     "checked_rejoin": 5,
+     "zero_stop": 6
+    },
+    "race_time_range_s": [
+     68.525,
+     99.30000000000001
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "wide",
+    "opponent": "solo",
+    "runs": 6,
+    "errors": 0,
+    "finished": 6,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 0,
+    "attempted": 0,
+    "completed": 0,
+    "runs_with_abort": {
+     "brake_in_lane": 0,
+     "checked_rejoin": 0,
+     "zero_stop": 0
+    },
+    "race_time_range_s": [
+     53.125,
+     53.225
+    ],
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   },
+   {
+    "mode": "planner",
+    "track": "wide",
+    "opponent": "stalled",
+    "runs": 6,
+    "errors": 0,
+    "finished": 0,
+    "car_contact_runs": 0,
+    "wall_contact_runs": 0,
+    "emergency_stop_ticks": 4729,
+    "attempted": 8,
+    "completed": 3,
+    "runs_with_abort": {
+     "brake_in_lane": 6,
+     "checked_rejoin": 4,
+     "zero_stop": 6
+    },
+    "race_time_range_s": null,
+    "seeds": [
+     12345,
+     12346,
+     12347,
+     12348,
+     12349,
+     12350
+    ]
+   }
+  ]
+ },
+ "planner_off_identity": {
+  "timeout_s": 100,
+  "compared_with": "stage-1 archive at fd0e34e (PR #37)",
+  "runs": 72,
+  "identical": 72,
+  "runs_detail": [
+   {
+    "course": "06a",
+    "opponent": "map80",
+    "seed": 12345,
+    "race_time_s": 53.525000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map80",
+    "seed": 12346,
+    "race_time_s": 53.375,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map80",
+    "seed": 12347,
+    "race_time_s": 53.45,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map80",
+    "seed": 12348,
+    "race_time_s": 53.525000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map80",
+    "seed": 12349,
+    "race_time_s": 53.475,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map80",
+    "seed": 12350,
+    "race_time_s": 53.425000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map90",
+    "seed": 12345,
+    "race_time_s": 50.1,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map90",
+    "seed": 12346,
+    "race_time_s": 50.325,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map90",
+    "seed": 12347,
+    "race_time_s": 50.425000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map90",
+    "seed": 12348,
+    "race_time_s": 50.300000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map90",
+    "seed": 12349,
+    "race_time_s": 50.675000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "map90",
+    "seed": 12350,
+    "race_time_s": 50.425000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "gap",
+    "seed": 12345,
+    "race_time_s": 49.975,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "gap",
+    "seed": 12346,
+    "race_time_s": 50.025000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "gap",
+    "seed": 12347,
+    "race_time_s": 50.625,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "gap",
+    "seed": 12348,
+    "race_time_s": 50.300000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "gap",
+    "seed": 12349,
+    "race_time_s": 50.725,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "gap",
+    "seed": 12350,
+    "race_time_s": 50.2,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "blocker",
+    "seed": 12345,
+    "race_time_s": 89.7,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "blocker",
+    "seed": 12346,
+    "race_time_s": 89.67500000000001,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "blocker",
+    "seed": 12347,
+    "race_time_s": 89.67500000000001,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "blocker",
+    "seed": 12348,
+    "race_time_s": 89.72500000000001,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "blocker",
+    "seed": 12349,
+    "race_time_s": 89.67500000000001,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "blocker",
+    "seed": 12350,
+    "race_time_s": 89.67500000000001,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "braking",
+    "seed": 12345,
+    "race_time_s": 55.875,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "braking",
+    "seed": 12346,
+    "race_time_s": 56.050000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "braking",
+    "seed": 12347,
+    "race_time_s": 56.125,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "braking",
+    "seed": 12348,
+    "race_time_s": 56.150000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "braking",
+    "seed": 12349,
+    "race_time_s": 55.95,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "braking",
+    "seed": 12350,
+    "race_time_s": 55.95,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "solo",
+    "seed": 12345,
+    "race_time_s": 46.35,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "solo",
+    "seed": 12346,
+    "race_time_s": 46.35,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "solo",
+    "seed": 12347,
+    "race_time_s": 46.375,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "solo",
+    "seed": 12348,
+    "race_time_s": 46.400000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "solo",
+    "seed": 12349,
+    "race_time_s": 46.375,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06a",
+    "opponent": "solo",
+    "seed": 12350,
+    "race_time_s": 46.35,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map80",
+    "seed": 12345,
+    "race_time_s": 40.275000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map80",
+    "seed": 12346,
+    "race_time_s": 40.550000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map80",
+    "seed": 12347,
+    "race_time_s": 40.400000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map80",
+    "seed": 12348,
+    "race_time_s": 40.425000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map80",
+    "seed": 12349,
+    "race_time_s": 40.550000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map80",
+    "seed": 12350,
+    "race_time_s": 40.400000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map90",
+    "seed": 12345,
+    "race_time_s": 39.725,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map90",
+    "seed": 12346,
+    "race_time_s": 39.875,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map90",
+    "seed": 12347,
+    "race_time_s": 39.775000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map90",
+    "seed": 12348,
+    "race_time_s": 39.800000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map90",
+    "seed": 12349,
+    "race_time_s": 39.900000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "map90",
+    "seed": 12350,
+    "race_time_s": 39.85,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "gap",
+    "seed": 12345,
+    "race_time_s": 40.075,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "gap",
+    "seed": 12346,
+    "race_time_s": 39.575,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "gap",
+    "seed": 12347,
+    "race_time_s": 39.95,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "gap",
+    "seed": 12348,
+    "race_time_s": 39.725,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "gap",
+    "seed": 12349,
+    "race_time_s": 39.95,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "gap",
+    "seed": 12350,
+    "race_time_s": 40.025000000000006,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "blocker",
+    "seed": 12345,
+    "race_time_s": 61.050000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "blocker",
+    "seed": 12346,
+    "race_time_s": 61.050000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "blocker",
+    "seed": 12347,
+    "race_time_s": 61.050000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "blocker",
+    "seed": 12348,
+    "race_time_s": 61.050000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "blocker",
+    "seed": 12349,
+    "race_time_s": 61.050000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "blocker",
+    "seed": 12350,
+    "race_time_s": 61.050000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "braking",
+    "seed": 12345,
+    "race_time_s": 43.2,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "braking",
+    "seed": 12346,
+    "race_time_s": 43.300000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "braking",
+    "seed": 12347,
+    "race_time_s": 43.175000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "braking",
+    "seed": 12348,
+    "race_time_s": 43.300000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "braking",
+    "seed": 12349,
+    "race_time_s": 43.325,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "braking",
+    "seed": 12350,
+    "race_time_s": 43.425000000000004,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "solo",
+    "seed": 12345,
+    "race_time_s": 36.75,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "solo",
+    "seed": 12346,
+    "race_time_s": 36.5,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "solo",
+    "seed": 12347,
+    "race_time_s": 36.725,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "solo",
+    "seed": 12348,
+    "race_time_s": 36.6,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "solo",
+    "seed": 12349,
+    "race_time_s": 36.575,
+    "identical_to_stage1": true
+   },
+   {
+    "course": "06b",
+    "opponent": "solo",
+    "seed": 12350,
+    "race_time_s": 36.825,
+    "identical_to_stage1": true
+   }
+  ]
+ },
+ "track_room_m": {
+  "note": "distance from the racing line to the wall; single-side stretches with >= 0.95 m of it",
+  "course_06a": {
+   "corridor_median": 1.6,
+   "left_runs": [
+    8.4,
+    5.1,
+    3.9,
+    2.8
+   ],
+   "right_runs": [
+    3.1,
+    1.2,
+    0.4,
+    0.1
+   ]
+  },
+  "course_06b": {
+   "corridor_median": 1.78,
+   "left_runs": [
+    6.0,
+    4.6,
+    1.0,
+    0.4
+   ],
+   "right_runs": [
+    1.8,
+    0.4
+   ]
+  }
+ },
+ "lines_sha256": {
+  "a06": "6aa6135489d7285a7cb3ef4911e1f3305bc4b03cecb84ba065050ec3994c0d30",
+  "b06": "e5243a815f5d0d857c86b110f1fcc4bbec349652e26a022ddc2c7655eda36a89",
+  "wide06": "bd3c34522ccec45ae3a82020e18431820400249a6aa98b400e2545f29a90a9a3"
+ },
+ "pass_planner_sha256": "04c89fabe7c5c7a73015f3d23cb38f1531ffb62dd3ea49c811eb4b867dc79253"
+}
