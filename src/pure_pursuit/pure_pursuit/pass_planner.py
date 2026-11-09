@@ -508,11 +508,14 @@ def manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, *, mode, hold=Fa
     s_rel = np.arange(0.0, length, limits.spacing)
     d = m.lateral(s0 + s_rel, line)
     # Start from where the car really is, not where the manoeuvre says it
-    # should be: carry the measured offset and blend it out over a metre, so
-    # every check sees the actual body (review 2026-11-08).
+    # should be: carry the measured offset and blend it out, so every check
+    # sees the actual body (review 2026-11-08). The blend is as long as a
+    # steerable shift of that size: a fixed metre made a 0.15 m tracking
+    # error need ~0.9 1/m of curvature and aborted passes as "unsteerable".
     _, d0 = line.frenet(pose[0], pose[1])
     if math.isfinite(d0):
-        d = d + (d0 - d[0]) * (1 - smooth(s_rel / 1.0))
+        blend = shift_length(abs(d0 - d[0]), max(speed, 1.0), limits)
+        d = d + (d0 - d[0]) * (1 - smooth(s_rel / blend))
     return build(line, s0, d, mode, limits, walls, side=manoeuvre.side, target=manoeuvre.target)
 
 
@@ -523,6 +526,15 @@ def plan_hold(line, pose, speed, walls, limits):
     length = stop_distance(max(speed, 0.5), limits) + 1.0
     return build(line, s0, np.full(len(np.arange(0.0, length, limits.spacing)), d0), 'hold',
                  limits, walls)
+
+
+def new_hold(line, pose, speed, limits, side=0):
+    """Carry on at the current offset (a stopped abort's way forward past a car beside it)."""
+    s0, d0 = line.frenet(pose[0], pose[1])
+    if not math.isfinite(s0):
+        return None
+    back = shift_length(d0, max(speed, 1.0), limits)
+    return Manoeuvre(s0, d0, d0, 1.0, math.inf, back, side)
 
 
 def plan_return(line, pose, speed, walls, limits):

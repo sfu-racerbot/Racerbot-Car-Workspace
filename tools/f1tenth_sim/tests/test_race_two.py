@@ -508,3 +508,87 @@ def test_a_localization_jump_mid_pass_stops_like_the_node_and_keeps_the_pass_sta
     steering, speed, *_, state = d.base_command(follower, far, 0.1)
     assert speed == 0.0 and state == 'off_racing_line'
     assert d._pass_state == 'pass'
+
+
+# Both lanes walled 0.45 m off the line from x = 6.6 m on: no pass and no
+# carrying on in a lane, but a path back to the line is clear of the walls.
+def _lanes_walled(x, y):
+    return 0.05 if (x > 6.6 and abs(y) > 0.45) else 1.5 - abs(y)
+
+
+def stopped_in_abort(walls_at):
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, nearest = started_pass(walls)
+    limit = d.overtake_max_duration_sec
+    walls['at'] = walls_at
+    ego = (5.5, -0.4)
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, ego, closed=True)
+    d.overtake_max_duration_sec = 0.0
+    d.observe([*ego, 0, 0.0, 0], stopped_car_scan(d, 5.5, 7.5), 0.9, 0)   # still seen
+    d._update_opponent_and_overtake(nearest)
+    d.overtake_max_duration_sec = limit
+    assert d._pass_state == 'abort'
+    return d, nearest, ego
+
+
+def tick_unseen(d, nearest, ego, now):
+    d.observe([*ego, 0, 0.0, 0], np.full(1081, 10.0), now, 0)
+    d._update_opponent_and_overtake(nearest)
+
+
+def test_a_stopped_abort_hands_a_car_lost_ahead_back_to_following_after_the_lost_timeout():
+    # Spec (node comment): a car last seen ahead of our nose cannot come back
+    # beside us unseen; once lost for opponent_lost_timeout_sec, and with a
+    # wall-clear path back to the line, the manoeuvre ends.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    lost = d.opponent_lost_timeout_sec
+    tick_unseen(d, nearest, ego, 0.9 + lost - 0.05)            # one tick short: not lost yet
+    assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+    tick_unseen(d, nearest, ego, 0.9 + lost + 0.05)
+    assert d._pass_state == 'idle' and not d.overtake_active
+    assert d.last_opponent_status.startswith('overtake ended')
+
+
+def test_a_stopped_abort_keeps_a_lost_car_when_the_way_back_is_walled():
+    walled = lambda x, y: 0.0 if x > 6.6 else 1.5 - abs(y)
+    d, nearest, ego = stopped_in_abort(walled)
+    tick_unseen(d, nearest, ego, 0.9 + d.opponent_lost_timeout_sec + 0.5)
+    assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+
+
+def test_a_stopped_abort_keeps_a_car_last_seen_beside_it():
+    # Beside us (its rear behind our nose) it may sit in the rear-flank blind
+    # spot: losing it is no reason to forget it.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    d._opp_anchor = (d._opp_anchor[0] - 2.5, *d._opp_anchor[1:])   # rear now level with us
+    tick_unseen(d, nearest, ego, 0.9 + d.opponent_lost_timeout_sec + 0.5)
+    assert d._pass_state == 'abort'
+
+
+def test_a_stopped_abort_carries_on_in_a_clear_lane_when_the_way_back_is_blocked():
+    # Car 2 stopped in its lane (y = -0.75) just past the stopped car (rear
+    # 7.5 m, front 8.12 m; car 2's rear 8.29 m), so it is no pass target, and
+    # the racing line ahead is walled off, so there is no way back to it. Only
+    # carrying on in the lane, which is clear, can move car 2.
+    line_blocked = lambda x, y: 0.0 if (x > 9.2 and y > -0.45) else 1.5 - abs(y)
+    ego = (8.4, -0.75)
+    nearest, _ = race.racing_math.find_nearest_index(straight_stadium().xy, ego, closed=True)
+
+    def stop_there(walls_at):
+        walls = dict(at=lambda x, y: 1.5 - abs(y))
+        d, _ = started_pass(walls)
+        walls['at'] = walls_at
+        limit = d.overtake_max_duration_sec
+        d.overtake_max_duration_sec = 0.0
+        d.observe([*ego, 0, 0.0, 0], np.full(1081, 10.0), 0.85, 0)
+        d._update_opponent_and_overtake(nearest)
+        d.overtake_max_duration_sec = limit
+        return d
+    d = stop_there(line_blocked)
+    assert d._pass_state == 'pass' and d._pass_plan.mode == 'pass'
+    assert d._pass_plan.d[0] == pytest.approx(-0.75, abs=1e-3)      # m: in its own lane
+    assert d.follow_speed_cap >= 0.3
+    # The lane also walled 1.2 m ahead of the nose: a stop from rest is
+    # clear, but a crawl along it is not, so it stays stopped.
+    both = lambda x, y: 0.0 if (x > ego[0] + 0.47 + 1.2 and y < -0.45) else line_blocked(x, y)
+    assert stop_there(both)._pass_state == 'abort'

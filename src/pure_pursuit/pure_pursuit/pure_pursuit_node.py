@@ -3195,6 +3195,34 @@ class PurePursuitNode(Node):
                 self._pass_state, self._pass_plan, self._pass_hold_steering = 'return', rejoin, False
                 self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
                 self.follow_speed_cap = cap
+                return
+            # Carry on in this lane, past a car beside us, if a crawl along it
+            # keeps its checked stop all the way.
+            side = 1 if d_ego > 0 else -1
+            hold_m = pass_planner.new_hold(line, pose, speed, limits, side)
+            ahead = pass_planner.manoeuvre_plan(line, pose, speed, hold_m, walls, limits, mode='pass', hold=True)
+            cap = pass_planner.safe_speed(ahead, opponent, line, limits, speed)
+            if (cap is not None and cap >= 0.3
+                    and pass_planner.progress_clear(ahead, opponent, line, limits)):
+                self._pass_state, self._pass_plan, self._pass_hold_steering = 'pass', ahead, False
+                self._pass_manoeuvre, self._pass_started = hold_m, now
+                self.follow_speed_cap = min(cap, opponent.speed_bound + limits.max_closing)
+                return
+            # A car last seen ahead of our nose and gone for the lost timeout
+            # cannot come back beside us unseen: it would cross the LiDAR's
+            # +-135 deg view first. Its unseen box, meanwhile, grows until it
+            # spans the lap, and nothing would ever be clear again. Hand back
+            # to stage-1 following, on a rejoin that is clear of the walls.
+            ego_front = s_ego + (self.wheelbase + self.car_length) / 2
+            wall_cap = pass_planner.safe_speed(rejoin, None, line, limits, speed)
+            if (opponent.age > self.opponent_lost_timeout_sec
+                    and line.wrap(opponent.rear_arc - ego_front) > 0.0
+                    and wall_cap is not None and wall_cap >= 0.3
+                    and pass_planner.progress_clear(rejoin, None, line, limits)):
+                self.get_logger().info('pass planner: car ahead out of sight; following again',
+                                       throttle_duration_sec=1.0)
+                self.last_opponent_status = 'overtake ended: the car ahead drove out of sight'
+                self._pass_reset_after(now)
 
     def _pass_reset_after(self, now):
         line, history, speed, anchor, seen = (self._pass_line, self._opp_history, self._opp_speed,

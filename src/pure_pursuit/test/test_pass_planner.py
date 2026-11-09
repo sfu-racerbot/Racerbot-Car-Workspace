@@ -422,3 +422,19 @@ def test_a_pose_needing_more_than_the_steering_headroom_counts_as_a_wall():
         return pp.build(circle, 0.0, np.zeros(20), 'hold', LIMITS, open_floor)
     assert np.all(np.isfinite(plan_on(r_edge * 1.1).wall[1:-1]))
     assert not np.any(np.isfinite(plan_on(r_edge * 0.9).wall[1:-1]))
+
+
+def test_the_offset_blend_is_a_steerable_shift():
+    # Spec: the measured offset blends into the manoeuvre over shift_length
+    # (steerable by construction). Oracle (closed form): a 0.25 m error
+    # blended over 1 m would peak at 0.25 * QUINTIC_PEAK = 1.44 1/m, above
+    # the 80 % headroom's 0.8 tan(0.42) / 0.36 = 0.99 1/m; over
+    # shift_length(0.25, 1.0) no sample may be marked unsteerable (-inf).
+    hold = pp.Manoeuvre(4.0, 0.0, -0.60, 2.0, math.inf, 3.0, -1)
+    plan = pp.manoeuvre_plan(LINE, (8.0, -0.85, 0.0), 0.0, hold, corridor(1.5), LIMITS, mode='pass', hold=True)
+    assert 0.25 * pp.QUINTIC_PEAK > 0.8 * math.tan(0.42) / 0.36       # the 1 m blend would not steer
+    assert np.all(np.isfinite(plan.wall))
+    blend = pp.shift_length(0.25, 1.0, LIMITS)
+    after = plan.dist >= blend + LIMITS.spacing
+    assert np.allclose(plan.d[after], -0.60, atol=1e-6)             # m
+    assert plan.d[0] == pytest.approx(-0.85, abs=1e-6)
