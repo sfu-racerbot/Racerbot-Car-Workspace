@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pure_pursuit_tech</name>
+  <version>0.0.0</version>
+  <description>Pure pursuit waypoint follower in racerbot_a's pure_pursuit_a layout, gated by racerbot_a's safety_node and by its own LB deadman.</description>
+  <maintainer email="cyruschung0603@gmail.com">cyrus</maintainer>
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>ackermann_msgs</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>std_msgs</depend>
+
+  <!-- launch file: per-car steering limit, racerbot_a's /safety/brake publisher -->
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>racerbot_car</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>safety_node</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>rclpy</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
