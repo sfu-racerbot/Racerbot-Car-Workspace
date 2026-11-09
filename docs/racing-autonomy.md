@@ -426,14 +426,45 @@ An OpenAI `gpt-6.1-sol` review of the whole diff found one critical and four imp
 - A lost car's speed was forgotten mid-pass, which shrank its reachable box and could authorise a rejoin. Mid-manoeuvre the bound now only rises; a car reacquired while idle starts a fresh estimate.
 - The checks started from where the manoeuvre said the car should be, not where it was. Every plan now starts at the measured offset and blends into the manoeuvre over a metre.
 - The "stopped for good" check used the sample just past the stop, which is not conservative against a car closing from behind. It now checks both samples around the stop.
-- The harness reached the planner's off-line abort before the node's hard watchdog stops, so a localization jump mid-pass left the two in different states. The harness now uses the node's order.
+- The harness reached the planner's off-line abort before the node's hard watchdog stops (the zero-speed stops when the car is too far off the racing line, or recovery has run too long), so a localization jump mid-pass left the two in different states. The harness now uses the node's order.
 
 Six refusal tests that would still have passed with the code replaced by a constant now each carry the accepted case beside them.
 
+### Follow-up, 2026-11-09: what changed, and where it stands
+
+Still **off by default**. With it off, all 72 stage-1 races again reproduce exactly (on `40c2a9a`).
+
+Each change below came from a trace of a failing `indoor_wide` race. Each carries tests that were seen failing under a deliberate break of the guard they cover.
+
+| Change | Why (the trace) |
+|---|---|
+| A pass path may need at most 80 % of the steering limit (`Limits.steering_headroom`), line bend included. | Pass paths at full lock could not be tracked through `delay_lqr`'s delays: five wall contacts. |
+| The measured offset blends into the manoeuvre over a steerable shift length, not a fixed metre. | A 0.15 m tracking error blended over 1 m needed ~0.9 1/m of curvature, so passes aborted as "unsteerable". |
+| Two margin tiers: plan with 0.15 / 0.08 / 0.15 m (wall / beside / along the car's box), keep going with 0.05 / 0.04 / 0.08 m. `safe_speed` brakes towards the planning tier instead of aborting while the keep tier holds. | Most aborts fired at 0.08-0.10 m from the wall at the car's own pose: its tracking error tripped the margin it was planned to. Stopped there, it could never move off. |
+| A stopped abort can carry on in its lane past a car beside it, if a crawl along the lane keeps its checked stop. | A car stopped beside the car it was passing had no way out. |
+| A stopped abort hands a car lost **ahead** back to stage-1 following, once it has been unseen for the lost timeout **and** the LiDAR has seen the flank car 2 would rejoin across empty for as long (nothing the map does not explain within 2 m, from 30 deg off the nose round to 135 deg). | A lost car's unseen box grows until it spans the lap, so nothing was ever clear again: car 2 sat stopped until the race timed out. The seen-empty flank was added on review (gpt-6.1-sol): a car can fail confirmation (reversing, say) or another object can replace the anchor, so no sighting is not evidence of an empty flank. |
+| When no path clears both the walls and the car's box, the abort brakes along a wall-clear one (`wall_clear_brake`) before holding its steering. | Holding -0.10 rad through a bend at 2.8 m/s ran into the wall 0.4 s later. |
+| The acceleration gate clears only on a full 0.6 s window. | Over the first 0.3 s, centroid noise hid a 4 m/s^2 launch, and a pass started 0.6 s into the race. |
+
+**Results on `indoor_wide` with the planner on (`40c2a9a`, six seeds, 120 s timeout):**
+
+| Opponent | Finished | Car / wall contact runs | Passes attempted / completed |
+|---|---|---|---|
+| map x0.8 | 6 (64.2-65.8 s) | 0 / 0 | 16 / 0 |
+| 1.5 m/s blocker | 0 | 0 / 1 | 6 / 0 |
+| stalled | 0 | 0 / 0 | 9 / 0 |
+| solo | 6 (53.1-53.2 s) | 0 / 0 | - |
+
+The 6 Nov course rows are unchanged from the table above. With the planner off, the same `indoor_wide` blocker races all finish (109.7 s) by following, so for now the planner makes that row worse.
+
+**What still stops it: the checks assume car 2 is on the path.** Every stop check samples the planned path, but in a bend at speed car 2 is not on it. In blocker seed 12345, the speed loop overshot the checked speed by 0.03 m/s on a path shifted to the outside of a bend. `delay_lqr` could not hold the curve, and the body's wall clearance fell from 1.1 m to 0.035 m while braking. Stopped that close to a wall, every exit fails, and the car waits out the race.
+
+The fix is to check a tube round the path, as wide as the tracking error `delay_lqr` actually shows at that speed and curvature. Then lower the speed until that tube fits. Margins alone cannot do it: the error grows with speed and bend.
+
 ### Open items before enabling it
 
-1. Steering headroom on pass paths (the wall contacts above), then re-run this matrix.
-2. Zero car and wall contact on every row, including `indoor_wide`, before car 2's tuning overlay turns it on.
+1. A tracking-error tube in the stop checks (above), then re-run this matrix.
+2. Zero car and wall contact on every row, including `indoor_wide`, and no row worse than the planner off, before car 2's tuning overlay turns it on.
 3. Node timing on the Jetson: a pass re-plans every tick (wall lookups for ~45 body points per pose along the path, plus the stop checks). Measure before trusting it at 40 Hz.
 4. Floor tests: none of this has run on a car.
 
