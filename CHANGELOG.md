@@ -19,7 +19,8 @@ for changes the team made.
 - Node: new state machine (`_local_pass_update`: idle -> pass -> return, abort brakes to zero in the approved order lane / checked rejoin / hold steering, never forgetting the car); the steering law tracks the pass path through the existing miss-policy wrapper, once per tick; mid-pass, "lost" is judged against the pass path as well as the line.
 - New parameters: `enable_local_pass_planner` (**false**), `pass_speed_uncertainty` 0.5 m/s, `pass_clear_margin` 0.5 m, `pass_standoff` 2.5 m. The node refuses the planner together with the legacy `enable_opponent_overtake`, or without `enable_opponent_following`.
 - `WallDistance.at_many` for vectorised wall lookups.
-- **Car 2 is not enabled.** With the planner off the stage-1 matrix is identical in all 72 races. With it on, the 6 Nov courses have zero contact and stage-1 following times but no passes (no room: single-side stretches with space for a second car are at most 8.4 m on 06a and 6.0 m on 06b). On the 2.6 m `indoor_wide` track 5 of 6 blocker races ended in wall contact (pass paths too close to the steering limit to track), so it stays off. See docs/racing-autonomy.md, "Passing: stage 2".
+- Independent review (gpt-6.1-sol) fixes, each with a regression test seen failing first: planner-only parameter checks no longer run with the planner off (a `following_reserve` above 2.5 m stopped the node starting); a lost car's speed bound never falls mid-manoeuvre; every plan starts from the measured body offset; the stopped-for-good check uses the sample short of the stop; the harness applies the node's hard watchdog stops before the planner.
+- **Car 2 is not enabled.** With the planner off the stage-1 matrix is identical in all 72 races (before and after the review fixes). With it on, the 6 Nov courses have zero contact and stage-1 following times but no passes (no room: single-side stretches with space for a second car are at most 8.4 m on 06a and 6.0 m on 06b). On the 2.6 m `indoor_wide` track 5 of 6 blocker races ended in wall contact (pass paths too close to the steering limit to track), so it stays off. See docs/racing-autonomy.md, "Passing: stage 2".
 
 ### tools/f1tenth_sim
 
@@ -28,6 +29,7 @@ for changes the team made.
 
 ### Validation
 
+- Suites on `65c7c2b`: `pure_pursuit` 1129 passed, 11 existing skips, only the known trust-region failure; simulator tools 702 passed; car profiles 231 passed; launch 312 passed.
 - New tests seen failing under deliberate breaks (break table in the docs): `test_pass_planner.py` (28, ROS-free), `test_pass_planner_node.py` (real node: refusals, the four LB deny paths with the planner on plus one mid-pass, the pass plan tracked, solo commands unchanged), and the state machine through the node's own methods in `test_race_two.py`.
 
 ## 2026-11-08: approved measured pass-completion contract

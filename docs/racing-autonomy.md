@@ -373,7 +373,7 @@ The completion correction does not supply entry, alongside or rejoin trajectorie
 
 ## Passing: stage 2 (local passing planner), 2026-11-08
 
-**Status: built and tested, off by default, not enabled on car 2.** With `enable_local_pass_planner: false`, which is the shipped setting, car 2 drives exactly as in stage 1. A re-run of the stage-1 matrix gave the same result in all 72 races. Turn it on only in the simulator until the open items below are closed.
+**Status: built and tested, off by default, not enabled on car 2.** With `enable_local_pass_planner: false`, which is the shipped setting, car 2 drives exactly as in stage 1. A re-run of the stage-1 matrix gave the same result in all 72 races (on `807a30b`, and again after the review fixes below). Turn it on only in the simulator until the open items below are closed.
 
 What it does: when car 2 is following a slower car, it looks for a path round it that the car can physically drive. It commits to a pass only if, at every moment of that pass, it could still brake to a stop clear of the walls and of everywhere the other car could reach. It rejoins the racing line only once it is clearly ahead.
 
@@ -417,6 +417,18 @@ So on these courses the planner nearly always declines and car 2 follows. On a w
 With the planner on, following on the 6 Nov courses matches stage 1 within a few tenths, and nothing touches anything. On `indoor_wide` it is not ready: five blocker races ended in wall contact. An earlier build with tighter margins, `a51598b`, passed the stalled car and finished in all six `indoor_wide` seeds (67.9-94.9 s) with no contact, so passes do work; the margins are not settled.
 
 **Why the wall contacts happen.** Each began within a second or two of the start, as car 2 shifted out to pass the blocker while the track bent. The pass path used close to the car's full 0.42 rad of steering, line bend plus shift; with `delay_lqr`'s modelled steering delays the car could not follow it, sat at full lock and ran wide into the wall. The next step is to keep steering headroom for tracking: no pass path may need more than about 80 % of the steering limit, bend included.
+
+### Independent review, 2026-11-08
+
+An OpenAI `gpt-6.1-sol` review of the whole diff found one critical and four important problems, all fixed in `65c7c2b` with a regression test each, every one seen failing on the code before the fix:
+
+- **Critical:** the planner's parameter checks ran with the planner off, so a valid stage-1 setting (a `following_reserve` above 2.5 m) stopped the node starting. They now run only with the planner on.
+- A lost car's speed was forgotten mid-pass, which shrank its reachable box and could authorise a rejoin. Mid-manoeuvre the bound now only rises; a car reacquired while idle starts a fresh estimate.
+- The checks started from where the manoeuvre said the car should be, not where it was. Every plan now starts at the measured offset and blends into the manoeuvre over a metre.
+- The "stopped for good" check used the sample just past the stop, which is not conservative against a car closing from behind. It now checks both samples around the stop.
+- The harness reached the planner's off-line abort before the node's hard watchdog stops, so a localization jump mid-pass left the two in different states. The harness now uses the node's order.
+
+Six refusal tests that would still have passed with the code replaced by a constant now each carry the accepted case beside them.
 
 ### Open items before enabling it
 
