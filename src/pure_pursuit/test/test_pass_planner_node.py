@@ -63,6 +63,18 @@ def test_the_node_refuses_an_unsafe_planner_configuration(profiled_csv, params, 
             rclpy.shutdown()
 
 
+def test_planner_off_refuses_nothing_main_accepted(profiled_csv):
+    # Review 2026-11-08: a following reserve above the default pass_standoff
+    # is a valid stage-1 setting; with the planner off it must still start.
+    node = _node(profiled_csv, '-p', 'enable_local_pass_planner:=false',
+                 '-p', 'following_reserve:=3.0', '-p', 'pass_clear_margin:=0.1')
+    try:
+        assert node.following_reserve == 3.0 and not node.enable_local_pass_planner
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 # --- LB deadman: the four deny paths, planner on (CLAUDE.md standing rule) ---
 
 def test_planner_node_lb_held_drives(planner_node):

@@ -556,18 +556,21 @@ class PurePursuitNode(Node):
         self.enable_local_pass_planner = bool(self.get_parameter('enable_local_pass_planner').value)
         self.pass_speed_uncertainty = float(self.get_parameter('pass_speed_uncertainty').value)
         self.pass_clear_margin = float(self.get_parameter('pass_clear_margin').value)
-        if not (math.isfinite(self.pass_speed_uncertainty) and 0.25 <= self.pass_speed_uncertainty <= 2.0
-                and math.isfinite(self.pass_clear_margin) and 0.3 <= self.pass_clear_margin <= 2.0):
-            raise ValueError('pass_speed_uncertainty must be in [0.25, 2] m/s and '
-                             'pass_clear_margin in [0.3, 2] m')
         self.pass_standoff = float(self.get_parameter('pass_standoff').value)
-        reserve = float(self.get_parameter('following_reserve').value)
-        if not (math.isfinite(self.pass_standoff) and reserve <= self.pass_standoff <= 4.0):
-            raise ValueError('pass_standoff must be between following_reserve and 4 m')
-        if self.enable_local_pass_planner and self.enable_opponent_overtake:
-            raise ValueError('enable_local_pass_planner replaces enable_opponent_overtake; enable one')
-        if self.enable_local_pass_planner and not self.enable_opponent_following:
-            raise ValueError('enable_local_pass_planner needs enable_opponent_following')
+        if self.enable_local_pass_planner:
+            # Planner off: none of these constrain anything, so none may
+            # refuse a configuration main accepted (review 2026-11-08).
+            if not (math.isfinite(self.pass_speed_uncertainty) and 0.25 <= self.pass_speed_uncertainty <= 2.0
+                    and math.isfinite(self.pass_clear_margin) and 0.3 <= self.pass_clear_margin <= 2.0):
+                raise ValueError('pass_speed_uncertainty must be in [0.25, 2] m/s and '
+                                 'pass_clear_margin in [0.3, 2] m')
+            reserve = float(self.get_parameter('following_reserve').value)
+            if not (math.isfinite(self.pass_standoff) and reserve <= self.pass_standoff <= 4.0):
+                raise ValueError('pass_standoff must be between following_reserve and 4 m')
+            if self.enable_opponent_overtake:
+                raise ValueError('enable_local_pass_planner replaces enable_opponent_overtake; enable one')
+            if not self.enable_opponent_following:
+                raise ValueError('enable_local_pass_planner needs enable_opponent_following')
         self._pass_reset_state()
         self.follow_speed_cap = None
         self._following_last_seen_ahead = True
@@ -3011,20 +3014,32 @@ class PurePursuitNode(Node):
         measured from behind is kept (a centroid sliding along a car's side
         is not its speed).
         """
-        if self._opp_seen is not None and now - self._opp_seen > self.opponent_lost_timeout_sec:
+        if (self._opp_seen is not None and now - self._opp_seen > self.opponent_lost_timeout_sec
+                and self._pass_state == 'idle'):
+            # Only idle forgets a lost car's speed: mid-manoeuvre an unknown
+            # speed is not a zero one (the bound would shrink as it hid).
             self._opp_history, self._opp_speed = [], None
         if point is None:
             return
         s_o, d_o = line.frenet(point[0], point[1])
         if not (math.isfinite(s_o) and math.isfinite(d_o)):
             return
+        if (self._pass_state == 'idle' and self._opp_seen is not None
+                and now - self._opp_seen > self.opponent_lost_timeout_sec):
+            # Reacquired after being lost: its old speed is not its speed now.
+            self._opp_history, self._opp_speed = [], None
         self._opp_seen = now
         front = (self.wheelbase + self.car_length) / 2
         if line.wrap(s_o - s_ego) > front + 0.3:
             history = [h for h in self._opp_history if now - h[0] <= 0.6] + [(now, s_o, d_o)]
             self._opp_history = history
             if history[-1][0] - history[0][0] >= 0.3:
-                self._opp_speed = line.wrap(history[-1][1] - history[0][1]) / (history[-1][0] - history[0][0])
+                measured = line.wrap(history[-1][1] - history[0][1]) / (history[-1][0] - history[0][0])
+                if self._pass_state == 'idle' or self._opp_speed is None:
+                    self._opp_speed = measured
+                else:
+                    # Mid-manoeuvre the bound only ever rises.
+                    self._opp_speed = max(self._opp_speed, measured)
                 # Speeding up (a race start, a car leaving a bend)? The two
                 # half-window speeds, over the time between their midpoints,
                 # give its acceleration; a pass on a stale speed would be cut

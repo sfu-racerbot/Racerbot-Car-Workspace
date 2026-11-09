@@ -77,6 +77,9 @@ def test_line_refuses_too_few_points_and_non_finite_points():
 def test_frenet_of_a_non_finite_point_is_nan():
     s, d = LINE.frenet(math.nan, 0.0)
     assert math.isnan(s) and math.isnan(d)
+    # ...and of a finite one, on the first straight (y = 0, heading +x), is exact.
+    s, d = LINE.frenet(5.0, 0.2)
+    assert (s, d) == (pytest.approx(5.0, abs=1e-9), pytest.approx(0.2, abs=1e-9))
 
 
 # --- Kinematics --------------------------------------------------------------
@@ -125,6 +128,10 @@ def test_worst_case_lead_pushes_the_last_sighting_forward_at_the_speed_bound():
 def test_no_rejoin_without_a_sighting_inside_max_unseen():
     stale = pp.StalledOpponent(10.0, 0.0, 1.0, LIMITS.max_unseen + 0.01)
     assert pp.worst_case_lead(30.0, stale, LINE, LIMITS) == -math.inf
+    # At exactly max_unseen the bound still applies (closed form).
+    edge = pp.StalledOpponent(10.0, 0.0, 1.0, LIMITS.max_unseen)
+    front = 10.0 + LIMITS.opponent_length + 1.0 * LIMITS.max_unseen
+    assert pp.worst_case_lead(30.0, edge, LINE, LIMITS) == pytest.approx(30.0 - front, abs=1e-9)
 
 
 # --- Contingency check -----------------------------------------------------------
@@ -179,7 +186,8 @@ def test_a_car_closing_from_behind_is_checked_against_the_stopped_pose_forever()
     assert final - during > 0.15
     s0 = 12.0
     plan = pp.plan_hold(LINE, (s0, 0.0, 0.0), v, corridor(1.5), LIMITS)
-    last = float(plan.dist[plan.dist <= pp.stop_distance(v, LIMITS) + LIMITS.spacing][-1])
+    # The stopped pose a car from behind closes on: the sample short of the stop.
+    last = float(plan.dist[plan.dist <= pp.stop_distance(v, LIMITS)][-1])
     ego_rear = s0 + last + (LIMITS.wheelbase - LIMITS.length) / 2
     front_now = ego_rear - LIMITS.long_margin - (during + final) / 2
     rear = front_now - LIMITS.opponent_length - LIMITS.opponent_long_uncertainty
@@ -197,6 +205,7 @@ def test_the_stop_must_also_clear_the_walls():
 
 def test_fallback_refuses_missing_plan_and_bad_speeds():
     plan = hold_plan(3.0)
+    assert pp.fallback_clear(plan, 0.5, STOPPED, LINE, LIMITS)     # the same plan, a sane speed
     assert not pp.fallback_clear(None, 1.0, STOPPED, LINE, LIMITS)
     assert not pp.fallback_clear(plan, math.nan, STOPPED, LINE, LIMITS)
     assert not pp.fallback_clear(plan, -0.1, STOPPED, LINE, LIMITS)
@@ -206,12 +215,18 @@ def test_a_plan_shorter_than_the_stop_is_not_clear():
     plan = hold_plan(3.0)
     too_fast = math.sqrt(2 * LIMITS.brake * (plan.dist[-1] + 1.0))
     assert not pp.fallback_clear(plan, too_fast, None, LINE, LIMITS)
+    # A speed whose stop (closed form) fits in the plan, walls clear, is.
+    fits = 0.5
+    assert pp.stop_distance(fits, LIMITS) + LIMITS.spacing < plan.dist[-1]
+    assert pp.fallback_clear(plan, fits, None, LINE, LIMITS)
 
 
 def test_safe_speed_is_none_when_even_the_current_speed_cannot_stop_clear():
     plan = hold_plan(0.6)
     assert pp.safe_speed(plan, STOPPED, LINE, LIMITS, 2.0) is None
     assert pp.safe_speed(plan, STOPPED, LINE, LIMITS, -1.0) is None
+    # From standstill, with 3 m of room, there is a positive checked speed.
+    assert pp.safe_speed(hold_plan(3.0), STOPPED, LINE, LIMITS, 0.0) > 0.0
 
 
 # --- Entry -----------------------------------------------------------------
@@ -260,6 +275,8 @@ def test_the_pass_pace_is_the_lines_mean_profile_speed_ahead():
 def test_a_car_beside_or_behind_is_not_a_pass_target():
     behind = pp.StalledOpponent(4.0, 0.0, 1.0, 0.0)
     assert pp.new_pass(LINE, pose_behind(2.0), 0.0, behind, LIMITS, 1, PACE) is None
+    # The same car ahead of us is one.
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, STOPPED, LIMITS, 1, PACE) is not None
 
 
 def test_a_pass_offset_beyond_max_offset_is_refused_on_that_side():
@@ -361,3 +378,30 @@ def test_a_lane_that_meets_the_box_caps_speed_to_stop_short_of_it():
     walls = corridor(0.6)                   # only the line fits: no offset lane
     plan, _, _, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, walls, LIMITS, nominal=PACE)
     assert plan is None
+
+
+def test_the_stopped_pose_a_car_closes_on_is_the_one_short_of_the_stop():
+    # Review 2026-11-08: ego on the line at s = 12 m stopping from 0.5 m/s
+    # (0.2667 m); a car behind (rear 10.03 m, bound 2 m/s). Checked at the
+    # sample past the stop (0.3 m) the saturated box misses; at the sample
+    # short of it (0.2 m), the conservative pose for a car closing from
+    # behind, it does not. Further back it clears both.
+    plan = pp.plan_hold(LINE, (12.0, 0.0, 0.0), 0.5, corridor(1.5), LIMITS)
+    behind = pp.StalledOpponent(rear_arc=10.03, lateral=0.0, speed_bound=2.0, age=0.0)
+    assert not pp.fallback_clear(plan, 0.5, behind, LINE, LIMITS)
+    further = pp.StalledOpponent(rear_arc=9.8, lateral=0.0, speed_bound=2.0, age=0.0)
+    assert pp.fallback_clear(plan, 0.5, further, LINE, LIMITS)
+
+
+def test_the_checks_start_from_where_the_car_is_not_where_the_manoeuvre_says():
+    # Review 2026-11-08: holding a pass at d = -0.60 m but really at -0.80 m,
+    # beside a wall 1.00 m off the line. The real body edge is 0.045 m from
+    # the wall (1.00 - 0.80 - 0.155): the plan must start there and refuse.
+    hold = pp.Manoeuvre(4.0, 0.0, -0.60, 2.0, math.inf, 3.0, -1)
+    walls = corridor(1.0)
+    real = pp.manoeuvre_plan(LINE, (8.0, -0.80, 0.0), 0.5, hold, walls, LIMITS, mode='pass', hold=True)
+    assert real.d[0] == pytest.approx(-0.80, abs=1e-3)
+    assert not pp.fallback_clear(real, 0.5, None, LINE, LIMITS)
+    on_plan = pp.manoeuvre_plan(LINE, (8.0, -0.60, 0.0), 0.5, hold, walls, LIMITS, mode='pass', hold=True)
+    assert on_plan.d[0] == pytest.approx(-0.60, abs=1e-3)
+    assert pp.fallback_clear(on_plan, 0.5, None, LINE, LIMITS)

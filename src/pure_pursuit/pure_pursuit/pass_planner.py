@@ -1,11 +1,11 @@
-"""Contingency planner for passing a stopped or crawling car. No ROS.
+"""Contingency planner for passing a slower car. No ROS.
 
-Scope (tech lead, 2026-11-08): car 2 only passes a car its tracker has held
-at <= stall_speed (0.5 m/s) for >= stall_sec (1.5 s): a crashed, stalled or
-crawling car that stage-1 following would otherwise wait behind forever.
-Passing moving cars is out of scope: on the 2026-11-06 courses the longest
-single-side stretch with room for two cars is 8.4 m (06a) / 6.0 m (06b), and a
-1.5 m/s car needs ~12 m (docs/racing-autonomy.md, "Passing a stopped car").
+Scope (tech lead, 2026-11-08): "as long as the car physically fits it should
+attempt to pass". Any car ahead that is slower than the line's pace by more
+than its speed bound's margin, and not accelerating, is a candidate (the node
+decides that; see _local_pass_update). On the 2026-11-06 courses the longest
+single-side stretch with room for two cars is 8.4 m (06a) / 6.0 m (06b), so
+there it nearly always declines (docs/racing-autonomy.md, "Passing: stage 2").
 
 Frame. Everything is in the closed racing line's Frenet frame: s = arc
 length, d = signed lateral offset, left positive. Offset points use
@@ -14,8 +14,10 @@ interpolated vertex normals, so an offset path has no kinks at stations.
 The opponent (StalledOpponent) is an *anchor*, not a prediction: the arc of
 its rear face, measured while following it from directly behind (where the
 cluster centroid is that face), and its lateral centre. Its front is
-bounded by rear + opponent_length (0.70 m: our 0.58 m chassis plus margin
-for other teams' cars). speed_bound is the tracked speed + 1 m/s.
+bounded by rear + opponent_length (0.62 m: our 0.58 m chassis plus 4 cm);
+length_extra adds a car length when the sighting may be any face of it.
+speed_bound is its speed measured from behind + pass_speed_uncertainty
+(0.5 m/s by default), and never falls during a manoeuvre.
 
 Two opponent motion models, both deliberate:
   * Unseen time (age since the last consistent sighting): it may have moved
@@ -322,8 +324,11 @@ def fallback_clear(plan, speed, opponent, line, limits, t0=0.0):
         t = times[k] if math.isfinite(times[k]) else t0 + limits.response + speed / limits.brake
         if _overlaps(plan, k, t, opponent, line, limits):
             return False
-    # The stopped car stays there; the opponent's reach saturates.
-    return not _overlaps(plan, last, math.inf, opponent, line, limits)
+    # The stopped car stays there; the opponent's reach saturates. The stop
+    # lies between two samples: the one before it is the conservative pose
+    # for a car closing from behind, the one after it for a car ahead.
+    before = int(np.flatnonzero(plan.dist <= stop)[-1])
+    return not any(_overlaps(plan, k, math.inf, opponent, line, limits) for k in {before, last})
 
 
 def _suffix(plan, k):
@@ -496,8 +501,14 @@ def manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, *, mode, hold=Fa
     if length > 40.0:
         return None
     s_rel = np.arange(0.0, length, limits.spacing)
-    return build(line, s0, m.lateral(s0 + s_rel, line), mode, limits, walls,
-                 side=manoeuvre.side, target=manoeuvre.target)
+    d = m.lateral(s0 + s_rel, line)
+    # Start from where the car really is, not where the manoeuvre says it
+    # should be: carry the measured offset and blend it out over a metre, so
+    # every check sees the actual body (review 2026-11-08).
+    _, d0 = line.frenet(pose[0], pose[1])
+    if math.isfinite(d0):
+        d = d + (d0 - d[0]) * (1 - smooth(s_rel / 1.0))
+    return build(line, s0, d, mode, limits, walls, side=manoeuvre.side, target=manoeuvre.target)
 
 
 def plan_hold(line, pose, speed, walls, limits):

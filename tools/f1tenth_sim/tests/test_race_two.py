@@ -471,3 +471,40 @@ def test_no_pass_is_started_on_a_car_that_is_still_speeding_up():
         d._update_opponent_and_overtake(nearest)
         assert d._pass_state == 'idle' and not d.overtake_active
     assert d._opp_accelerating
+
+
+def test_mid_pass_a_lost_car_keeps_its_measured_speed_bound():
+    # Review 2026-11-08: losing sight must not turn its speed into zero.
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, nearest = started_pass(walls)
+    d._opp_speed = 1.0                       # as measured from behind
+    bound = d._pass_opponent(1.0).speed_bound
+    lost = 0.8 + d.opponent_lost_timeout_sec + 0.5
+    d.observe([5.0, -0.5, 0, 0.5, 0], np.full(1081, 10.0), lost, 0)
+    d._update_opponent_and_overtake(nearest)
+    assert d._opp_speed == 1.0
+    assert d._pass_opponent(lost).speed_bound == pytest.approx(bound, abs=1e-12)
+    # Idle (a corridor too narrow to pass in), a car reacquired after being
+    # lost starts a fresh speed estimate.
+    idle = planner_decisions(dict(at=lambda x, y: 0.80 - abs(y)))
+    follow_stopped_car(idle, until=0.5)
+    assert idle._opp_speed is not None
+    back = 0.5 + idle.opponent_lost_timeout_sec + 0.1
+    for now in np.arange(back, back + 0.2, 0.025):   # re-confirmed, under 0.3 s of history
+        idle.observe([5.0, 0, 0, 0.0, 0], stopped_car_scan(idle, 5.0, 7.5), float(now), 0)
+        idle._update_opponent_and_overtake(nearest)
+    assert idle._opp_speed is None and idle._pass_state == 'idle'
+
+
+def test_a_localization_jump_mid_pass_stops_like_the_node_and_keeps_the_pass_state():
+    # Node order: beyond off_racing_line_recovery_max_error the hard watchdog
+    # stop returns before the planner, so the planner state is untouched.
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    follower = race.rv.PathFollower(straight_stadium(), law_name='delay_lqr', car_id='rb2')
+    # Beyond recovery range from the line AND from the pass path (~0.8 m off it).
+    far = [9.0, -(d.off_racing_line_recovery_max_error + 1.5), 0, 1.0, 0]
+    d.observe(far, np.full(1081, 10.0), 1.9, 0)
+    steering, speed, *_, state = d.base_command(follower, far, 0.1)
+    assert speed == 0.0 and state == 'off_racing_line'
+    assert d._pass_state == 'pass'

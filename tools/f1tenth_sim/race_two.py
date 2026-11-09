@@ -135,13 +135,10 @@ class NodeDecisions(Decisions):
             error = min(error, plan_error)
         recovering = error > self.max_cross_track_error
         self.tracking_law = follower.law
-        if recovering and self.enable_local_pass_planner and self._pass_state != 'idle':
-            # Node: aiming at the line beside a car is an unchecked rejoin, so stop.
-            self._pass_enter_abort('off the racing line mid-pass')
-            self._pass_plan, self._pass_hold_steering = None, True
-            self.follow_speed_cap = 0.0
-            return previous_steering, 0.0, nearest, None, 'off_racing_line_recovery'
         if recovering:
+            # Node order: the hard watchdog stops (beyond recovery range, or
+            # recovery exhausted / timed out) come first and leave the planner
+            # state untouched; only a car still inside recovery reaches it.
             if self.recovery_since is None:
                 self.recovery_since = self.now
             if self.now - self.recovery_since > self.off_racing_line_recovery_timeout_sec:
@@ -149,6 +146,12 @@ class NodeDecisions(Decisions):
             if error > self.off_racing_line_recovery_max_error or self.recovery_exhausted:
                 follower.previous_index = None
                 return previous_steering, 0.0, nearest, None, 'off_racing_line'
+            if self.enable_local_pass_planner and self._pass_state != 'idle':
+                # Node: aiming at the line beside a car is an unchecked rejoin, so stop.
+                self._pass_enter_abort('off the racing line mid-pass')
+                self._pass_plan, self._pass_hold_steering = None, True
+                self.follow_speed_cap = 0.0
+                return previous_steering, 0.0, nearest, None, 'off_racing_line_recovery'
             steering, speed, _, _, _ = follower.command(
                 state, speed=min(self.off_racing_line_recovery_speed, self.max_speed),
                 target_override=self.xy[nearest], previous_steering=previous_steering)
