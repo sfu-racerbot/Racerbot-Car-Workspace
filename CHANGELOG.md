@@ -11,7 +11,26 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-08 (latest): stage-2 passing planner, off by default
+## 2026-11-09 (latest): passing planner follow-up, still off by default
+
+### pure_pursuit
+
+- Pass paths may need at most 80 % of the steering limit (`Limits.steering_headroom`); the measured-offset blend is a steerable shift, not a fixed metre.
+- Two margin tiers: plan with 0.15 / 0.08 / 0.15 m (wall / beside / along the car's box), keep going and move off a stop with 0.05 / 0.04 / 0.08 m (`pass_planner.keeping`).
+- Stopped-abort exits: carry on in a clear lane past a car beside it, and hand a car lost ahead back to stage-1 following once it has been unseen for the lost timeout and the LiDAR has seen the rejoin flank empty for as long (review, gpt-6.1-sol).
+- Abort order gains `wall_clear_brake` (brake along a wall-clear path) before holding the steering.
+- The acceleration gate clears only on a full 0.6 s window.
+- **Car 2 unchanged:** the planner stays off; with it off, all 72 stage-1 races reproduce exactly. With it on, `indoor_wide` against a map x0.8 car now finishes 6/6 with no contact; against the 1.5 m/s blocker 0/6 still finish (one wall contact), worse than following. Next: a tracking-error tube in the stop checks. See docs/racing-autonomy.md, "Follow-up, 2026-11-09".
+
+### tools/f1tenth_sim
+
+- `race_two.py`: `wall_clear_brake` in the abort-branch counts; `_pass_flank_clear` in the source adapter.
+
+### Tests
+
+- Two existing planner tests repinned for the new default wall margin, assertions unchanged: the measured-pose test pins the 0.10 m its numbers were derived for; the wall-slack test places the wall half way into the slack (closed form), so it still detects the slack.
+
+## 2026-11-08: stage-2 passing planner, off by default
 
 ### pure_pursuit
 

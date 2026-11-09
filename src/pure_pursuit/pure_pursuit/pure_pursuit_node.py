@@ -2951,6 +2951,7 @@ class PurePursuitNode(Node):
         self._opp_anchor = None       # (rear arc, lateral, length_extra)
         self._opp_seen = None
         self._pass_line = None
+        self._pass_flank_since = None   # since when the rejoin flank has been seen clear
 
     def _following_reserve(self):
         """Stage-1 following reserve; with the planner on, the pass standoff.
@@ -2997,8 +2998,34 @@ class PurePursuitNode(Node):
         return tracking_laws.TrackingInput(inp.x, inp.y, inp.yaw, inp.speed, nearest,
                                            inp.previous_steering)
 
+    def _pass_flank_clear(self, toward_left, reach=2.0):
+        """The raw scan shows nothing the map does not explain, within `reach`
+        of the LiDAR, from 30 deg off the nose round to 135 deg on the side
+        a rejoin would move toward. A NaN or sub-range_min beam is not clear:
+        this is evidence the space is empty, not the absence of a sighting."""
+        scan = self.last_scan
+        if (scan is None or self.map_ray_caster is None
+                or self._seconds_since(self.last_scan_time) > self.scan_timeout_sec):
+            return False
+        step = self.map_beam_step
+        measured = np.array(scan.ranges, dtype=np.float64)[::step]
+        angles = scan.angle_min + np.arange(len(scan.ranges))[::step] * scan.angle_increment
+        side = angles if toward_left else -angles
+        region = (side >= -math.radians(30.0)) & (side <= math.radians(135.0))
+        if not np.any(region):
+            return False
+        cos_yaw, sin_yaw = math.cos(self.car_yaw), math.sin(self.car_yaw)
+        laser_x = self.car_x + self.laser_offset_x * cos_yaw - self.laser_offset_y * sin_yaw
+        laser_y = self.car_y + self.laser_offset_x * sin_yaw + self.laser_offset_y * cos_yaw
+        expected = np.asarray(self.map_ray_caster.expected_ranges(
+            laser_x, laser_y, self.car_yaw, angles[region]), dtype=np.float64)
+        # NaN fails the comparison and a sub-range_min beam is shorter than
+        # any expected range, so neither is ever counted clear.
+        return bool(np.all(measured[region] >= np.minimum(expected, reach) - self.map_subtraction_margin))
+
     def _pass_enter_abort(self, why):
         if self._pass_state != 'abort':
+            self._pass_flank_since = None
             self.get_logger().warn(f'pass planner: overtake abandoned: {why}', throttle_duration_sec=1.0)
             self.last_opponent_status = f'overtake abandoned: {why}'
         self._pass_state = 'abort'
@@ -3048,7 +3075,11 @@ class PurePursuitNode(Node):
                 mid = history[len(history) // 2]
                 first = line.wrap(mid[1] - history[0][1]) / max(mid[0] - history[0][0], 1e-3)
                 second = line.wrap(history[-1][1] - mid[1]) / max(history[-1][0] - mid[0], 1e-3)
-                self._opp_accelerating = (second - first) / ((history[-1][0] - history[0][0]) / 2) > 1.5
+                # Only a (nearly) full 0.6 s window may clear it: over 0.3 s,
+                # centroid noise hid a 4 m/s^2 launch (indoor_wide seed 12349,
+                # 2026-11-09: a pass started 0.6 s into the race).
+                span = history[-1][0] - history[0][0]
+                self._opp_accelerating = span < 0.55 or (second - first) / (span / 2) > 1.5
             self._opp_anchor = (s_o, d_o, 0.0)
         else:
             # Alongside, the centroid is its near side face, half a width
@@ -3169,12 +3200,26 @@ class PurePursuitNode(Node):
         self.follow_speed_cap = 0.0
         hold = pass_planner.plan_hold(line, pose, speed, walls, limits)
         rejoin = pass_planner.plan_return(line, pose, speed, walls, limits)
-        if pass_planner.fallback_clear(hold, speed, opponent, line, limits):
+        keep = pass_planner.keeping(limits)
+        if pass_planner.fallback_clear(hold, speed, opponent, line, keep):
             self._pass_plan, self._pass_hold_steering, self._pass_branch = hold, False, 'brake_in_lane'
-        elif pass_planner.fallback_clear(rejoin, speed, opponent, line, limits):
+        elif pass_planner.fallback_clear(rejoin, speed, opponent, line, keep):
             self._pass_plan, self._pass_hold_steering, self._pass_branch = rejoin, False, 'checked_rejoin'
+        elif pass_planner.fallback_clear(hold, speed, None, line, keep):
+            # No path clears both: the walls are certain, the car's box is a
+            # worst case. Brake in the lane rather than hold the steering
+            # into a wall (indoor_wide 2026-11-09: held through a bend at
+            # 2.8 m/s, into the wall 0.4 s later).
+            self._pass_plan, self._pass_hold_steering, self._pass_branch = hold, False, 'wall_clear_brake'
+        elif pass_planner.fallback_clear(rejoin, speed, None, line, keep):
+            self._pass_plan, self._pass_hold_steering, self._pass_branch = rejoin, False, 'wall_clear_brake'
         else:
             self._pass_plan, self._pass_hold_steering, self._pass_branch = None, True, 'zero_stop'
+        if self._pass_flank_clear(toward_left=d_ego < 0.0):
+            if self._pass_flank_since is None:
+                self._pass_flank_since = now
+        else:
+            self._pass_flank_since = None
         if speed < 0.2:
             # Stopped: leave only on a path the car could crawl all along with
             # a checked stop. Carry on past a car still ahead of our rear
@@ -3189,12 +3234,44 @@ class PurePursuitNode(Node):
                     self._pass_manoeuvre, self._pass_started = manoeuvre, now
                     self.follow_speed_cap = cap
                     return
-            cap = pass_planner.safe_speed(rejoin, opponent, line, limits, speed)
+            cap = pass_planner.safe_speed(rejoin, opponent, line, keep, speed)
             if (cap is not None and cap >= 0.3
-                    and pass_planner.progress_clear(rejoin, opponent, line, limits)):
+                    and pass_planner.progress_clear(rejoin, opponent, line, keep)):
                 self._pass_state, self._pass_plan, self._pass_hold_steering = 'return', rejoin, False
                 self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
                 self.follow_speed_cap = cap
+                return
+            # Carry on in this lane, past a car beside us, if a crawl along it
+            # keeps its checked stop all the way.
+            side = 1 if d_ego > 0 else -1
+            hold_m = pass_planner.new_hold(line, pose, speed, limits, side)
+            ahead = pass_planner.manoeuvre_plan(line, pose, speed, hold_m, walls, limits, mode='pass', hold=True)
+            cap = pass_planner.safe_speed(ahead, opponent, line, keep, speed)
+            if (cap is not None and cap >= 0.3
+                    and pass_planner.progress_clear(ahead, opponent, line, keep)):
+                self._pass_state, self._pass_plan, self._pass_hold_steering = 'pass', ahead, False
+                self._pass_manoeuvre, self._pass_started = hold_m, now
+                self.follow_speed_cap = min(cap, opponent.speed_bound + limits.max_closing)
+                return
+            # A car last seen ahead of our nose and gone for the lost timeout,
+            # with the flank we would rejoin across *seen* empty for as long
+            # (not merely no confirmed sighting: a car can fail confirmation,
+            # or another object can replace the anchor), cannot be beside us.
+            # Its unseen box, meanwhile, grows until it spans the lap, and
+            # nothing would ever be clear again. Hand back to stage-1
+            # following, with a crawl back to the line clear of the walls.
+            ego_front = s_ego + (self.wheelbase + self.car_length) / 2
+            wall_cap = pass_planner.safe_speed(rejoin, None, line, keep, speed)
+            if (opponent.age > self.opponent_lost_timeout_sec
+                    and self._pass_flank_since is not None
+                    and now - self._pass_flank_since >= self.opponent_lost_timeout_sec
+                    and line.wrap(opponent.rear_arc - ego_front) > 0.0
+                    and wall_cap is not None and wall_cap >= 0.3
+                    and pass_planner.progress_clear(rejoin, None, line, keep)):
+                self.get_logger().info('pass planner: car ahead out of sight; following again',
+                                       throttle_duration_sec=1.0)
+                self.last_opponent_status = 'overtake ended: the car ahead drove out of sight'
+                self._pass_reset_after(now)
 
     def _pass_reset_after(self, now):
         line, history, speed, anchor, seen = (self._pass_line, self._opp_history, self._opp_speed,

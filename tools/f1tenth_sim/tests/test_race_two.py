@@ -508,3 +508,215 @@ def test_a_localization_jump_mid_pass_stops_like_the_node_and_keeps_the_pass_sta
     steering, speed, *_, state = d.base_command(follower, far, 0.1)
     assert speed == 0.0 and state == 'off_racing_line'
     assert d._pass_state == 'pass'
+
+
+# Both lanes walled 0.45 m off the line from x = 6.6 m on: no pass and no
+# carrying on in a lane, but a path back to the line is clear of the walls.
+def _lanes_walled(x, y):
+    return 0.05 if (x > 6.6 and abs(y) > 0.45) else 1.5 - abs(y)
+
+
+def stopped_in_abort(walls_at):
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, nearest = started_pass(walls)
+    limit = d.overtake_max_duration_sec
+    walls['at'] = walls_at
+    ego = (5.5, -0.4)
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, ego, closed=True)
+    d.overtake_max_duration_sec = 0.0
+    d.observe([*ego, 0, 0.0, 0], stopped_car_scan(d, 5.5, 7.5), 0.9, 0)   # still seen
+    d._update_opponent_and_overtake(nearest)
+    d.overtake_max_duration_sec = limit
+    assert d._pass_state == 'abort'
+    return d, nearest, ego
+
+
+def tick_unseen(d, nearest, ego, now):
+    d.observe([*ego, 0, 0.0, 0], np.full(1081, 10.0), now, 0)
+    d._update_opponent_and_overtake(nearest)
+
+
+def test_a_stopped_abort_hands_a_car_lost_ahead_back_to_following_after_the_lost_timeout():
+    # Spec (node comment): a car last seen ahead of our nose cannot come back
+    # beside us unseen; once lost for opponent_lost_timeout_sec, and with a
+    # wall-clear path back to the line, the manoeuvre ends.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    lost = d.opponent_lost_timeout_sec
+    tick_unseen(d, nearest, ego, 0.9 + lost - 0.05)            # one tick short: not lost yet
+    assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+    tick_unseen(d, nearest, ego, 0.9 + lost + 0.05)
+    assert d._pass_state == 'idle' and not d.overtake_active
+    assert d.last_opponent_status.startswith('overtake ended')
+
+
+def test_a_stopped_abort_keeps_a_lost_car_when_the_way_back_is_walled():
+    walled = lambda x, y: 0.0 if x > 6.6 else 1.5 - abs(y)
+    d, nearest, ego = stopped_in_abort(walled)
+    tick_unseen(d, nearest, ego, 0.9 + d.opponent_lost_timeout_sec + 0.5)
+    assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+
+
+def test_a_stopped_abort_keeps_a_car_last_seen_beside_it():
+    # Beside us (its rear behind our nose) it may sit in the rear-flank blind
+    # spot: losing it is no reason to forget it.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    d._opp_anchor = (d._opp_anchor[0] - 2.5, *d._opp_anchor[1:])   # rear now level with us
+    tick_unseen(d, nearest, ego, 0.9 + d.opponent_lost_timeout_sec + 0.5)
+    assert d._pass_state == 'abort'
+
+
+def test_a_stopped_abort_carries_on_in_a_clear_lane_when_the_way_back_is_blocked():
+    # Car 2 stopped in its lane (y = -0.75) just past the stopped car (rear
+    # 7.5 m, front 8.12 m; car 2's rear 8.29 m), so it is no pass target, and
+    # the racing line ahead is walled off, so there is no way back to it. Only
+    # carrying on in the lane, which is clear, can move car 2.
+    line_blocked = lambda x, y: 0.0 if (x > 9.2 and y > -0.45) else 1.5 - abs(y)
+    ego = (8.4, -0.75)
+    nearest, _ = race.racing_math.find_nearest_index(straight_stadium().xy, ego, closed=True)
+
+    def stop_there(walls_at):
+        walls = dict(at=lambda x, y: 1.5 - abs(y))
+        d, _ = started_pass(walls)
+        walls['at'] = walls_at
+        limit = d.overtake_max_duration_sec
+        d.overtake_max_duration_sec = 0.0
+        d.observe([*ego, 0, 0.0, 0], np.full(1081, 10.0), 0.85, 0)
+        d._update_opponent_and_overtake(nearest)
+        d.overtake_max_duration_sec = limit
+        return d
+    d = stop_there(line_blocked)
+    assert d._pass_state == 'pass' and d._pass_plan.mode == 'pass'
+    assert d._pass_plan.d[0] == pytest.approx(-0.75, abs=1e-3)      # m: in its own lane
+    assert d.follow_speed_cap >= 0.3
+    # The lane also walled 1.2 m ahead of the nose: a stop from rest is
+    # clear, but a crawl along it is not, so it stays stopped.
+    both = lambda x, y: 0.0 if (x > ego[0] + 0.47 + 1.2 and y < -0.45) else line_blocked(x, y)
+    assert stop_there(both)._pass_state == 'abort'
+
+
+def flank_scan(d, bearing_deg, rng):
+    """An unexplained return (expected map range is 10 m) at one bearing, e.g. a car beside us."""
+    scan = np.full(1081, 10.0)
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    scan[np.abs(angles - math.radians(bearing_deg)) < 0.15] = rng
+    return scan
+
+
+def test_a_stopped_abort_keeps_the_car_while_its_flank_shows_an_unconfirmed_return():
+    # Review 2026-11-09: no confirmed sighting is not evidence of an empty
+    # flank (a car can fail confirmation, e.g. reversing, or another object
+    # can replace the anchor). A return 0.6 m off at +80 deg, on the side
+    # car 2 (right of the line) would rejoin toward, keeps the abort and its
+    # zero cap however long the anchor has been stale.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    for now in np.arange(1.0, 0.9 + 3 * d.opponent_lost_timeout_sec, 0.1):
+        d.observe([*ego, 0, 0.0, 0], flank_scan(d, 80.0, 0.6), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+        assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+    # The same return on the far side (-80 deg) is not across the rejoin.
+    d2, nearest, ego = stopped_in_abort(_lanes_walled)
+    for now in np.arange(1.0, 0.9 + d2.opponent_lost_timeout_sec + 0.2, 0.1):
+        d2.observe([*ego, 0, 0.0, 0], flank_scan(d2, -80.0, 0.6), float(now), 0)
+        d2._update_opponent_and_overtake(nearest)
+    assert d2._pass_state == 'idle'
+
+
+def test_the_flank_must_stay_clear_for_the_whole_lost_timeout():
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    lost = d.opponent_lost_timeout_sec
+    gone = 0.9 + 2 * lost                    # the return leaves here
+    for now in np.arange(1.0, gone, 0.1):
+        d.observe([*ego, 0, 0.0, 0], flank_scan(d, 60.0, 0.8), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+    tick_unseen(d, nearest, ego, gone)
+    tick_unseen(d, nearest, ego, gone + lost - 0.05)
+    assert d._pass_state == 'abort'          # clear, but not for long enough yet
+    tick_unseen(d, nearest, ego, gone + lost + 0.05)
+    assert d._pass_state == 'idle'
+
+
+def test_a_nan_or_too_short_beam_in_the_flank_is_not_seen_clear():
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    d.observe([*ego, 0, 0.0, 0], np.full(1081, 10.0), 2.0, 0)
+    assert d._pass_flank_clear(True)
+    for bad in (math.nan, 0.01):              # NaN; under range_min (0.05 m)
+        d.observe([*ego, 0, 0.0, 0], flank_scan(d, 80.0, bad), 2.0, 0)
+        assert not d._pass_flank_clear(True)
+    # A return beyond the 2 m reach is not across the rejoin.
+    d.observe([*ego, 0, 0.0, 0], flank_scan(d, 80.0, 2.5), 2.0, 0)
+    assert d._pass_flank_clear(True)
+
+
+def test_an_abort_with_no_path_clear_of_the_car_brakes_on_a_wall_clear_one():
+    # 2026-11-09: when the car's reachable box blocks both the lane and the
+    # way back, brake along the lane if the walls allow it, rather than hold
+    # the steering (which ran into a wall through a bend at 2.8 m/s).
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    ego = EGO_PAST
+    s_ego, _ = d._pass_line_frame().frenet(*ego)
+    d._opp_anchor = (s_ego + 0.6, ego[1], 0.0)          # a car dead ahead in our lane
+    abort_once(d, ego)
+    d._opp_seen = 1.9                                   # seen this tick
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, ego, closed=True)
+    d.observe([*ego, 0, 2.0, 0], np.full(1081, 10.0), 1.925, 0)
+    d._opp_anchor, d._opp_seen = (s_ego + 0.6, ego[1], 0.0), 1.925
+    d._update_opponent_and_overtake(nearest)
+    assert d._pass_state == 'abort'
+    assert d._pass_branch == 'wall_clear_brake'
+    assert d._pass_plan is not None and not d._pass_hold_steering
+    assert d.follow_speed_cap == 0.0
+
+
+def test_an_abort_between_the_margin_tiers_still_brakes_in_its_lane():
+    # Car 2 in its lane (y = -0.75) with the right-hand wall about 0.10 m off
+    # its body: inside the 0.15 m planning margin, outside the 0.05 m
+    # keep-going one. The abort judges the lane on the keep tier, so it
+    # brakes in it rather than falling through to holding the steering.
+    ego = EGO_PAST
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    limits = d._pass_limits()
+
+    def lane_clearance():
+        plan = race.pass_planner.plan_hold(d._pass_line_frame(), (*ego, 0.0), 2.0, d._pass_walls(), limits)
+        return float(np.min(plan.wall))
+    # The plan's clearance is the wall distance minus the body half-width and
+    # build()'s sampling slack: measure that offset with the 1.5 m wall, then
+    # move the right-hand wall so the lane sees 0.10 m.
+    offset = (1.5 - abs(ego[1])) - lane_clearance()
+    edge = abs(ego[1]) + offset + 0.10
+    walls['at'] = lambda x, y: (edge - abs(y)) if y < 0 else 1.5 - abs(y)
+    assert lane_clearance() == pytest.approx(0.10, abs=1e-6)            # m
+    assert limits.keep_wall_margin < 0.10 < limits.wall_margin
+    abort_once(d, ego)
+    assert d._pass_state == 'abort' and d._pass_branch == 'brake_in_lane'
+    assert not d._pass_hold_steering and d.follow_speed_cap == 0.0
+
+
+def test_a_stopped_abort_keeps_a_car_it_can_still_see_ahead():
+    # The car stays in view 1.74 m ahead (beyond the flank check's reach, so
+    # the flank reads clear): its sightings keep it fresh, and it is not lost.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    for now in np.arange(0.925, 0.9 + 3 * d.opponent_lost_timeout_sec, 0.025):
+        d.observe([*ego, 0, 0.0, 0], stopped_car_scan(d, 5.5, 7.5), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+    assert d._pass_flank_since is not None                   # the flank itself is seen clear
+    assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+
+
+def test_no_pass_starts_before_a_full_acceleration_window():
+    # Node spec: the acceleration gate clears only on a window spanning at
+    # least 0.55 s of the 0.6 s history, even once a speed is known (0.3 s).
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d = planner_decisions(walls)
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, (5.0, 0.0), closed=True)
+    states = {}
+    for now in np.arange(0, 0.8, .025):
+        d.observe([5.0, 0, 0, 0.0, 0], stopped_car_scan(d, 5.0, 7.5), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+        states[round(float(now), 3)] = (d._pass_state, d._opp_speed is not None, d._opp_accelerating)
+    # Confirmed by 0.15 s; a speed once 0.3 s of history exists; at 0.5 s the
+    # window spans ~0.35 s: still gated, and still idle.
+    assert states[0.5] == ('idle', True, True)
+    assert d._pass_state == 'pass'            # a full window of a car that is not speeding up

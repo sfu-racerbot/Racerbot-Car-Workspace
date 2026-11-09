@@ -6,6 +6,7 @@ recomputed here; the corridor cases use an analytic wall distance on a
 synthetic stadium (two 30 m straights, 6 m bends), so "room" is known exactly.
 """
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -198,7 +199,13 @@ def test_a_car_closing_from_behind_is_checked_against_the_stopped_pose_forever()
 
 
 def test_the_stop_must_also_clear_the_walls():
-    plan = hold_plan(3.0, half_width=0.30)   # 0.30 - 0.155 body = 0.145 < margin + slack
+    # The body's clearance must cover the margin AND the sampling slack
+    # (closed form, body_points: hypot(L/16, W/8) between body points plus
+    # half a step between poses; no turn on the straight). A wall half way
+    # into the slack passes the margin alone and must still be refused.
+    slack = math.hypot(LIMITS.length / 16, LIMITS.width / 8) + LIMITS.spacing / 2
+    half_width = LIMITS.width / 2 + LIMITS.wall_margin + slack / 2
+    plan = hold_plan(3.0, half_width=half_width)
     assert not pp.fallback_clear(plan, 0.5, None, LINE, LIMITS)
     assert pp.fallback_clear(hold_plan(3.0), 0.5, None, LINE, LIMITS)
 
@@ -338,7 +345,7 @@ def test_a_shift_from_standstill_peaks_at_80_percent_of_the_steering_curvature()
     # the shift so its quintic d'' peaks at 80% of tan(steering)/wheelbase.
     # Oracle: the path's curvature there is d''/(1 + d'^2)^1.5, with d'' and
     # d' of the quintic at t* = (3 - sqrt 3)/6 (closed forms below).
-    kmax = math.tan(LIMITS.steering) / LIMITS.wheelbase
+    kmax = 0.8 * math.tan(LIMITS.steering) / LIMITS.wheelbase   # spec: 80 % steering headroom
     delta, length = 0.6, pp.shift_length(0.6, 0.0, LIMITS)
     shift = pp.Manoeuvre(5.0, 0.0, -delta, length, math.inf, 3.0, -1)
     plan = pp.manoeuvre_plan(LINE, (5.0, 0.0, 0.0), 0.0, shift, corridor(1.5), LIMITS,
@@ -397,11 +404,96 @@ def test_the_checks_start_from_where_the_car_is_not_where_the_manoeuvre_says():
     # Review 2026-11-08: holding a pass at d = -0.60 m but really at -0.80 m,
     # beside a wall 1.00 m off the line. The real body edge is 0.045 m from
     # the wall (1.00 - 0.80 - 0.155): the plan must start there and refuse.
+    # Numbers derived for a 0.10 m wall margin, pinned here (the default
+    # planning margin became 0.15 m on 2026-11-09; this test is about where
+    # the checks start, not the margin's value).
+    limits = replace(LIMITS, wall_margin=0.10)
     hold = pp.Manoeuvre(4.0, 0.0, -0.60, 2.0, math.inf, 3.0, -1)
     walls = corridor(1.0)
-    real = pp.manoeuvre_plan(LINE, (8.0, -0.80, 0.0), 0.5, hold, walls, LIMITS, mode='pass', hold=True)
+    real = pp.manoeuvre_plan(LINE, (8.0, -0.80, 0.0), 0.5, hold, walls, limits, mode='pass', hold=True)
     assert real.d[0] == pytest.approx(-0.80, abs=1e-3)
-    assert not pp.fallback_clear(real, 0.5, None, LINE, LIMITS)
-    on_plan = pp.manoeuvre_plan(LINE, (8.0, -0.60, 0.0), 0.5, hold, walls, LIMITS, mode='pass', hold=True)
+    assert not pp.fallback_clear(real, 0.5, None, LINE, limits)
+    on_plan = pp.manoeuvre_plan(LINE, (8.0, -0.60, 0.0), 0.5, hold, walls, limits, mode='pass', hold=True)
     assert on_plan.d[0] == pytest.approx(-0.60, abs=1e-3)
-    assert pp.fallback_clear(on_plan, 0.5, None, LINE, LIMITS)
+    assert pp.fallback_clear(on_plan, 0.5, None, LINE, limits)
+
+
+def test_a_pose_needing_more_than_the_steering_headroom_counts_as_a_wall():
+    # Spec (Limits.steering_headroom): a pass path may need at most 80 % of
+    # the steering limit. Oracle: a circle of radius R needs atan(L/R); pick R
+    # either side of the headroom's radius and build a short plan on it.
+    limit = 0.8 * LIMITS.steering       # spec value, not read back from Limits
+    r_edge = LIMITS.wheelbase / math.tan(limit)
+
+    def plan_on(radius):
+        angles = np.linspace(0, 2 * math.pi, 600, endpoint=False)
+        circle = pp.Line(np.column_stack((radius * np.cos(angles), radius * np.sin(angles))),
+                         np.full(600, 2.0))
+        open_floor = lambda xs, ys: np.full(len(xs), 5.0)
+        return pp.build(circle, 0.0, np.zeros(20), 'hold', LIMITS, open_floor)
+    assert np.all(np.isfinite(plan_on(r_edge * 1.1).wall[1:-1]))
+    assert not np.any(np.isfinite(plan_on(r_edge * 0.9).wall[1:-1]))
+
+
+def test_the_offset_blend_is_a_steerable_shift():
+    # Spec: the measured offset blends into the manoeuvre over shift_length
+    # (steerable by construction). Oracle (closed form): a 0.25 m error
+    # blended over 1 m would peak at 0.25 * QUINTIC_PEAK = 1.44 1/m, above
+    # the 80 % headroom's 0.8 tan(0.42) / 0.36 = 0.99 1/m; over
+    # shift_length(0.25, 1.0) no sample may be marked unsteerable (-inf).
+    hold = pp.Manoeuvre(4.0, 0.0, -0.60, 2.0, math.inf, 3.0, -1)
+    plan = pp.manoeuvre_plan(LINE, (8.0, -0.85, 0.0), 0.0, hold, corridor(1.5), LIMITS, mode='pass', hold=True)
+    assert 0.25 * pp.QUINTIC_PEAK > 0.8 * math.tan(0.42) / 0.36       # the 1 m blend would not steer
+    assert np.all(np.isfinite(plan.wall))
+    blend = pp.shift_length(0.25, 1.0, LIMITS)
+    after = plan.dist >= blend + LIMITS.spacing
+    assert np.allclose(plan.d[after], -0.60, atol=1e-6)             # m
+    assert plan.d[0] == pytest.approx(-0.85, abs=1e-6)
+
+
+def test_the_offset_blend_lengthens_with_speed():
+    # At 3 m/s the speed term sets the blend: 3 * sqrt(QUINTIC_PEAK * 0.25 /
+    # shift_accel) = 2.55 m (closed form, > min_shift 1.5 m). Halfway through,
+    # the quintic has removed exactly half the 0.25 m error.
+    blend = 3.0 * math.sqrt(pp.QUINTIC_PEAK * 0.25 / LIMITS.shift_accel)
+    assert blend > LIMITS.min_shift + 0.5
+    hold = pp.Manoeuvre(4.0, 0.0, -0.60, 2.0, math.inf, 3.0, -1)
+    plan = pp.manoeuvre_plan(LINE, (8.0, -0.85, 0.0), 3.0, hold, corridor(1.5), LIMITS, mode='pass', hold=True)
+    arc = plan.s - 8.0                    # the blend runs along the line's arc, not the path's
+    mid = int(np.argmin(np.abs(arc - blend / 2)))
+    assert plan.d[mid] == pytest.approx(-0.60 - 0.25 * (1 - pp.smooth(arc[mid] / blend)), abs=1e-6)
+    assert plan.d[mid] == pytest.approx(-0.725, abs=0.01)          # m: half the error left
+    assert np.allclose(plan.d[arc >= blend], -0.60, atol=1e-6)
+
+
+def test_keeping_is_the_keep_going_tier():
+    keep = pp.keeping(LIMITS)
+    assert (keep.wall_margin, keep.car_margin, keep.long_margin) == (
+        LIMITS.keep_wall_margin, LIMITS.keep_car_margin, LIMITS.keep_long_margin)
+    # Spec (Limits comments, 2026-11-09): plan with 0.15 / 0.08 / 0.15 m, keep going to 0.05 / 0.04 / 0.08 m.
+    assert (LIMITS.wall_margin, LIMITS.car_margin, LIMITS.long_margin) == (0.15, 0.08, 0.15)
+    assert (keep.wall_margin, keep.car_margin, keep.long_margin) == (0.05, 0.04, 0.08)
+    assert keep.brake == LIMITS.brake and keep.width == LIMITS.width   # nothing else changes
+
+
+@pytest.mark.parametrize('clearance, expected', [
+    (0.25, 'go'),        # above the planning margin: a positive checked speed
+    (0.10, 'brake'),     # between the tiers: keep the manoeuvre, brake (cap 0)
+    (0.03, 'abort'),     # under the keep margin: no checked speed at all
+])
+def test_safe_speed_plans_with_one_tier_and_gives_up_with_the_other(clearance, expected):
+    # A hold on the line, on the straight: the body's wall clearance is the
+    # corridor half-width minus half the car's width (closed form), the same
+    # along the whole plan. build()'s sampling slack is added to the
+    # half-width so `clearance` is what the plan sees.
+    probe = pp.plan_hold(LINE, (8.0, 0.0, 0.0), 1.0, corridor(1.0), LIMITS)
+    slack = 1.0 - LIMITS.width / 2 - float(np.min(probe.wall))      # sampling slack, m
+    plan = pp.plan_hold(LINE, (8.0, 0.0, 0.0), 1.0, corridor(LIMITS.width / 2 + slack + clearance), LIMITS)
+    assert float(np.min(plan.wall)) == pytest.approx(clearance, abs=1e-6)   # m
+    cap = pp.safe_speed(plan, None, LINE, LIMITS, 1.0)
+    if expected == 'go':
+        assert cap is not None and cap >= 1.0
+    elif expected == 'brake':
+        assert cap == 0.0
+    else:
+        assert cap is None

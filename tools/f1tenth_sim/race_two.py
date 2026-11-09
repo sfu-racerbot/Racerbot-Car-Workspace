@@ -33,7 +33,7 @@ METHODS = {
     '_footprint_clearance', '_forward_body_clearance', '_arc_clearance',
     '_dynamic_closest_in_cone', '_static_closest_in_cone',
     '_sanitized_window', '_emergency_escape',
-    '_pass_reset_state', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
+    '_pass_reset_state', '_pass_flank_clear', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
     '_pass_enter_abort', '_pass_opponent', '_local_pass_update', '_pass_reset_after', '_pass_observe',
     '_following_reserve',
 }
@@ -229,7 +229,7 @@ def race_metrics(rows, dt, length, laps):
                 finish[i] = row['time']
     return dict(attempted=attempts, completed=completed, abandoned=abandoned,
                 abort_branch_ticks={b: sum(r.get('abort_branch') == b for r in rows)
-                                    for b in ('brake_in_lane', 'checked_rejoin', 'zero_stop')},
+                                    for b in ('brake_in_lane', 'checked_rejoin', 'wall_clear_brake', 'zero_stop')},
                 declared_completed=sum(r['status'].startswith('overtake complete:') for r in rows),
                 active_at_end=was_active, stuck_s=round(stuck * dt, 3),
                 race_time_s=finish[0], opponent_race_time_s=finish[1],
