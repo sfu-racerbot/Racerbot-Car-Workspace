@@ -323,6 +323,9 @@ pure_pursuit_node:
     # docs/racing-autonomy.md's "Racing against opponents" for the full
     # strategy. Requires enable_lidar_safety above to also be true. ---
     enable_opponent_overtake: true
+    # Experimental swept-path planner; requires following and delay_lqr.
+    # Car 2 remains disabled until the independent traffic matrix meets its gate.
+    enable_local_pass_planner: false
     enable_opponent_following: false  # car 2 enables the measured braking envelope
     following_brake: 3.0  # measured physical braking, NOT max_braking_decel command slew
     following_response_sec: 0.45  # 0.10 s transport + 1/7 s loop lag + sensing/tracking allowance

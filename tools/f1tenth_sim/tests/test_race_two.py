@@ -73,6 +73,34 @@ def decisions(wall_distance=math.inf):
     return d, scan
 
 
+def test_local_planner_adapter_declines_without_using_legacy_offset():
+    d, scan = decisions(9.)
+    d.enable_local_pass_planner = d.enable_opponent_overtake = True
+    d.enable_opponent_following = True
+    follower = race.rv.PathFollower(rectangle(), law_name='delay_lqr', car_id='rb2')
+    for now in np.arange(0, .3, .025):
+        d.observe([2, 0, 0, 1, 0], scan, float(now), 0)
+        steering, speed, _, target, _ = d.base_command(follower, [2, 0, 0, 1, 0], 0)
+    # oracle: invariant -- the reachable weaving tube fills this short track;
+    # rejecting it must preserve following, not fall into the old offset pass.
+    assert target is None and not d.overtake_active
+    assert 'no swept-clear candidate' in d.last_opponent_status
+    assert d.follow_speed_cap is not None and d.follow_speed_cap < speed
+    assert abs(steering) < 1e-8  # rad: straight line, zero lateral/heading error
+    assert d.opponent.arc_length is not None
+
+
+def test_planner_abort_branch_accounting_counts_events_not_braking_ticks():
+    rows = [row(.1, active=True), row(.2, abort_branch='follow_brake', status='overtake abandoned: planner'),
+            row(.3), row(.4, active=True), row(.5, abort_branch='checked_rejoin', status='overtake abandoned: planner'),
+            row(.6, active=True), row(.7, abort_branch='zero_stop', status='overtake abandoned: planner')]
+    metrics = race.race_metrics(rows, .1, 40, 4)
+    # oracle: closed form -- three distinct active->abort transitions.
+    assert metrics['attempted'] == metrics['abandoned'] == 3
+    assert metrics['abort_branches'] == dict(follow_brake=1, checked_rejoin=1, zero_stop=1)
+    assert metrics['completed'] == 0
+
+
 def test_real_car_needs_confirmation_and_wall_phantom_never_commits():
     # Node spec: six sightings spanning >=0.15s; wall distance >=0.30m.
     d, scan = decisions()

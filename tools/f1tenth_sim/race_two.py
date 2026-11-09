@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_gap  # noqa: E402,F401
 import run_validation as rv  # noqa: E402
 import numpy as np  # noqa: E402
-from pure_pursuit import following, pass_completion, racing_math  # noqa: E402
+from pure_pursuit import following, pass_completion, pass_planner, racing_math, tracking_laws  # noqa: E402
 from pure_pursuit.opponent_gate import OpponentGate  # noqa: E402
 from sim_fidelity import with_floor  # noqa: E402
 
@@ -33,6 +33,7 @@ METHODS = {
     '_footprint_clearance', '_forward_body_clearance', '_arc_clearance',
     '_dynamic_closest_in_cone', '_static_closest_in_cone',
     '_sanitized_window', '_emergency_escape',
+    '_local_pass_limits', '_local_pass_candidate', '_local_pass_update', '_local_pass_steering',
 }
 
 
@@ -54,7 +55,7 @@ def node_decisions():
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0),
                               tracker, adapter], type_ignores=[])
     namespace = dict(math=math, np=np, racing_math=racing_math, following=following,
-                     pass_completion=pass_completion)
+                     pass_completion=pass_completion, pass_planner=pass_planner, tracking_laws=tracking_laws)
     exec(compile(ast.fix_missing_locations(module), str(NODE), 'exec'), namespace)
     return namespace['Decisions'], namespace['OpponentTracker']
 
@@ -88,6 +89,12 @@ class NodeDecisions(Decisions):
         self.recovery_since = None
         self.recovery_exhausted = False
         self.follow_speed_cap = None
+        self._local_candidate = self._local_opponent = None
+        self._local_aborting = self._local_rejoining = self._local_zero = False
+        self._local_abort_event = ''
+
+    def _odom_fresh(self):
+        return math.isfinite(self.current_speed)
 
     def _now_sec(self):
         return self.now
@@ -105,6 +112,7 @@ class NodeDecisions(Decisions):
         self.car_x, self.car_y, _, _, self.car_yaw = state[:5]
         self.now = now
         self.steering_basis = previous_steering
+        self.current_speed = float(state[3])
         self.last_scan_time = now
         self.last_scan = SimpleNamespace(
             ranges=ranges, angle_min=self.lidar.angle_min,
@@ -114,6 +122,8 @@ class NodeDecisions(Decisions):
     def base_command(self, follower, state, previous_steering):
         """Node control_step's bounded off-line recovery, before opponents/safety."""
         self.follow_speed_cap = None
+        self.tracking_law = follower.law
+        self.path_context = follower.path_context
         nearest, error = racing_math.find_nearest_index(
             self.xy, state[:2], closed=True, prev_index=follower.previous_index,
             search_window=self.nearest_search_window)
@@ -121,6 +131,13 @@ class NodeDecisions(Decisions):
             nearest, error = racing_math.find_nearest_index(self.xy, state[:2], closed=True)
         recovering = error > self.max_cross_track_error
         if recovering:
+            if self.enable_local_pass_planner and (self.overtake_active or self._local_aborting):
+                self._local_abort_event = 'zero_stop' if self.overtake_active else ''
+                self.overtake_active = False
+                self._local_aborting = self._local_zero = True
+                self._local_candidate = None
+                self.follow_speed_cap = 0.0
+                return previous_steering, 0.0, nearest, None, 'off_racing_line'
             if self.recovery_since is None:
                 self.recovery_since = self.now
             if self.now - self.recovery_since > self.off_racing_line_recovery_timeout_sec:
@@ -135,12 +152,20 @@ class NodeDecisions(Decisions):
         self.recovery_since, self.recovery_exhausted = None, False
         # The node advances its stateful law once, even if a pass
         # subsequently replaces the steering target.
-        steering, speed, nearest, _, _ = follower.command(state, previous_steering=previous_steering)
+        if self.enable_local_pass_planner:
+            steering, speed = previous_steering, float(self.speed_profile[nearest])
+            follower.previous_index = nearest
+        else:
+            steering, speed, nearest, _, _ = follower.command(state, previous_steering=previous_steering)
         target = self._update_opponent_and_overtake(
             nearest, allow_pass=self.enable_opponent_overtake, desired_steering=steering)
         if target is not None:
             steering, speed, nearest, _, _ = follower.command(
                 state, target_override=target, previous_steering=previous_steering)
+        if self.enable_local_pass_planner:
+            inp = tracking_laws.TrackingInput(self.car_x, self.car_y, self.car_yaw,
+                                              abs(self.current_speed), nearest, previous_steering)
+            steering = self._local_pass_steering(inp).steering
         return steering, speed, nearest, target, None
 
 
@@ -193,6 +218,8 @@ def race_metrics(rows, dt, length, laps):
             if finish[i] is None and row[key] >= required:
                 finish[i] = row['time']
     return dict(attempted=attempts, completed=completed, abandoned=abandoned,
+                abort_branches={branch: sum(r.get('abort_branch') == branch for r in rows)
+                                for branch in ('follow_brake', 'checked_rejoin', 'zero_stop')},
                 declared_completed=sum(r['status'].startswith('overtake complete:') for r in rows),
                 active_at_end=was_active, stuck_s=round(stuck * dt, 3),
                 race_time_s=finish[0], opponent_race_time_s=finish[1],
@@ -203,7 +230,7 @@ def race_metrics(rows, dt, length, laps):
 
 
 def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0,
-        pass_lookahead=None, cap_only=False):
+        pass_lookahead=None, cap_only=False, pass_planner_enabled=False):
     rv.select_profile('car', 'rb2')
     xy, speeds = racing_math.load_profiled_csv(line)
     plan = rv.PathPlan(np.asarray(xy), racing_math.compute_segment_lengths(xy, closed=True), np.minimum(speeds, 5.0))
@@ -241,7 +268,10 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
             # FidelityPlant casts from this agent's *estimated* pose, as does the node.
             indices = np.rint((angles - lidar.angle_min) / lidar.angle_increment).astype(int)
             return plant.expected_scan(index)[indices]
-        decisions.append(NodeDecisions(plan if i == 0 else opp_plan, lidar, expected, wall_at, params))
+        agent_params = dict(params)
+        if i == 0 and pass_planner_enabled:
+            agent_params.update(enable_local_pass_planner=True, enable_opponent_overtake=True)
+        decisions.append(NodeDecisions(plan if i == 0 else opp_plan, lidar, expected, wall_at, agent_params))
     rows = []
     try:
         for step in range(math.ceil(timeout / rv.CONTROL_DT)):
@@ -295,7 +325,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                              ego_x=float(plant.truth(0)[0]), ego_y=float(plant.truth(0)[1]),
                              opp_x=float(plant.truth(1)[0]) if count == 2 else None,
                              opp_y=float(plant.truth(1)[1]) if count == 2 else None,
-                             active=decisions[0].overtake_active, status=statuses[0], safety=states[0],
+                              active=decisions[0].overtake_active, status=statuses[0], safety=states[0],
+                              abort_branch=decisions[0]._local_abort_event,
                              target=targets[0], desired_steering=desired[0],
                              follow_cap=decisions[0].follow_speed_cap,
                              tracked_arc=decisions[0].opponent.arc_length,
@@ -318,12 +349,14 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     result = race_metrics(rows, rv.CONTROL_DT, progress[0].length, laps)
     result.update(track=track, opponent=opponent, seed=seed, head_start_m=actual_head, laps=laps,
                   timeout_s=timeout, elapsed_s=rows[-1]['time'],
-                  experiments=dict(pass_lookahead_m=pass_lookahead, cap_only=cap_only),
+                  experiments=dict(pass_lookahead_m=pass_lookahead, cap_only=cap_only,
+                                   local_pass_planner=pass_planner_enabled),
                   ego_laps=rows[-1]['ego_progress'] / progress[0].length,
                   opponent_laps=rows[-1]['opp_progress'] / progress[0].length if count == 2 else None,
                   node_sha256=hashlib.sha256(NODE.read_bytes()).hexdigest(),
                   following_sha256=hashlib.sha256(Path(following.__file__).read_bytes()).hexdigest(),
                   completion_sha256=hashlib.sha256(Path(pass_completion.__file__).read_bytes()).hexdigest(),
+                  pass_planner_sha256=hashlib.sha256(Path(pass_planner.__file__).read_bytes()).hexdigest(),
                   controller_parameters=params,
                   harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                   setup='standing start; frozen map and line settled before LB; both cars rb2',
@@ -345,6 +378,7 @@ def main():
                     help='EXPERIMENT: override passing preview for both map cars, in metres')
     ap.add_argument('--cap-only', action='store_true',
                     help='EXPERIMENT: mapped pass cap can only lower the profile target')
+    ap.add_argument('--pass-planner', action='store_true', help='enable local passing on ego only')
     ap.add_argument('--output', type=Path, required=True)
     args = ap.parse_args()
     if not math.isfinite(args.head_start) or not 2 <= args.head_start <= 4 or args.laps < 1 or not math.isfinite(args.timeout) or args.timeout <= 0:
@@ -355,7 +389,7 @@ def main():
     results = []
     for seed in map(int, args.seeds.split(',')):
         result, rows = run(args.track, args.line, args.opponent, seed, args.head_start, args.laps, args.timeout,
-                           args.pass_lookahead, args.cap_only)
+                            args.pass_lookahead, args.cap_only, args.pass_planner)
         with (args.output / f'{seed}.csv').open('w') as stream:
             writer = csv.DictWriter(stream, fieldnames=rows[0])
             writer.writeheader()

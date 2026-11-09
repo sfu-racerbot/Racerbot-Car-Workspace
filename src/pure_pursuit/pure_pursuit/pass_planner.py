@@ -250,7 +250,8 @@ def plan(xy, cumulative, pose, speed, opponent, wall_at, *, limits=Limits(),
     # No geometric teleport from a badly aligned pose into a smooth path.
     if abs(yaw_error) > 0.25 or abs(lateral) > 1.5:
         return None
-    targets = [0.0] if rejoin else [s * d for s in ((side,) if side else (-1, 1)) for d in (0.8, 1.2)]
+    targets = ([0.0] if rejoin else [lateral] if braking else
+               [s * d for s in ((side,) if side else (-1, 1)) for d in (0.8, 1.2)])
     best = None
     for target in targets:
         mode = 'rejoin' if rejoin else 'hold' if braking else 'pass'
