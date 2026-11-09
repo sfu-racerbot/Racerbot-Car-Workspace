@@ -229,7 +229,7 @@ def race_metrics(rows, dt, length, laps):
                 finish[i] = row['time']
     return dict(attempted=attempts, completed=completed, abandoned=abandoned,
                 abort_branch_ticks={b: sum(r.get('abort_branch') == b for r in rows)
-                                    for b in ('brake_in_lane', 'checked_rejoin', 'zero_stop')},
+                                    for b in ('brake_in_lane', 'checked_rejoin', 'wall_clear_brake', 'zero_stop')},
                 declared_completed=sum(r['status'].startswith('overtake complete:') for r in rows),
                 active_at_end=was_active, stuck_s=round(stuck * dt, 3),
                 race_time_s=finish[0], opponent_race_time_s=finish[1],

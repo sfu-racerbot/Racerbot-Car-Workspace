@@ -36,7 +36,7 @@ pose up to the stop, and the stopped pose forever after, must clear the walls
 by wall_margin and the opponent's reachable box by car_margin/long_margin.
 A pass continues only while that holds; the node aborts otherwise.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 import numpy as np
@@ -55,9 +55,17 @@ class Limits:
     accel: float = 4.0                # car 2's measured speed loop
     brake: float = 3.0
     response: float = 0.45
-    wall_margin: float = 0.10         # body to wall: what fits once delay_lqr's offset-path error is in
-    car_margin: float = 0.08          # body to the opponent's reachable box, laterally
-    long_margin: float = 0.15         # same, longitudinally
+    # Two tiers. A pass is planned, and its speed chosen, with the first; it
+    # is abandoned only when the second fails. With one tier the car's own
+    # tracking error tripped the margins it was planned to (indoor_wide,
+    # 2026-11-09: most aborts at 0.08-0.10 m from the wall at the car's own
+    # pose), and a car stopped at a margin could never move off again.
+    wall_margin: float = 0.15         # body to wall, planning
+    car_margin: float = 0.08          # body to the opponent's reachable box, laterally, planning
+    long_margin: float = 0.15         # same, longitudinally, planning
+    keep_wall_margin: float = 0.05    # the same three, to keep going (and to move off from a stop)
+    keep_car_margin: float = 0.04
+    keep_long_margin: float = 0.08
     max_offset: float = 0.85          # inside max_cross_track_error (1.0 m)
     steering_headroom: float = 0.8    # a pass path may need at most this share of the steering limit
     min_shift: float = 1.5            # metres
@@ -73,6 +81,12 @@ class Limits:
     max_unseen: float = 1.0           # approved: a sighting within the last second
     spacing: float = 0.10
     horizon: float = 12.0
+
+
+def keeping(limits):
+    """The keep-going tier of `limits`: what an executing pass must still satisfy."""
+    return replace(limits, wall_margin=limits.keep_wall_margin, car_margin=limits.keep_car_margin,
+                   long_margin=limits.keep_long_margin)
 
 
 @dataclass(frozen=True)
@@ -387,7 +401,9 @@ def safe_speed(plan, opponent, line, limits, current_speed, grid=0.25):
     """
     if plan is None or not math.isfinite(current_speed) or current_speed < 0:
         return None
-    if not fallback_clear(plan, current_speed, opponent, line, limits):
+    # Still safe to keep going at all (keep tier)? Then pick the speed with
+    # the planning tier, braking towards it if even the current one fails it.
+    if not fallback_clear(plan, current_speed, opponent, line, keeping(limits)):
         return None
     top = float(plan.context.speed_profile[0])
     free = box_free_distance(plan, opponent, line, limits) - 2 * limits.spacing
@@ -398,7 +414,12 @@ def safe_speed(plan, opponent, line, limits, current_speed, grid=0.25):
     for v in candidates:
         if fallback_clear(plan, float(v), opponent, line, limits):
             return float(min(v, top))
-    return float(min(current_speed, top))
+    if fallback_clear(plan, current_speed, opponent, line, limits):
+        return float(min(current_speed, top))
+    for v in np.arange(math.floor(current_speed / grid) * grid, -grid / 2, -grid):
+        if fallback_clear(plan, float(v), opponent, line, limits):
+            return float(min(v, top))
+    return 0.0
 
 
 def worst_case_lead(ego_rear_arc, opponent, line, limits):

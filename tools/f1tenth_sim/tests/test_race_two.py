@@ -645,3 +645,61 @@ def test_a_nan_or_too_short_beam_in_the_flank_is_not_seen_clear():
     # A return beyond the 2 m reach is not across the rejoin.
     d.observe([*ego, 0, 0.0, 0], flank_scan(d, 80.0, 2.5), 2.0, 0)
     assert d._pass_flank_clear(True)
+
+
+def test_an_abort_with_no_path_clear_of_the_car_brakes_on_a_wall_clear_one():
+    # 2026-11-09: when the car's reachable box blocks both the lane and the
+    # way back, brake along the lane if the walls allow it, rather than hold
+    # the steering (which ran into a wall through a bend at 2.8 m/s).
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    ego = EGO_PAST
+    s_ego, _ = d._pass_line_frame().frenet(*ego)
+    d._opp_anchor = (s_ego + 0.6, ego[1], 0.0)          # a car dead ahead in our lane
+    abort_once(d, ego)
+    d._opp_seen = 1.9                                   # seen this tick
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, ego, closed=True)
+    d.observe([*ego, 0, 2.0, 0], np.full(1081, 10.0), 1.925, 0)
+    d._opp_anchor, d._opp_seen = (s_ego + 0.6, ego[1], 0.0), 1.925
+    d._update_opponent_and_overtake(nearest)
+    assert d._pass_state == 'abort'
+    assert d._pass_branch == 'wall_clear_brake'
+    assert d._pass_plan is not None and not d._pass_hold_steering
+    assert d.follow_speed_cap == 0.0
+
+
+def test_an_abort_between_the_margin_tiers_still_brakes_in_its_lane():
+    # Car 2 in its lane (y = -0.75) with the right-hand wall about 0.10 m off
+    # its body: inside the 0.15 m planning margin, outside the 0.05 m
+    # keep-going one. The abort judges the lane on the keep tier, so it
+    # brakes in it rather than falling through to holding the steering.
+    ego = EGO_PAST
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    limits = d._pass_limits()
+
+    def lane_clearance():
+        plan = race.pass_planner.plan_hold(d._pass_line_frame(), (*ego, 0.0), 2.0, d._pass_walls(), limits)
+        return float(np.min(plan.wall))
+    # The plan's clearance is the wall distance minus the body half-width and
+    # build()'s sampling slack: measure that offset with the 1.5 m wall, then
+    # move the right-hand wall so the lane sees 0.10 m.
+    offset = (1.5 - abs(ego[1])) - lane_clearance()
+    edge = abs(ego[1]) + offset + 0.10
+    walls['at'] = lambda x, y: (edge - abs(y)) if y < 0 else 1.5 - abs(y)
+    assert lane_clearance() == pytest.approx(0.10, abs=1e-6)            # m
+    assert limits.keep_wall_margin < 0.10 < limits.wall_margin
+    abort_once(d, ego)
+    assert d._pass_state == 'abort' and d._pass_branch == 'brake_in_lane'
+    assert not d._pass_hold_steering and d.follow_speed_cap == 0.0
+
+
+def test_a_stopped_abort_keeps_a_car_it_can_still_see_ahead():
+    # The car stays in view 1.74 m ahead (beyond the flank check's reach, so
+    # the flank reads clear): its sightings keep it fresh, and it is not lost.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    for now in np.arange(0.925, 0.9 + 3 * d.opponent_lost_timeout_sec, 0.025):
+        d.observe([*ego, 0, 0.0, 0], stopped_car_scan(d, 5.5, 7.5), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+    assert d._pass_flank_since is not None                   # the flank itself is seen clear
+    assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0

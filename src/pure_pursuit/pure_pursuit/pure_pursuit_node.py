@@ -3196,10 +3196,19 @@ class PurePursuitNode(Node):
         self.follow_speed_cap = 0.0
         hold = pass_planner.plan_hold(line, pose, speed, walls, limits)
         rejoin = pass_planner.plan_return(line, pose, speed, walls, limits)
-        if pass_planner.fallback_clear(hold, speed, opponent, line, limits):
+        keep = pass_planner.keeping(limits)
+        if pass_planner.fallback_clear(hold, speed, opponent, line, keep):
             self._pass_plan, self._pass_hold_steering, self._pass_branch = hold, False, 'brake_in_lane'
-        elif pass_planner.fallback_clear(rejoin, speed, opponent, line, limits):
+        elif pass_planner.fallback_clear(rejoin, speed, opponent, line, keep):
             self._pass_plan, self._pass_hold_steering, self._pass_branch = rejoin, False, 'checked_rejoin'
+        elif pass_planner.fallback_clear(hold, speed, None, line, keep):
+            # No path clears both: the walls are certain, the car's box is a
+            # worst case. Brake in the lane rather than hold the steering
+            # into a wall (indoor_wide 2026-11-09: held through a bend at
+            # 2.8 m/s, into the wall 0.4 s later).
+            self._pass_plan, self._pass_hold_steering, self._pass_branch = hold, False, 'wall_clear_brake'
+        elif pass_planner.fallback_clear(rejoin, speed, None, line, keep):
+            self._pass_plan, self._pass_hold_steering, self._pass_branch = rejoin, False, 'wall_clear_brake'
         else:
             self._pass_plan, self._pass_hold_steering, self._pass_branch = None, True, 'zero_stop'
         if self._pass_flank_clear(toward_left=d_ego < 0.0):
@@ -3221,9 +3230,9 @@ class PurePursuitNode(Node):
                     self._pass_manoeuvre, self._pass_started = manoeuvre, now
                     self.follow_speed_cap = cap
                     return
-            cap = pass_planner.safe_speed(rejoin, opponent, line, limits, speed)
+            cap = pass_planner.safe_speed(rejoin, opponent, line, keep, speed)
             if (cap is not None and cap >= 0.3
-                    and pass_planner.progress_clear(rejoin, opponent, line, limits)):
+                    and pass_planner.progress_clear(rejoin, opponent, line, keep)):
                 self._pass_state, self._pass_plan, self._pass_hold_steering = 'return', rejoin, False
                 self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
                 self.follow_speed_cap = cap
@@ -3233,9 +3242,9 @@ class PurePursuitNode(Node):
             side = 1 if d_ego > 0 else -1
             hold_m = pass_planner.new_hold(line, pose, speed, limits, side)
             ahead = pass_planner.manoeuvre_plan(line, pose, speed, hold_m, walls, limits, mode='pass', hold=True)
-            cap = pass_planner.safe_speed(ahead, opponent, line, limits, speed)
+            cap = pass_planner.safe_speed(ahead, opponent, line, keep, speed)
             if (cap is not None and cap >= 0.3
-                    and pass_planner.progress_clear(ahead, opponent, line, limits)):
+                    and pass_planner.progress_clear(ahead, opponent, line, keep)):
                 self._pass_state, self._pass_plan, self._pass_hold_steering = 'pass', ahead, False
                 self._pass_manoeuvre, self._pass_started = hold_m, now
                 self.follow_speed_cap = min(cap, opponent.speed_bound + limits.max_closing)
@@ -3248,13 +3257,13 @@ class PurePursuitNode(Node):
             # nothing would ever be clear again. Hand back to stage-1
             # following, with a crawl back to the line clear of the walls.
             ego_front = s_ego + (self.wheelbase + self.car_length) / 2
-            wall_cap = pass_planner.safe_speed(rejoin, None, line, limits, speed)
+            wall_cap = pass_planner.safe_speed(rejoin, None, line, keep, speed)
             if (opponent.age > self.opponent_lost_timeout_sec
                     and self._pass_flank_since is not None
                     and now - self._pass_flank_since >= self.opponent_lost_timeout_sec
                     and line.wrap(opponent.rear_arc - ego_front) > 0.0
                     and wall_cap is not None and wall_cap >= 0.3
-                    and pass_planner.progress_clear(rejoin, None, line, limits)):
+                    and pass_planner.progress_clear(rejoin, None, line, keep)):
                 self.get_logger().info('pass planner: car ahead out of sight; following again',
                                        throttle_duration_sec=1.0)
                 self.last_opponent_status = 'overtake ended: the car ahead drove out of sight'
