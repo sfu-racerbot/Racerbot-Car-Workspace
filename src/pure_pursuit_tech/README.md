@@ -1,14 +1,12 @@
 # Pure Pursuit (tech)
 
-A C++ pure pursuit waypoint follower, laid out like racerbot_a's
-[`pure_pursuit_a`](https://github.com/sfu-racerbot/racerbot_a/tree/main/src/pure_pursuit_a)
-and using the same control law, except for the goal point: the point
-where the line crosses the lookahead circle, interpolated between waypoints,
-instead of the first waypoint at least the lookahead distance away. The goal
-then slides along the line instead of jumping from waypoint to waypoint
-(`k = 2y/d²`, `steering = atan(wheelbase · k)`). It slows down linearly from `max_speed`
-on straights to `min_speed` at full steering lock, and publishes
-`AckermannDriveStamped` on `/drive`.
+A C++ pure pursuit waypoint follower
+
+The controller uses the same steering equations but improves how the target point is selected. Instead of choosing the first waypoint beyond the lookahead distance, it interpolates between waypoints to find where the path intersects the lookahead circle. This allows the target point to move smoothly along the racing line rather than jumping between waypoints.
+
+The controller then calculates the path curvature using (k = 2y/d^2) and converts it into a steering angle using (\delta = \arctan(Lk)), where (L) is the wheelbase.
+
+Speed depends on speed_mode. In steering mode (default), speed follows a piecewise-linear function of the steering angle: max_speed when straight, medium_angle_speed at half of max_steering, and min_speed at full lock (linear end to end when medium_angle_speed is left at its default). In profile mode, speed follows a profile planned along the whole line from cornering, braking and acceleration limits, with the steering rule kept as a cap. In both modes the command is acceleration-limited and ramps down near the goal. The controller publishes steering and speed as an AckermannDriveStamped message on /drive.
 
 It only drives while **both** of these are true; otherwise it publishes speed 0:
 
