@@ -30,14 +30,35 @@ std::optional<Goal> find_goal(const Path& path, size_t from, const Pose& car, do
 {
     const size_t n = path.size();
     const size_t steps = path.closed() ? n : n - from;
+    bool have_prev = false;
+    double px = 0.0, py = 0.0;   // previous waypoint, car frame
     for (size_t step = 0; step < steps; ++step) {
         const size_t i = path.closed() ? (from + step) % n : from + step;
         double lx, ly;
         to_car_frame(car, path[i].x, path[i].y, lx, ly);
         // waypoint must be IN FRONT of the car and AT LEAST L away
-        if (lx > 0.0 && std::hypot(lx, ly) >= L) {   // TODO: interpolate between 2 points
+        if (lx > 0.0 && std::hypot(lx, ly) >= L) {
+            // constraint L at the circle, effectively acts as a low pass filter
+            if (have_prev && std::hypot(px, py) < L) {
+                const double dx = lx - px;
+                const double dy = ly - py;
+                const double a = dx * dx + dy * dy;
+                const double b = 2.0 * (px * dx + py * dy);
+                const double c = px * px + py * py - L * L;   // < 0: prev is inside
+                if (a > 1e-12) {
+                    const double t = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
+                    const double gx = px + t * dx;
+                    // crossing behind the car: keep the waypoint
+                    if (gx > 0.0) {
+                        return Goal{gx, py + t * dy, i, false};
+                    }
+                }
+            }
             return Goal{lx, ly, i, false};
         }
+        px = lx;
+        py = ly;
+        have_prev = true;
     }
     if (!path.closed()) {
         const Waypoint& end = path[n - 1];
