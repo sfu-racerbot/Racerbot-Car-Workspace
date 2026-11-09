@@ -32,8 +32,10 @@ struct Goal
     bool past_end;    // a point L ahead along an open path's last segment
 };
 
-/// The goal point: the first waypoint from `from` on that is ahead of the
-/// car and at least L away. A loop wraps round; an open path does not, and
+/// The goal point: where the path crosses the circle of radius L, between the
+/// last waypoint inside it and the first ahead of the car outside it (`index`).
+/// That waypoint itself when none is inside or the crossing is behind the car.
+/// A loop wraps round; an open path does not, and
 /// near its end, when every waypoint left is closer than L, the goal is the
 /// point L ahead along the last segment, so steering stays calm instead of
 /// swinging at the final waypoint. None when nothing is ahead of the car.

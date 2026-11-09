@@ -2,9 +2,11 @@
 
 A C++ pure pursuit waypoint follower, laid out like racerbot_a's
 [`pure_pursuit_a`](https://github.com/sfu-racerbot/racerbot_a/tree/main/src/pure_pursuit_a)
-and using the same control law. It drives toward the first waypoint ahead
-that is at least the lookahead distance away (`k = 2y/d²`,
-`steering = atan(wheelbase · k)`). It slows down linearly from `max_speed`
+and using the same control law, except for the goal point: the point
+where the line crosses the lookahead circle, interpolated between waypoints,
+instead of the first waypoint at least the lookahead distance away. The goal
+then slides along the line instead of jumping from waypoint to waypoint
+(`k = 2y/d²`, `steering = atan(wheelbase · k)`). It slows down linearly from `max_speed`
 on straights to `min_speed` at full steering lock, and publishes
 `AckermannDriveStamped` on `/drive`.
 
