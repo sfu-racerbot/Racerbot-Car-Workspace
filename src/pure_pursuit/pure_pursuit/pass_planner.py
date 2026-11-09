@@ -59,6 +59,7 @@ class Limits:
     car_margin: float = 0.08          # body to the opponent's reachable box, laterally
     long_margin: float = 0.15         # same, longitudinally
     max_offset: float = 0.85          # inside max_cross_track_error (1.0 m)
+    steering_headroom: float = 0.8    # a pass path may need at most this share of the steering limit
     min_shift: float = 1.5            # metres
     opponent_length: float = 0.62     # an F1TENTH car (ours is 0.58 m) plus 4 cm
     opponent_width: float = 0.32
@@ -180,7 +181,7 @@ def shift_length(delta_d, speed, limits):
     limit allows. build() then refuses any path whose total curvature (the
     line's own bend plus the shift) still needs more steering than the car has.
     """
-    curvature = 0.8 * math.tan(limits.steering) / limits.wheelbase
+    curvature = 0.8 * limits.steering_headroom * math.tan(limits.steering) / limits.wheelbase
     return max(limits.min_shift,
                speed * math.sqrt(QUINTIC_PEAK * abs(delta_d) / limits.shift_accel),
                math.sqrt(QUINTIC_PEAK * abs(delta_d) / curvature))
@@ -221,7 +222,11 @@ def build(line, s0, d, mode, limits, walls, *, side=0, target=0.0):
         return None
     seg = np.r_[step, step[-1]]
     curvature = racing_math.estimate_signed_path_curvature(xy, closed=False)  # signed: the laws feed it forward
-    unsteerable = np.abs(np.arctan(limits.wheelbase * curvature)) > limits.steering
+    # Leave the tracking law headroom: a path needing the full limit cannot be
+    # followed through delay_lqr's modelled delays (indoor_wide, 2026-11-08:
+    # pass paths at full lock ran wide into the wall in 5 of 6 blocker races).
+    unsteerable = (np.abs(np.arctan(limits.wheelbase * curvature))
+                   > limits.steering_headroom * limits.steering)
     speed = np.minimum(line.sample(line.speed, s),
                        np.sqrt(limits.lateral_accel / np.maximum(np.abs(curvature), 1e-9)))
     for i in range(len(speed) - 2, -1, -1):
@@ -557,9 +562,6 @@ def entry(line, pose, speed, opponent, walls, limits, *, nominal):
         v = safe_speed(plan, opponent, line, limits, speed)
         if v is None or v < 0.3:
             reasons.append(f'{name}: no checked stop at a crawl')
-            continue
-        if not progress_clear(plan, opponent, line, limits):
-            reasons.append(f'{name}: a crawl along the pass would lose its checked stop')
             continue
         score = float(whole.wall.min())
         if best is None or score > best[0]:

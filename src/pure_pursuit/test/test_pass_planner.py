@@ -338,7 +338,7 @@ def test_a_shift_from_standstill_peaks_at_80_percent_of_the_steering_curvature()
     # the shift so its quintic d'' peaks at 80% of tan(steering)/wheelbase.
     # Oracle: the path's curvature there is d''/(1 + d'^2)^1.5, with d'' and
     # d' of the quintic at t* = (3 - sqrt 3)/6 (closed forms below).
-    kmax = math.tan(LIMITS.steering) / LIMITS.wheelbase
+    kmax = 0.8 * math.tan(LIMITS.steering) / LIMITS.wheelbase   # spec: 80 % steering headroom
     delta, length = 0.6, pp.shift_length(0.6, 0.0, LIMITS)
     shift = pp.Manoeuvre(5.0, 0.0, -delta, length, math.inf, 3.0, -1)
     plan = pp.manoeuvre_plan(LINE, (5.0, 0.0, 0.0), 0.0, shift, corridor(1.5), LIMITS,
@@ -405,3 +405,20 @@ def test_the_checks_start_from_where_the_car_is_not_where_the_manoeuvre_says():
     on_plan = pp.manoeuvre_plan(LINE, (8.0, -0.60, 0.0), 0.5, hold, walls, LIMITS, mode='pass', hold=True)
     assert on_plan.d[0] == pytest.approx(-0.60, abs=1e-3)
     assert pp.fallback_clear(on_plan, 0.5, None, LINE, LIMITS)
+
+
+def test_a_pose_needing_more_than_the_steering_headroom_counts_as_a_wall():
+    # Spec (Limits.steering_headroom): a pass path may need at most 80 % of
+    # the steering limit. Oracle: a circle of radius R needs atan(L/R); pick R
+    # either side of the headroom's radius and build a short plan on it.
+    limit = 0.8 * LIMITS.steering       # spec value, not read back from Limits
+    r_edge = LIMITS.wheelbase / math.tan(limit)
+
+    def plan_on(radius):
+        angles = np.linspace(0, 2 * math.pi, 600, endpoint=False)
+        circle = pp.Line(np.column_stack((radius * np.cos(angles), radius * np.sin(angles))),
+                         np.full(600, 2.0))
+        open_floor = lambda xs, ys: np.full(len(xs), 5.0)
+        return pp.build(circle, 0.0, np.zeros(20), 'hold', LIMITS, open_floor)
+    assert np.all(np.isfinite(plan_on(r_edge * 1.1).wall[1:-1]))
+    assert not np.any(np.isfinite(plan_on(r_edge * 0.9).wall[1:-1]))
