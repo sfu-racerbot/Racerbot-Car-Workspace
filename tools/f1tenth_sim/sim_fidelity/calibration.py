@@ -152,6 +152,10 @@ class CarCalibration:
     speed_loop_accel_max: float = 4.5
     speed_loop_brake_gain: float = 4.0
     speed_loop_brake_max: float = 4.0
+    # Above this speed the acceleration ceiling falls linearly to zero at speed_loop_accel_no_load, as a
+    # motor's force falls with speed (actuation.speed_loop_accel_ceiling). inf = no fall-off.
+    speed_loop_accel_fade_from: float = math.inf
+    speed_loop_accel_no_load: float = math.inf
 
     # --- Speed envelope -------------------------------------------------
     speed_max: float = None
@@ -365,6 +369,8 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     "speed_loop_accel_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_gain": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
+    "speed_loop_accel_fade_from": (Provenance.ESTIMATED, "inf by default (no fall-off); a floor profile sets it where the measured, traction-limited speed range ends"),
+    "speed_loop_accel_no_load": (Provenance.ESTIMATED, "inf by default; a floor profile sets an estimated motor no-load speed (actuation.speed_loop_accel_ceiling)"),
     "speed_max": (
         Provenance.DERIVED,
         "selected car's effective vesc.yaml speed_max / abs(speed_to_erpm_gain). Enforced "
@@ -550,6 +556,8 @@ FLOORS: dict[str, Floor] = {
             speed_loop_accel_max=4.0,
             speed_loop_brake_gain=7.0,
             speed_loop_brake_max=3.0,
+            speed_loop_accel_fade_from=5.4,
+            speed_loop_accel_no_load=16.0,
             speed_delay_ticks=4,
             odom_speed_scale=1.0323453317475084,
             speed_command_scale=4614.0 / 4447.983786 / 1.0323453317475084,
@@ -574,6 +582,13 @@ FLOORS: dict[str, Floor] = {
             speed_loop_accel_max="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
             speed_loop_brake_gain="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
             speed_loop_brake_max="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
+            speed_loop_accel_fade_from="ESTIMATED: the fitted 4 m/s^2 ceiling showed no fall-off up to the 5.4 m/s "
+                                       "the car reached on 2026-11-06 (sim-calibration.md, top speed overshoot); "
+                                       "above that, untested",
+            speed_loop_accel_no_load="ESTIMATED, not measured: a DC motor's force falls linearly with speed to "
+                                     "its no-load speed; ~16 m/s is the order expected for this motor and 3S "
+                                     "battery through the 4614 eRPM per m/s gearing. Only matters above "
+                                     "5.4 m/s (raised VESC speed_max experiments, 2026-11-09)",
             speed_delay_ticks="fit-only true-speed replay, sfu_course_2026_11_06_measurement.json speed_loop",
             odom_speed_scale="wheel / scan-to-map true speed, 20261106-163633, -164401, -170803",
             speed_command_scale="fit-run wheel over-read and metadata vesc gains 4614 / 4447.983786",

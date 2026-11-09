@@ -25,6 +25,7 @@ of the limit cycle, and free in run time.
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass
 
@@ -78,3 +79,19 @@ class TransportDelay:
             return value
         self._queue.append(value)
         return self._queue.popleft()
+
+
+def speed_loop_accel_ceiling(accel_max: float, fade_from: float, no_load: float, speed: float) -> float:
+    """The speed loop's acceleration ceiling at ``speed``: ``accel_max`` up to ``fade_from``, then falling
+    linearly to zero at ``no_load``, as an electric motor's force falls with speed.
+
+    Car 2 was measured traction-limited (4 m/s^2, no fall-off) up to the 5.4 m/s it reached on 2026-11-06.
+    Above that the drive force of a DC motor falls linearly towards its no-load speed (an estimate for this
+    motor and battery, not a measurement), so a raised VESC speed limit is not simulated as free
+    acceleration. ``fade_from`` infinite (the default calibration) returns ``accel_max`` unchanged.
+    """
+    if not math.isfinite(fade_from) or speed <= fade_from:
+        return accel_max
+    if not (math.isfinite(no_load) and no_load > fade_from):
+        raise ValueError("no_load must be finite and above fade_from")
+    return accel_max * max(no_load - speed, 0.0) / (no_load - fade_from)
