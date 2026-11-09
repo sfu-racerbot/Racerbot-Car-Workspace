@@ -49,7 +49,8 @@ def planner_node(profiled_csv):
     (('-p', 'enable_local_pass_planner:=true', '-p', 'enable_opponent_following:=false',
       '-p', 'enable_opponent_overtake:=false'), 'needs enable_opponent_following'),
     ((*PLANNER, '-p', 'pass_standoff:=0.5'), 'pass_standoff must be between'),
-    ((*PLANNER, '-p', 'pass_stalled_sec:=0.2'), 'pass_stalled_sec >= 0.5'),
+    ((*PLANNER, '-p', 'pass_speed_uncertainty:=0.1'), 'pass_speed_uncertainty must be in'),
+    ((*PLANNER, '-p', 'pass_clear_margin:=0.1'), 'pass_clear_margin in'),
 ])
 def test_the_node_refuses_an_unsafe_planner_configuration(profiled_csv, params, message):
     try:
@@ -130,10 +131,13 @@ def test_an_active_pass_plan_is_what_the_law_tracks(planner_node):
     straight = published[-1].drive.steering_angle
     line = node._pass_line_frame()
     s0, _ = line.frenet(-1.5, -1.2)
+    # A short plan straight off the shift (build() directly: the stadium's
+    # bends are too tight for a full-length pass plan, which is refused).
     shift = pass_planner.Manoeuvre(s0, 0.0, -0.6, 2.5, math.inf, 2.5, -1)
     open_floor = lambda xs, ys: np.full(len(xs), 5.0)
-    node._pass_plan = pass_planner.manoeuvre_plan(
-        line, (-1.5, -1.2, 0.0), 1.0, shift, open_floor, node._pass_limits(), mode='pass', hold=True)
+    s = s0 + np.arange(0.0, 2.0, 0.1)
+    node._pass_plan = pass_planner.build(line, s0, shift.lateral(s, line), 'pass', node._pass_limits(),
+                                         open_floor)
     assert node._pass_plan is not None
     side = math.copysign(1.0, float(line.point(np.array(s0 + 2.5), np.array(-0.6))[1]) + 1.2)
     _set_pose(node, -1.5, -1.2, 0.0)

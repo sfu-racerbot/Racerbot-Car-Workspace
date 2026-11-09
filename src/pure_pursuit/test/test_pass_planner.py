@@ -13,6 +13,7 @@ import pytest
 from pure_pursuit import pass_planner as pp
 
 LIMITS = pp.Limits()
+PACE = 4.0   # the synthetic line's profile speed: nominal_speed() of every case here
 
 
 def stadium(straight=30.0, radius=6.0, step=0.15):
@@ -216,7 +217,7 @@ def test_safe_speed_is_none_when_even_the_current_speed_cannot_stop_clear():
 # --- Entry -----------------------------------------------------------------
 
 def test_a_wide_corridor_admits_a_pass_beside_the_whole_reachable_box():
-    plan, manoeuvre, cap, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, corridor(1.5), LIMITS)
+    plan, manoeuvre, cap, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, corridor(1.5), LIMITS, nominal=PACE)
     assert plan is not None, why
     worst = pp.StalledOpponent(10.0, 0.0, 1.0, LIMITS.max_unseen)
     half = pp.opponent_box(worst, math.inf, LIMITS)[2]
@@ -229,29 +230,40 @@ def test_a_wide_corridor_admits_a_pass_beside_the_whole_reachable_box():
 
 
 def test_a_corridor_too_narrow_for_two_cars_refuses_with_the_wall_reason():
-    plan, _, _, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, corridor(1.1), LIMITS)
+    # Closed form: the lane needs half-width >= target + car half-width +
+    # wall margin + body/step slack, about 0.85 m here; 0.80 m is too narrow.
+    plan, _, _, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, corridor(0.80), LIMITS, nominal=PACE)
     assert plan is None
     assert 'left: wall' in why and 'right: wall' in why
 
 
-def test_a_car_whose_bound_the_pass_speed_cannot_outrun_is_not_passed():
-    # new_pass needs pass_speed - speed_bound > 0.2 m/s, or the unseen bound
+def test_a_car_whose_bound_the_pass_pace_cannot_outrun_is_not_passed():
+    # new_pass needs nominal - speed_bound > 0.2 m/s, or the unseen bound
     # would never fall behind and the rejoin could never be authorised.
     # (A wider max_offset isolates this gate from the offset gate.)
     limits = pp.Limits(max_offset=2.0)
-    slow = pp.StalledOpponent(10.0, 0.0, limits.pass_speed - 0.25, 0.0)
-    fast = pp.StalledOpponent(10.0, 0.0, limits.pass_speed - 0.15, 0.0)
-    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, slow, limits, 1) is not None
-    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, fast, limits, 1) is None
+    slow = pp.StalledOpponent(10.0, 0.0, PACE - 0.25, 0.0)
+    fast = pp.StalledOpponent(10.0, 0.0, PACE - 0.15, 0.0)
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, slow, limits, 1, PACE) is not None
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, fast, limits, 1, PACE) is None
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, slow, limits, 1, math.nan) is None
+
+
+def test_the_pass_pace_is_the_lines_mean_profile_speed_ahead():
+    speeds = np.where(np.arange(len(XY)) < 40, 2.0, 5.0)    # 2 m/s for the first 6 m
+    line = pp.Line(XY, speeds)
+    # Oracle: mean of 20 samples every 0.5 m from s = 0: twelve at 2 m/s
+    # (0..5.5 m, before station 40 at 6.0 m) and eight at 5 m/s.
+    assert pp.nominal_speed(line, 0.0) == pytest.approx((12 * 2.0 + 8 * 5.0) / 20, abs=0.08)
 
 
 def test_a_car_beside_or_behind_is_not_a_pass_target():
     behind = pp.StalledOpponent(4.0, 0.0, 1.0, 0.0)
-    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, behind, LIMITS, 1) is None
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, behind, LIMITS, 1, PACE) is None
 
 
 def test_a_pass_offset_beyond_max_offset_is_refused_on_that_side():
-    off_left = pp.StalledOpponent(10.0, 0.30, 1.0, 0.0)
+    off_left = pp.StalledOpponent(10.0, 0.40, 1.0, 0.0)
     assert pp.target_offset(off_left, 1, LIMITS) is None
     assert pp.target_offset(off_left, -1, LIMITS) is not None
 
@@ -274,15 +286,15 @@ def test_a_pass_that_cannot_get_wide_before_reaching_the_car_is_refused_though_i
     # 1.0 m behind: a stop from standstill is trivially clear, but a 2.1 m
     # shift has the body only ~0.1 m across by the time its front reaches the
     # box (0.55 m of room), so crawling the pass would lose the checked stop.
-    m = pp.new_pass(LINE, pose_behind(1.0), 0.0, STOPPED, LIMITS, -1)
+    m = pp.new_pass(LINE, pose_behind(1.0), 0.0, STOPPED, LIMITS, -1, PACE)
     plan = pp.manoeuvre_plan(LINE, pose_behind(1.0), 0.0, m, corridor(1.5), LIMITS,
                              mode='pass', hold=True)
     assert pp.fallback_clear(plan, 0.0, STOPPED, LINE, LIMITS)
     assert not pp.progress_clear(plan, STOPPED, LINE, LIMITS)
-    plan, _, _, why = pp.entry(LINE, pose_behind(1.0), 0.0, STOPPED, corridor(1.5), LIMITS)
+    plan, _, _, why = pp.entry(LINE, pose_behind(1.0), 0.0, STOPPED, corridor(1.5), LIMITS, nominal=PACE)
     assert plan is None and 'crawl along the pass' in why
     # From 2.0 m back the same pass can be crawled.
-    m = pp.new_pass(LINE, pose_behind(2.0), 0.0, STOPPED, LIMITS, -1)
+    m = pp.new_pass(LINE, pose_behind(2.0), 0.0, STOPPED, LIMITS, -1, PACE)
     plan = pp.manoeuvre_plan(LINE, pose_behind(2.0), 0.0, m, corridor(1.5), LIMITS,
                              mode='pass', hold=True)
     assert pp.progress_clear(plan, STOPPED, LINE, LIMITS)

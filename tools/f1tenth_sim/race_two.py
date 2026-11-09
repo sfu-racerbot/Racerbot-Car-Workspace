@@ -34,7 +34,7 @@ METHODS = {
     '_dynamic_closest_in_cone', '_static_closest_in_cone',
     '_sanitized_window', '_emergency_escape',
     '_pass_reset_state', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
-    '_pass_enter_abort', '_pass_opponent', '_local_pass_update', '_pass_reset_after',
+    '_pass_enter_abort', '_pass_opponent', '_local_pass_update', '_pass_reset_after', '_pass_observe',
     '_following_reserve',
 }
 
@@ -128,6 +128,10 @@ class NodeDecisions(Decisions):
             search_window=self.nearest_search_window)
         if error > self.max_cross_track_error:
             nearest, error = racing_math.find_nearest_index(self.xy, state[:2], closed=True)
+        if self.enable_local_pass_planner and self._pass_plan is not None:
+            # Node: a pass is judged against its own checked path as well.
+            _, plan_error = racing_math.find_nearest_index(self._pass_plan.context.xy, state[:2], closed=False)
+            error = min(error, plan_error)
         recovering = error > self.max_cross_track_error
         self.tracking_law = follower.law
         if recovering and self.enable_local_pass_planner and self._pass_state != 'idle':

@@ -53,23 +53,22 @@ class Limits:
     accel: float = 4.0                # car 2's measured speed loop
     brake: float = 3.0
     response: float = 0.45
-    wall_margin: float = 0.10         # body to wall, covers tracking error
-    car_margin: float = 0.10          # body to the opponent's reachable box, laterally
-    long_margin: float = 0.30         # same, longitudinally
+    wall_margin: float = 0.05         # body to wall (racing: "if it physically fits")
+    car_margin: float = 0.05          # body to the opponent's reachable box, laterally
+    long_margin: float = 0.15         # same, longitudinally
     max_offset: float = 0.85          # inside max_cross_track_error (1.0 m)
     min_shift: float = 1.5            # metres
-    opponent_length: float = 0.70
+    opponent_length: float = 0.62     # an F1TENTH car (ours is 0.58 m) plus 4 cm
     opponent_width: float = 0.32
-    opponent_lateral_uncertainty: float = 0.08
-    opponent_long_uncertainty: float = 0.15
+    opponent_lateral_uncertainty: float = 0.05
+    opponent_long_uncertainty: float = 0.10
     opponent_react: float = 0.3
     opponent_brake: float = 3.0
-    opponent_heading: float = 0.15    # rad; a car pulling away holds near its line
-    clear_margin: float = 1.0         # approved rejoin body gap
+    opponent_heading: float = 0.05    # rad; a racing car holds its line (it is not driving into us)
+    clear_margin: float = 0.5         # worst-case rejoin body gap (pass_clear_margin)
     max_unseen: float = 1.0           # approved: a sighting within the last second
     spacing: float = 0.10
     horizon: float = 12.0
-    pass_speed: float = 2.0           # m/s: plan speed beside a stopped car; sizes the shifts
 
 
 @dataclass(frozen=True)
@@ -217,8 +216,6 @@ def build(line, s0, d, mode, limits, walls, *, side=0, target=0.0):
         return None
     speed = np.minimum(line.sample(line.speed, s),
                        np.sqrt(limits.lateral_accel / np.maximum(np.abs(curvature), 1e-9)))
-    if mode != 'return':
-        speed = np.minimum(speed, limits.pass_speed)
     for i in range(len(speed) - 2, -1, -1):
         speed[i] = min(speed[i], math.sqrt(speed[i + 1] ** 2 + 2 * limits.brake * step[i]))
     yaw = np.arctan2(np.diff(xy[:, 1]), np.diff(xy[:, 0]))
@@ -403,7 +400,12 @@ class Manoeuvre:
         return lateral_profile(s_rel, self.d_start, self.target, self.out, ret, self.back)
 
 
-def new_pass(line, pose, speed, opponent, limits, side):
+def nominal_speed(line, s0, ahead=10.0):
+    """The line's mean profile speed over the next `ahead` metres: the pace a pass runs at."""
+    return float(np.mean(line.sample(line.speed, s0 + np.arange(0.0, ahead, 0.5))))
+
+
+def new_pass(line, pose, speed, opponent, limits, side, nominal):
     """The pass manoeuvre from here, or None: offset, outrunning the bound, length."""
     s0, d0 = line.frenet(pose[0], pose[1])
     if not math.isfinite(s0) or side not in (-1, 1):
@@ -414,7 +416,7 @@ def new_pass(line, pose, speed, opponent, limits, side):
     rel_rear = line.wrap(opponent.rear_arc - s0)
     if rel_rear < -limits.opponent_length:
         return None    # it is beside or behind us: that is a return, not a pass
-    if limits.pass_speed - opponent.speed_bound <= 0.2:
+    if not math.isfinite(nominal) or nominal - opponent.speed_bound <= 0.2:
         return None    # the unseen bound would never fall behind
     # Sized at the speed the car has now; the plan's speed profile then holds
     # it to what that curvature allows (lateral_accel), so it cannot be run faster.
@@ -422,9 +424,9 @@ def new_pass(line, pose, speed, opponent, limits, side):
     # Nominal: the front corner leaves the scan ~0.35 m before ego's rear
     # passes it; from there ego gains (v - speed_bound) on the unseen bound.
     rear_offset = (limits.wheelbase - limits.length) / 2
-    unseen = (limits.clear_margin - 0.35) / (1 - opponent.speed_bound / limits.pass_speed)
+    unseen = max(0.0, limits.clear_margin - 0.35) / (1 - opponent.speed_bound / nominal)
     s_return = max(out, rel_rear + limits.opponent_length + 0.35 + unseen - rear_offset)
-    back = shift_length(target, limits.pass_speed, limits)
+    back = shift_length(target, nominal, limits)
     return Manoeuvre(s0, d0, target, out, s0 + s_return, back, side)
 
 
@@ -451,11 +453,12 @@ def manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, *, mode, hold=Fa
         m = Manoeuvre(manoeuvre.s_start, manoeuvre.d_start, manoeuvre.target, manoeuvre.out,
                       math.inf, manoeuvre.back, manoeuvre.side)
         ahead = max(0.0, line.wrap(manoeuvre.s_start + manoeuvre.out - s0))
-        length = ahead + stop_distance(max(speed, limits.pass_speed), limits) + 1.5
     else:
         m = manoeuvre
         ahead = max(0.0, line.wrap(manoeuvre.s_return + manoeuvre.back - s0))
-        length = ahead + stop_distance(max(speed, limits.pass_speed), limits) + 1.5
+    # Long enough for a stop from the fastest the line allows along it.
+    fastest = max(speed, float(np.max(line.sample(line.speed, s0 + np.arange(0.0, ahead + 3.0, 0.5)))))
+    length = ahead + stop_distance(fastest, limits) + 1.5
     if length > 40.0:
         return None
     s_rel = np.arange(0.0, length, limits.spacing)
@@ -478,7 +481,7 @@ def plan_return(line, pose, speed, walls, limits):
                           mode='return')
 
 
-def entry(line, pose, speed, opponent, walls, limits):
+def entry(line, pose, speed, opponent, walls, limits, *, nominal):
     """The best feasible pass: whole nominal manoeuvre wall-clear, stop clear now.
 
     Returns (plan, manoeuvre, speed_cap, reason); plan is None with a reason
@@ -490,14 +493,14 @@ def entry(line, pose, speed, opponent, walls, limits):
         if target_offset(opponent, side, limits) is None:
             reasons.append(f'{name}: needs more than {limits.max_offset:.2f}m offset')
             continue
-        manoeuvre = new_pass(line, pose, speed, opponent, limits, side)
-        nominal = manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, mode='pass')
-        if nominal is None:
+        manoeuvre = new_pass(line, pose, speed, opponent, limits, side, nominal)
+        whole = manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, mode='pass')
+        if whole is None:
             reasons.append(f'{name}: no pass path (steering, speed bound or length)')
             continue
-        if np.any(nominal.wall < limits.wall_margin):
-            short = float(nominal.dist[int(np.argmax(nominal.wall < limits.wall_margin))])
-            reasons.append(f'{name}: wall {short:.1f}m along a {nominal.dist[-1]:.1f}m pass')
+        if np.any(whole.wall < limits.wall_margin):
+            short = float(whole.dist[int(np.argmax(whole.wall < limits.wall_margin))])
+            reasons.append(f'{name}: wall {short:.1f}m along a {whole.dist[-1]:.1f}m pass')
             continue
         plan = manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, mode='pass', hold=True)
         # A crawl is enough to start: the cap rises as the shift clears the
@@ -509,7 +512,7 @@ def entry(line, pose, speed, opponent, walls, limits):
         if not progress_clear(plan, opponent, line, limits):
             reasons.append(f'{name}: a crawl along the pass would lose its checked stop')
             continue
-        score = float(nominal.wall.min())
+        score = float(whole.wall.min())
         if best is None or score > best[0]:
             best = (score, plan, manoeuvre, v)
     if best is None:

@@ -364,22 +364,24 @@ def follow_stopped_car(d, ego_x=5.0, car_rear_x=7.5, until=1.8, speed=0.0):
     return nearest
 
 
-def test_pass_planner_waits_out_the_stall_then_commits_on_a_checked_path():
+def test_pass_planner_needs_a_speed_from_behind_then_commits_on_a_checked_path():
     walls = dict(at=lambda x, y: 1.5 - abs(y))
     d = planner_decisions(walls)
-    follow_stopped_car(d, until=1.4)
-    # Node spec: stopped means averaged progress <= 0.5 m/s for 1.5 s.
-    assert d._pass_state == 'idle' and not d.overtake_active
-    follow_stopped_car(d, until=1.8)
+    follow_stopped_car(d, until=0.2)
+    # Node spec: confirmation (six sightings over 0.15 s) and then a speed
+    # measured from behind over at least 0.3 s, before any pass.
+    assert d._pass_state == 'idle' and not d.overtake_active and d._opp_speed is None
+    follow_stopped_car(d, until=0.8)
+    assert d._opp_speed == pytest.approx(0.0, abs=1e-6)   # m/s: it is not moving
     assert d._pass_state == 'pass' and d.overtake_active
     assert d._pass_plan.mode == 'pass'
     # The pass replaces the stage-1 cap only with its own checked stop speed.
-    assert 0.3 <= d.follow_speed_cap <= d._pass_limits().pass_speed
-    assert d.last_opponent_status.startswith('overtake active: passing a stopped car')
+    assert 0.3 <= d.follow_speed_cap <= float(np.max(d.speed_profile))
+    assert d.last_opponent_status.startswith('overtake active: passing on the')
 
 
 def test_pass_planner_never_commits_in_a_corridor_too_narrow_for_two_cars():
-    walls = dict(at=lambda x, y: 1.0 - abs(y))
+    walls = dict(at=lambda x, y: 0.80 - abs(y))
     d = planner_decisions(walls)
     follow_stopped_car(d, until=3.0)
     assert d._pass_state == 'idle' and not d.overtake_active
@@ -388,7 +390,7 @@ def test_pass_planner_never_commits_in_a_corridor_too_narrow_for_two_cars():
 
 def started_pass(walls):
     d = planner_decisions(walls)
-    nearest = follow_stopped_car(d, until=1.8)
+    nearest = follow_stopped_car(d, until=0.8)
     assert d._pass_state == 'pass'
     return d, nearest
 
@@ -400,7 +402,7 @@ def abort_once(d, ego, now=1.9, speed=2.0):
     d.overtake_max_duration_sec = 0.0          # forces the abort this tick
     # Last sighting 1.05 s ago: past max_unseen, so no rejoin is authorised
     # and the abort (not the return) is what this tick decides.
-    d._stall_seen = now - 1.05
+    d._opp_seen = now - 1.05
     nearest, _ = race.racing_math.find_nearest_index(d.xy, ego, closed=True)
     d.observe([ego[0], ego[1], 0, speed, 0], np.full(1081, 10.0), now, 0)
     d._update_opponent_and_overtake(nearest)
@@ -421,7 +423,7 @@ def test_an_abort_brakes_to_zero_on_the_first_checked_path_and_keeps_the_car(bra
     # Approved order (2026-11-08): lane, then checked rejoin, then hold steering.
     walls = dict(at=lambda x, y: 1.5 - abs(y))
     d, _ = started_pass(walls)
-    anchor, arc = d._stall_anchor, d.opponent.arc_length
+    anchor, arc = d._opp_anchor, d.opponent.arc_length
     walls['at'] = walls_at
     abort_once(d, EGO_PAST)
     assert d._pass_state == 'abort' and d.overtake_active
@@ -430,7 +432,7 @@ def test_an_abort_brakes_to_zero_on_the_first_checked_path_and_keeps_the_car(bra
     assert (d._pass_plan.mode if d._pass_plan is not None else None) == plan_mode
     assert d._pass_hold_steering is (branch == 'zero_stop')
     # Never forget the car on an abort.
-    assert d._stall_anchor == anchor and d.opponent.arc_length == arc
+    assert d._opp_anchor == anchor and d.opponent.arc_length == arc
     assert d.last_opponent_status.startswith('overtake abandoned:')
 
 
@@ -441,13 +443,13 @@ def test_no_rejoin_without_a_sighting_in_the_last_second_however_far_ahead():
     # consistent sighting is 1.2 s old: the approved bound needs <= 1.0 s.
     ego_x = 14.0
     nearest, _ = race.racing_math.find_nearest_index(d.xy, (ego_x, -0.75), closed=True)
-    d._stall_seen = 0.6
+    d._opp_seen = 0.6
     d.observe([ego_x, -0.75, 0, 1.0, 0], np.full(1081, 10.0), 1.8, 0)
     d._update_opponent_and_overtake(nearest)
     assert d._pass_state != 'return'
     # The same place with a fresh sighting is authorised.
     d2, _ = started_pass(walls)
-    d2._stall_seen = 1.8
+    d2._opp_seen = 1.8
     d2.observe([ego_x, -0.75, 0, 1.0, 0], np.full(1081, 10.0), 1.8, 0)
     d2._update_opponent_and_overtake(nearest)
     assert d2._pass_state == 'return'
