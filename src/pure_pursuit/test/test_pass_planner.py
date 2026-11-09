@@ -1,157 +1,256 @@
-"""ROS-free planner oracles. Runner: pytest src/pure_pursuit/test/.
+"""pass_planner: passing a stopped car (stage 2). ROS-free; run by
+`python3 -m pytest src/pure_pursuit/test/` and colcon test.
 
-Rectangular track, analytic walls, and deliberately bounded synthetic opponents
-keep these checks independent of any simulator collision verdict.
+Oracles: circle geometry and the stopping/reach kinematics are closed forms
+recomputed here; the corridor cases use an analytic wall distance on a
+synthetic stadium (two 30 m straights, 6 m bends), so "room" is known exactly.
 """
-from dataclasses import replace
 import math
 
 import numpy as np
 import pytest
 
-from pure_pursuit import pass_planner as pp, racing_math, tracking_laws
+from pure_pursuit import pass_planner as pp
+
+LIMITS = pp.Limits()
 
 
-def scene():
-    # 400 m rectangle, sampled densely enough to put the local scene on a straight.
-    xy = np.vstack((np.column_stack((np.arange(0, 100, .15), np.zeros(667))),
-                    [[100, 100], [0, 100]]))
-    cumulative = racing_math.compute_cumulative_arc_length(
-        racing_math.compute_segment_lengths(xy, closed=True))
-    return xy, cumulative
+def stadium(straight=30.0, radius=6.0, step=0.15):
+    pts = [(i * step, 0.0) for i in range(int(straight / step))]
+    m = int(math.pi * radius / step)
+    pts += [(straight + radius * math.cos(-math.pi / 2 + math.pi * i / m),
+             radius + radius * math.sin(-math.pi / 2 + math.pi * i / m)) for i in range(m)]
+    pts += [(straight - i * step, 2 * radius) for i in range(int(straight / step))]
+    pts += [(radius * math.cos(math.pi / 2 + math.pi * i / m),
+             radius + radius * math.sin(math.pi / 2 + math.pi * i / m)) for i in range(m)]
+    return np.array(pts)
 
 
-def limits(**kwargs):
-    return replace(pp.Limits(), tracking_margin=.05, opponent_uncertainty=.01,
-                   opponent_speed_uncertainty=.001, opponent_lateral_accel=.000001,
-                   opponent_max_speed=.01, **kwargs)
+XY = stadium()
+LINE = pp.Line(XY, np.full(len(XY), 4.0))
 
 
-def search(**kwargs):
-    xy, s = scene()
-    args = dict(pose=(10., 0., 0.), speed=2., opponent=pp.Opponent(16., 0., 0.),
-                wall_at=lambda x, y: 8 - abs(y), limits=limits())
-    args.update(kwargs)
-    return pp.plan(xy, s, **args)
+def corridor(half_width):
+    """Walls at half_width either side of the first straight (the line is y = 0
+    for 0 <= x <= 30, where every case here stays): distance = half_width - |y|."""
+    def walls(xs, ys):
+        return half_width - np.abs(np.asarray(ys, float))
+    return walls
 
 
-def test_entry_cost_and_left_right_wall_selection():
-    left = search(wall_at=lambda x, y: y + .7)
-    right = search(wall_at=lambda x, y: .7 - y)
-    # oracle: invariant -- mirrored half-planes must select opposite corridors.
-    assert left is not None and right is not None
-    assert left.side == 1 and right.side == -1
-    assert left.path.xy[0, 1] == pytest.approx(0., abs=1e-9)  # m
-    assert left.path.xy[-1, 1] > .65
-    assert left.clearance > 0 and math.isfinite(left.cost)
-    assert left.cost == pytest.approx(right.cost, abs=1e-6)  # seconds
-    # oracle: closed form -- candidate cost integrates ds/v plus clearance penalty.
-    travel = sum(np.linalg.norm(np.diff(left.path.xy, axis=0), axis=1)
-                 / left.path.speed_profile[:-1])
-    assert left.cost == pytest.approx(travel - 12 / .3 + .3 / left.clearance, abs=1e-9)
+STOPPED = pp.StalledOpponent(rear_arc=10.0, lateral=0.0, speed_bound=1.0, age=0.0)
 
 
-@pytest.mark.parametrize('value', [[], [[0., 0.]], [[0., 0.]] * 4,
-                                [[0., 0.], [1., 0.], [math.nan, 1.], [0., 1.]]])
-def test_degenerate_lines_decline(value):
-    # oracle: spec -- absent, non-finite and degenerate paths cannot authorise movement.
-    assert pp.plan(value, np.arange(len(value)), (0., 0., 0.), 1.,
-                   pp.Opponent(3., 0., 0.), lambda x, y: 9.) is None
+def pose_behind(gap):
+    """Rear axle on the first straight with the front `gap` metres behind s=10."""
+    front = (LIMITS.wheelbase + LIMITS.length) / 2
+    return (10.0 - gap - front, 0.0, 0.0)
 
 
-@pytest.mark.parametrize('kwargs', [dict(speed=math.nan), dict(speed=-1.),
-                                  dict(pose=(0., math.inf, 0.)), dict(opponent=None),
-                                  dict(opponent=pp.Opponent(3., 0., 0., age=-.1)),
-                                  dict(wall_at=lambda x, y: math.nan),
-                                  dict(wall_at=lambda x, y: 0.)])
-def test_invalid_or_occupied_scene_declines(kwargs):
-    # oracle: invariant -- unknown geometry never becomes a free corridor.
-    assert search(**kwargs) is None
+# --- Frenet frame -----------------------------------------------------------
+
+def test_offset_points_on_a_circle_sit_at_radius_minus_offset_and_project_back():
+    # Oracle: a counter-clockwise circle's left normal points at the centre,
+    # so the point at offset d is at radius R - d, and frenet() inverts it.
+    radius = 5.0
+    angles = np.linspace(0, 2 * math.pi, 400, endpoint=False)
+    circle = pp.Line(np.column_stack((radius * np.cos(angles), radius * np.sin(angles))),
+                     np.full(400, 3.0))
+    for s, d in ((1.0, 0.0), (7.3, 0.6), (20.0, -0.8)):
+        point = circle.point(np.array(s), np.array(d))
+        assert np.linalg.norm(point) == pytest.approx(radius - d, abs=2e-3)  # 2 mm chord sag
+        s_back, d_back = circle.frenet(*point)
+        assert s_back == pytest.approx(s, abs=5e-3)
+        assert d_back == pytest.approx(d, abs=5e-3)
 
 
-def test_whole_body_and_between_station_wall_check():
-    path = pp.temporary_path(np.column_stack((np.arange(0., 3., .15), np.zeros(20))), np.ones(20))
-    cfg = limits()
-    # oracle: closed form -- a wall y=.20 intersects the inflated body despite free axle points.
-    assert pp.wall_clearance(path, lambda x, y: .20 - y, cfg) < 0
-    assert pp.wall_clearance(path, lambda x, y: 2. - abs(y), cfg) > 1.
-    # Thin wall between successive axle stations, extending across the track.
-    assert pp.wall_clearance(path, lambda x, y: abs(x - .075), cfg) < 0
+def test_line_refuses_too_few_points_and_non_finite_points():
+    with pytest.raises(ValueError, match='>= 4 points'):
+        pp.Line(XY[:3], np.ones(3))
+    bad = XY.copy()
+    bad[5, 0] = math.nan
+    with pytest.raises(ValueError, match='finite'):
+        pp.Line(bad, np.ones(len(bad)))
 
 
-def test_steering_grip_rate_and_physical_speed_bounds():
-    x = np.arange(0., 6., .05)
-    path = pp.temporary_path(np.column_stack((x, .1 * x * x)), np.full(len(x), 5.))
-    cfg = limits()
-    speeds = pp.feasible_speed(path, cfg)
-    # oracle: physical inequalities from the brief; independently calculate each constraint.
-    assert speeds is not None
-    assert np.max(speeds ** 2 * abs(path.curvature)) <= 2.7 + 1e-9  # m/s²
-    ds = np.linalg.norm(np.diff(path.xy, axis=0), axis=1)
-    assert np.max(np.diff(speeds ** 2) / (2 * ds)) <= 4. + 1e-9
-    assert np.max(-np.diff(speeds ** 2) / (2 * ds)) <= 3. + 1e-9
-    rack = np.arctan(.36 * path.curvature)
-    assert np.max(abs(np.diff(rack)) * np.minimum(speeds[:-1], speeds[1:]) / ds) <= 1. + 1e-9
-    assert pp.feasible_speed(path, replace(cfg, steering=.001)) is None
-    # A 10% grip change must have a numerical effect (not just an upper bound).
-    faster = pp.feasible_speed(path, replace(cfg, lateral_accel=2.97))
-    assert np.max(faster - speeds) > .05  # m/s
+def test_frenet_of_a_non_finite_point_is_nan():
+    s, d = LINE.frenet(math.nan, 0.0)
+    assert math.isnan(s) and math.isnan(d)
 
 
-@pytest.mark.parametrize('speed', [0., 1.5, 4.])
-def test_stopped_braking_and_weaving_opponent_tubes(speed):
-    xy, cumulative = scene()
-    path = pp.temporary_path(np.column_stack((np.linspace(10., 20., 80), np.ones(80))), np.full(80, 3.))
-    times = np.linspace(0., 3., 80)
-    cfg = limits()
-    # oracle: invariant -- stopped car must remain occupied even if measured speed is positive.
-    assert pp.opponent_clearance(path, times, xy, cumulative, pp.Opponent(16., 1., speed), cfg) < 0
-    # A weave towards the adjacent corridor is occupied, not constant-velocity free space.
-    assert pp.opponent_clearance(path, times, xy, cumulative, pp.Opponent(16., 0., speed),
-                                 replace(cfg, opponent_lateral_accel=2.7)) < 0
-    assert pp.opponent_clearance(path, times, xy, cumulative, pp.Opponent(60., 0., speed), cfg) > 0
+# --- Kinematics --------------------------------------------------------------
+
+def test_braking_times_coast_for_the_response_then_brake_to_the_stop():
+    v = 2.0
+    coast = v * LIMITS.response                       # 0.90 m
+    stop = coast + v * v / (2 * LIMITS.brake)         # 1.5667 m
+    assert pp.stop_distance(v, LIMITS) == pytest.approx(stop, abs=1e-9)
+    times = pp.braking_times(np.array([0.5, coast + 0.5, stop - 1e-9, stop + 0.01]), v, LIMITS)
+    assert times[0] == pytest.approx(0.25, abs=1e-9)
+    left = v * v - 2 * LIMITS.brake * 0.5
+    assert times[1] == pytest.approx(LIMITS.response + (v - math.sqrt(left)) / LIMITS.brake, abs=1e-9)
+    assert times[2] == pytest.approx(LIMITS.response + v / LIMITS.brake, abs=1e-4)
+    assert times[3] == math.inf
 
 
-def test_rejoin_is_checked_and_never_a_wrapped_temporary_path():
-    clear = search(pose=(10., 1., 0.), opponent=pp.Opponent(2., 0., 0.), rejoin=True)
-    blocked = search(pose=(10., 1., 0.), opponent=pp.Opponent(13., 0., 0.), rejoin=True)
-    # oracle: invariant -- return crosses the line only when its swept corridor is free.
-    assert clear is not None and blocked is None
-    assert not clear.path.closed
-    assert clear.path.xy[-1, 1] == pytest.approx(0., abs=1e-9)  # m
-    assert tracking_laws.sample_at_arc(clear.path.curvature, clear.path.cumulative,
-                                       1000., False) == clear.path.curvature[-1]
+def test_braking_times_from_standstill_reach_nothing_but_the_start():
+    assert list(pp.braking_times(np.array([0.0, 0.1]), 0.0, LIMITS)) == [0.0, math.inf]
 
 
-def test_frame_seam_and_rigid_transform():
-    xy, cumulative = scene()
-    a, t, n = pp.frame(xy, cumulative, -1.)
-    total = cumulative[-1] + np.linalg.norm(xy[0] - xy[-1])
-    b, _, _ = pp.frame(xy, cumulative, total - 1.)
-    # oracle: closed form -- the closing segment is vertical at x=0, one metre from origin.
-    assert a == pytest.approx([0., 1.], abs=1e-8)  # m
-    assert b == pytest.approx(a, abs=1e-8)
-    assert np.dot(t, n) == pytest.approx(0., abs=1e-12)
-    rotation = np.array([[0., -1.], [1., 0.]])
-    moved, _, _ = pp.frame(xy @ rotation.T + [5., 6.], cumulative, -1.)
-    assert moved == pytest.approx(a @ rotation.T + [5., 6.], abs=1e-8)
+def test_opponent_reach_runs_for_the_reaction_time_then_brakes_to_a_stop():
+    v = 1.0
+    assert float(pp.reach_long(0.1, v, LIMITS)) == pytest.approx(0.1, abs=1e-12)
+    saturated = v * LIMITS.opponent_react + v * v / (2 * LIMITS.opponent_brake)
+    assert float(pp.reach_long(math.inf, v, LIMITS)) == pytest.approx(saturated, abs=1e-12)
+    assert float(pp.reach_long(10.0, v, LIMITS)) == pytest.approx(saturated, abs=1e-12)
 
 
-def test_delayed_stop_rejects_too_short_horizon():
-    # oracle: closed form -- at 10m/s response+braking is .45*10+100/6 > 12m.
-    assert search(speed=10.) is None
-    assert search(speed=2.) is not None
+def test_unseen_time_moves_the_box_forward_at_the_speed_bound():
+    seen = pp.opponent_box(STOPPED, 0.0, LIMITS)
+    later = pp.opponent_box(pp.StalledOpponent(10.0, 0.0, 1.0, 0.8), 0.0, LIMITS)
+    assert seen[0] == later[0] == pytest.approx(10.0 - LIMITS.opponent_long_uncertainty, abs=1e-12)
+    assert later[1] - seen[1] == pytest.approx(1.0 * 0.8, abs=1e-12)
+    assert later[2] - seen[2] == pytest.approx(math.sin(LIMITS.opponent_heading) * 0.8, abs=1e-12)
 
 
-def test_delay_lqr_rollout_checks_real_executed_body_without_mutating_law():
-    xy, cumulative = scene()
-    candidate = search(opponent=pp.Opponent(60., 0., 0.))
-    law = tracking_laws.DelayLqrLaw(tracking_laws.VehicleLimits(.36, .42, 1., .025),
-                                   tracking_laws.DelayLqrParams())
-    inp = tracking_laws.TrackingInput(10., 0., 0., 2., 0, 0.)
-    # oracle: invariant -- real servo rollout succeeds in open space and fails on a wall.
-    assert pp.rollout_clear(candidate, law, inp, xy, cumulative, pp.Opponent(60., 0., 0.),
-                            lambda x, y: 9., limits())
-    assert not pp.rollout_clear(candidate, law, inp, xy, cumulative, pp.Opponent(60., 0., 0.),
-                                lambda x, y: 0., limits())
-    assert len(law._history) == 0
+# --- Approved rejoin bound (tech lead, 2026-11-08) ---------------------------
+
+def test_worst_case_lead_pushes_the_last_sighting_forward_at_the_speed_bound():
+    opponent = pp.StalledOpponent(10.0, 0.0, 1.0, 0.5)
+    front = 10.0 + LIMITS.opponent_length + 1.0 * 0.5
+    assert pp.worst_case_lead(front + 1.25, opponent, LINE, LIMITS) == pytest.approx(1.25, abs=1e-9)
+
+
+def test_no_rejoin_without_a_sighting_inside_max_unseen():
+    stale = pp.StalledOpponent(10.0, 0.0, 1.0, LIMITS.max_unseen + 0.01)
+    assert pp.worst_case_lead(30.0, stale, LINE, LIMITS) == -math.inf
+
+
+# --- Contingency check -----------------------------------------------------------
+
+def hold_plan(gap, half_width=1.5):
+    pose = pose_behind(gap)
+    return pp.plan_hold(LINE, pose, 4.0, corridor(half_width), LIMITS)
+
+
+def test_a_stop_that_ends_short_of_the_opponent_box_is_clear_one_past_it_is_not():
+    # On the line, straight at the stopped car. Free room ahead of the front
+    # bumper before the box: gap - long_uncertainty - long_margin. Samples
+    # are 0.1 m apart and the check runs one sample past the stop, so a stop
+    # 0.3 m short of that room is clear and one 0.1 m past it is not.
+    gap = 3.0
+    plan = hold_plan(gap)
+    room = gap - LIMITS.opponent_long_uncertainty - LIMITS.long_margin
+
+    def speed_for(stop):
+        r, b = LIMITS.response, LIMITS.brake
+        return -b * r + math.sqrt((b * r) ** 2 + 2 * b * stop)
+    assert pp.fallback_clear(plan, speed_for(room - 0.3), STOPPED, LINE, LIMITS)
+    assert not pp.fallback_clear(plan, speed_for(room + 0.1), STOPPED, LINE, LIMITS)
+
+
+def test_beside_the_box_the_body_needs_the_car_margin_on_top_of_both_half_widths():
+    # Held still beside a stopped car (overlapping it along the line), the
+    # box's half-width at its saturated reach sets the lateral threshold:
+    # car half-width + box half-width + car_margin (closed form below).
+    reach = float(pp.reach_long(math.inf, STOPPED.speed_bound, LIMITS))
+    half = (LIMITS.opponent_width / 2 + LIMITS.opponent_lateral_uncertainty
+            + math.sin(LIMITS.opponent_heading) * reach)
+    threshold = LIMITS.width / 2 + half + LIMITS.car_margin
+    beside = pp.StalledOpponent(rear_arc=7.0, lateral=0.0, speed_bound=1.0, age=0.0)
+
+    def clear_at(offset):
+        plan = pp.plan_hold(LINE, (7.0, offset, 0.0), 0.0, corridor(1.5), LIMITS)
+        return pp.fallback_clear(plan, 0.0, beside, LINE, LIMITS)
+    assert clear_at(threshold + 0.03)
+    assert not clear_at(threshold - 0.06)
+
+
+def test_a_car_closing_from_behind_is_checked_against_the_stopped_pose_forever():
+    # Ego ahead, stopping from 0.5 m/s; a car behind with a 2 m/s bound. Its
+    # reach while ego is still braking is reach(T_stop); afterwards it keeps
+    # coming to reach(inf) (it reacts, then brakes). Place it so ego's
+    # stopped rear is between the two: clear while moving, not once stopped.
+    v, bound = 0.5, 2.0
+    t_stop = LIMITS.response + v / LIMITS.brake
+    during = float(pp.reach_long(t_stop, bound, LIMITS))
+    final = float(pp.reach_long(math.inf, bound, LIMITS))
+    assert final - during > 0.15
+    s0 = 12.0
+    plan = pp.plan_hold(LINE, (s0, 0.0, 0.0), v, corridor(1.5), LIMITS)
+    last = float(plan.dist[plan.dist <= pp.stop_distance(v, LIMITS) + LIMITS.spacing][-1])
+    ego_rear = s0 + last + (LIMITS.wheelbase - LIMITS.length) / 2
+    front_now = ego_rear - LIMITS.long_margin - (during + final) / 2
+    rear = front_now - LIMITS.opponent_length - LIMITS.opponent_long_uncertainty
+    behind = pp.StalledOpponent(rear_arc=rear, lateral=0.0, speed_bound=bound, age=0.0)
+    assert not pp.fallback_clear(plan, v, behind, LINE, LIMITS)
+    further = pp.StalledOpponent(rear_arc=rear - (final - during), lateral=0.0, speed_bound=bound, age=0.0)
+    assert pp.fallback_clear(plan, v, further, LINE, LIMITS)
+
+
+def test_the_stop_must_also_clear_the_walls():
+    plan = hold_plan(3.0, half_width=0.30)   # 0.30 - 0.155 body = 0.145 < margin + slack
+    assert not pp.fallback_clear(plan, 0.5, None, LINE, LIMITS)
+    assert pp.fallback_clear(hold_plan(3.0), 0.5, None, LINE, LIMITS)
+
+
+def test_fallback_refuses_missing_plan_and_bad_speeds():
+    plan = hold_plan(3.0)
+    assert not pp.fallback_clear(None, 1.0, STOPPED, LINE, LIMITS)
+    assert not pp.fallback_clear(plan, math.nan, STOPPED, LINE, LIMITS)
+    assert not pp.fallback_clear(plan, -0.1, STOPPED, LINE, LIMITS)
+
+
+def test_a_plan_shorter_than_the_stop_is_not_clear():
+    plan = hold_plan(3.0)
+    too_fast = math.sqrt(2 * LIMITS.brake * (plan.dist[-1] + 1.0))
+    assert not pp.fallback_clear(plan, too_fast, None, LINE, LIMITS)
+
+
+def test_safe_speed_is_none_when_even_the_current_speed_cannot_stop_clear():
+    plan = hold_plan(0.6)
+    assert pp.safe_speed(plan, STOPPED, LINE, LIMITS, 2.0) is None
+    assert pp.safe_speed(plan, STOPPED, LINE, LIMITS, -1.0) is None
+
+
+# --- Entry -----------------------------------------------------------------
+
+def test_a_wide_corridor_admits_a_pass_beside_the_whole_reachable_box():
+    plan, manoeuvre, cap, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, corridor(1.5), LIMITS)
+    assert plan is not None, why
+    worst = pp.StalledOpponent(10.0, 0.0, 1.0, LIMITS.max_unseen)
+    half = pp.opponent_box(worst, math.inf, LIMITS)[2]
+    expected = half + LIMITS.width / 2 + LIMITS.car_margin + 0.05
+    assert abs(plan.target) == pytest.approx(expected, abs=1e-9)
+    assert np.all(plan.wall >= LIMITS.wall_margin)
+    assert cap >= 0.3
+    # The shift back is planned beyond the stopped car's front.
+    assert manoeuvre.s_return > 10.0 + LIMITS.opponent_length
+
+
+def test_a_corridor_too_narrow_for_two_cars_refuses_with_the_wall_reason():
+    plan, _, _, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, corridor(1.1), LIMITS)
+    assert plan is None
+    assert 'left: wall' in why and 'right: wall' in why
+
+
+def test_a_car_whose_bound_the_pass_speed_cannot_outrun_is_not_passed():
+    # new_pass needs pass_speed - speed_bound > 0.2 m/s, or the unseen bound
+    # would never fall behind and the rejoin could never be authorised.
+    # (A wider max_offset isolates this gate from the offset gate.)
+    limits = pp.Limits(max_offset=2.0)
+    slow = pp.StalledOpponent(10.0, 0.0, limits.pass_speed - 0.25, 0.0)
+    fast = pp.StalledOpponent(10.0, 0.0, limits.pass_speed - 0.15, 0.0)
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, slow, limits, 1) is not None
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, fast, limits, 1) is None
+
+
+def test_a_car_beside_or_behind_is_not_a_pass_target():
+    behind = pp.StalledOpponent(4.0, 0.0, 1.0, 0.0)
+    assert pp.new_pass(LINE, pose_behind(2.0), 0.0, behind, LIMITS, 1) is None
+
+
+def test_a_pass_offset_beyond_max_offset_is_refused_on_that_side():
+    off_left = pp.StalledOpponent(10.0, 0.30, 1.0, 0.0)
+    assert pp.target_offset(off_left, 1, LIMITS) is None
+    assert pp.target_offset(off_left, -1, LIMITS) is not None

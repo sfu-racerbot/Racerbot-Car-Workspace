@@ -316,8 +316,11 @@ class PurePursuitNode(Node):
         # --- Opponent detection, tracking, and overtaking -- see
         # docs/racing-autonomy.md's "Racing against opponents" ---
         self.declare_parameter('enable_opponent_overtake', True)
-        self.declare_parameter('enable_local_pass_planner', False)
         self.declare_parameter('enable_opponent_following', False)
+        self.declare_parameter('enable_local_pass_planner', False)
+        self.declare_parameter('pass_stalled_speed', 0.5)
+        self.declare_parameter('pass_stalled_sec', 1.5)
+        self.declare_parameter('pass_standoff', 2.0)
         self.declare_parameter('following_brake', 3.0)
         self.declare_parameter('following_response_sec', 0.45)
         self.declare_parameter('following_reserve', 0.65)
@@ -547,14 +550,23 @@ class PurePursuitNode(Node):
         self.avoidance_speed = float(self.get_parameter('avoidance_speed').value)
 
         self.enable_opponent_overtake = bool(self.get_parameter('enable_opponent_overtake').value)
-        self.enable_local_pass_planner = bool(self.get_parameter('enable_local_pass_planner').value)
-        self._local_candidate = None
-        self._local_aborting = False
-        self._local_rejoining = False
-        self._local_zero = False
-        self._local_opponent = None
-        self._local_abort_event = ''
         self.enable_opponent_following = bool(self.get_parameter('enable_opponent_following').value)
+        # Stage 2: pass a stopped car (pass_planner.py). Needs following and
+        # LiDAR safety; never the legacy offset pass (enable_opponent_overtake).
+        self.enable_local_pass_planner = bool(self.get_parameter('enable_local_pass_planner').value)
+        self.pass_stalled_speed = float(self.get_parameter('pass_stalled_speed').value)
+        self.pass_stalled_sec = float(self.get_parameter('pass_stalled_sec').value)
+        self.pass_standoff = float(self.get_parameter('pass_standoff').value)
+        if not (math.isfinite(self.pass_standoff) and self.following_reserve <= self.pass_standoff <= 4.0):
+            raise ValueError('pass_standoff must be between following_reserve and 4 m')
+        if not (math.isfinite(self.pass_stalled_speed) and 0 <= self.pass_stalled_speed <= 1.0
+                and math.isfinite(self.pass_stalled_sec) and self.pass_stalled_sec >= 0.5):
+            raise ValueError('pass_stalled_speed must be in [0, 1] m/s and pass_stalled_sec >= 0.5 s')
+        if self.enable_local_pass_planner and self.enable_opponent_overtake:
+            raise ValueError('enable_local_pass_planner replaces enable_opponent_overtake; enable one')
+        if self.enable_local_pass_planner and not self.enable_opponent_following:
+            raise ValueError('enable_local_pass_planner needs enable_opponent_following')
+        self._pass_reset_state()
         self.follow_speed_cap = None
         self._following_last_seen_ahead = True
         for name in ('following_brake', 'following_response_sec',
@@ -1664,13 +1676,8 @@ class PurePursuitNode(Node):
             steering_unclipped = racing_math.steering_from_curvature(kappa, self.wheelbase)
             steering_angle = float(np.clip(
                 steering_unclipped, -self.max_steering_angle, self.max_steering_angle))
-            if self.enable_local_pass_planner and (self.overtake_active or self._local_aborting):
-                # Ordinary recovery aims at the line: forbidden as an unchecked
-                # rejoin while alongside. Retain the watchdog and stop instead.
-                self._local_abort_event = 'zero_stop' if self.overtake_active else ''
-                self.overtake_active = False
-                self._local_aborting = self._local_zero = True
-                self._local_candidate = None
+            if self.enable_local_pass_planner and self._pass_state != 'idle':
+                # Aiming at the line beside a car is an unchecked rejoin: stop.
                 steering_angle = steering_unclipped = self.steering_basis
         else:
             tracking_input = tracking_laws.TrackingInput(
@@ -1678,10 +1685,15 @@ class PurePursuitNode(Node):
                 speed=lookahead_speed, nearest_idx=nearest_idx,
                 previous_steering=self.steering_basis)
             try:
-                # Planner mode evaluates the law once, AFTER choosing a path.
-                # Advancing delay_lqr twice would corrupt its transport history.
-                result = (tracking_laws.SteeringResult(self.steering_basis, self.steering_basis, '')
-                          if self.enable_local_pass_planner else self._steer_with_miss_policy(tracking_input))
+                if self.enable_local_pass_planner and self._pass_hold_steering:
+                    result = tracking_laws.SteeringResult(
+                        self.steering_basis, self.steering_basis,
+                        'pass planner: no checked braking path, holding steering')
+                elif self.enable_local_pass_planner and self._pass_plan is not None:
+                    result = self._steer_with_miss_policy(
+                        self._pass_tracking_input(tracking_input), path=self._pass_plan.context)
+                else:
+                    result = self._steer_with_miss_policy(tracking_input)
             except _MpcStopped:
                 return  # the latch already stopped the car this tick
             except Exception as exc:  # noqa: BLE001 -- a crashing law must stop, not hang
@@ -1728,7 +1740,9 @@ class PurePursuitNode(Node):
         # significantly off it would fight the recovery aim point instead
         # of helping reach it. ---
         self.follow_speed_cap = None
-        if recovering and self.enable_local_pass_planner and self._local_aborting:
+        if recovering and self.enable_local_pass_planner and self._pass_state != 'idle':
+            self._pass_enter_abort('off the racing line mid-pass')
+            self._pass_plan, self._pass_hold_steering = None, True
             self.follow_speed_cap = 0.0
         if not recovering and self.enable_lidar_safety and (
                 self.enable_opponent_overtake or self.enable_opponent_following):
@@ -1745,13 +1759,6 @@ class PurePursuitNode(Node):
                 steering_angle = float(np.clip(steering_angle, -self.max_steering_angle, self.max_steering_angle))
                 decision_state = (
                     'overtake_left' if self.overtake_side > 0 else 'overtake_right')
-
-        if self.enable_local_pass_planner and not recovering:
-            result = self._local_pass_steering(tracking_input)
-            steering_angle, steering_unclipped = result.steering, result.unclipped
-            law_detail = result.detail
-            if self._local_candidate is not None or self._local_zero:
-                decision_state = 'local_pass_' + ('zero_stop' if self._local_zero else self._local_candidate.mode)
 
         clipped_text = (
             f", steering clipped from {steering_unclipped:+.3f}rad"
@@ -2569,7 +2576,7 @@ class PurePursuitNode(Node):
             return None
         # Following needs the car through bends, not just the +/-30 degree
         # avoidance cone. Confirmation/wall rejection remain unchanged.
-        if self.overtake_active or (self.enable_local_pass_planner and self._local_aborting):
+        if self.overtake_active:
             # Completion needs an actual sighting alongside/behind. Use only
             # the scan's available coverage; never invent a rear observation.
             half_fov = max(abs(scan.angle_min), abs(scan.angle_max))
@@ -2737,7 +2744,7 @@ class PurePursuitNode(Node):
                     self.follow_speed_cap = min(self.follow_speed_cap, cap)
             self.last_opponent_status += f'; following cap={self.follow_speed_cap:.2f}m/s'
         if self.enable_local_pass_planner:
-            self._local_pass_update(nearest_idx, now_sec, measured_arc, confirmed_point, allow_pass)
+            self._local_pass_update(nearest_idx, now_sec, confirmed_point)
             return None
         if not allow_pass:
             self.overtake_active = False
@@ -2907,154 +2914,245 @@ class PurePursuitNode(Node):
         return racing_math.lateral_offset_point(
             self.xy, overtake_idx, next_idx, self.overtake_side * self.overtake_lateral_offset)
 
-    def _local_pass_limits(self):
+    # --- Stage 2: passing a stopped car. The geometry and the safety check
+    # live in pass_planner.py (ROS-free); this is only the state machine.
+    # States: idle (stage-1 following decides) -> pass -> return -> idle, and
+    # abort from either. Abort brakes to zero on a checked path in this order
+    # (tech lead, 2026-11-08): hold the current lane; else a checked rejoin;
+    # else hold the steering. The opponent track is never reset. ---
+
+    def _pass_reset_state(self):
+        self._pass_state = 'idle'
+        self._pass_plan = None
+        self._pass_hold_steering = False
+        self._pass_branch = ''
+        self._pass_manoeuvre = None
+        self._pass_started = 0.0
+        self._pass_retry_after = 0.0
+        self._stall_since = None
+        self._stall_anchor = None
+        self._stall_seen = None
+        self._stall_moved = False
+        self._stall_history = []
+        self._stall_speed = 0.0
+        self._pass_line = None
+
+    def _pass_limits(self):
         return pass_planner.Limits(
             wheelbase=self.wheelbase, length=self.car_length, width=self.car_width,
-            steering=self.max_steering_angle, steering_rate=self.max_steering_rate,
-            lateral_accel=self.max_lateral_accel, brake=self.following_brake,
-            response=self.following_response_sec,
-            opponent_uncertainty=self.overtake_measurement_uncertainty,
-            opponent_speed_uncertainty=self.following_speed_uncertainty,
-            opponent_max_speed=self.opponent_gate.max_speed)
+            steering=self.max_steering_angle, lateral_accel=self.max_lateral_accel,
+            brake=self.following_brake, response=self.following_response_sec,
+            max_offset=min(0.85, self.max_cross_track_error - 0.15),
+            clear_margin=self.overtake_clear_margin)
 
-    def _local_pass_candidate(self, nearest_idx, *, braking=False, rejoin=False):
+    def _pass_line_frame(self):
+        if self._pass_line is None or self._pass_line[0] is not self.xy:
+            self._pass_line = (self.xy, pass_planner.Line(self.xy, self.speed_profile))
+        return self._pass_line[1]
+
+    def _pass_walls(self):
         walls = self.opponent_wall_distance
-        if walls is None or self._local_opponent is None or self.tracking_law.name != 'delay_lqr':
+        if walls is None:
             return None
-        cfg = self._local_pass_limits()
-        speed = abs(self.current_speed) if self._odom_fresh() else self.max_speed
-        opponent = pass_planner.Opponent(
-            self.opponent.arc_length, self._local_opponent[0], self.opponent.progress_rate,
-            self.opponent.seconds_since_seen(self._now_sec()), self._local_opponent[1])
-        candidate = pass_planner.plan(
-            self.xy, self.cumulative_arc_length, (self.car_x, self.car_y, self.car_yaw),
-            speed, opponent, walls.at, limits=cfg,
-            side=self.overtake_side if self.overtake_active or self._local_aborting else 0,
-            rejoin=rejoin, braking=braking)
-        if candidate is None:
-            return None
-        inp = tracking_laws.TrackingInput(self.car_x, self.car_y, self.car_yaw, speed,
-                                          nearest_idx, self.steering_basis)
-        if not pass_planner.rollout_clear(candidate, self.tracking_law, inp, self.xy,
-                                         self.cumulative_arc_length, opponent, walls.at, cfg,
-                                         braking=braking):
-            return None
-        return candidate
+        many = getattr(walls, 'at_many', None)
+        if many is not None:
+            return many
+        return lambda xs, ys: np.array([walls.at(float(x), float(y)) for x, y in zip(xs, ys)])
 
-    def _local_pass_update(self, nearest_idx, now, measured_arc, point, allow_pass):
-        """Planner-only state machine. Legacy abort and tracker reset stay intact.
+    def _pass_tracking_input(self, inp):
+        path = self._pass_plan.context
+        nearest, _ = racing_math.find_nearest_index(path.xy, (inp.x, inp.y), closed=False)
+        return tracking_laws.TrackingInput(inp.x, inp.y, inp.yaw, inp.speed, nearest,
+                                           inp.previous_steering)
 
-        Aborts never forget the car. A rejected continuation is NOT permission
-        to steer at the original line. The follow cap is computed by the same
-        stage-1 code above, and is replaced only by an active checked path cap.
-        """
-        self._local_abort_event = ''
-        self._local_zero = False
-        self._local_candidate = None
-        if point is not None:
-            centre, _, normal = pass_planner.frame(self.xy, self.cumulative_arc_length, measured_arc)
-            lateral = float(np.dot(np.asarray(point) - centre, normal))
-            previous = self._local_opponent
-            rate = 0.0
-            if previous is not None and now > previous[2]:
-                rate = (lateral - previous[0]) / (now - previous[2])
-            self._local_opponent = (lateral, rate, now)
-        if not self.enable_opponent_following or not self.enable_lidar_safety:
-            self._local_zero = True
-            self.follow_speed_cap = 0.0
-            return
-        if self.overtake_active:
-            lead = -math.inf if measured_arc is None else pass_completion.measured_body_lead(
-                following.project_arc(self.xy, self.cumulative_arc_length,
-                                      (self.car_x, self.car_y), nearest_idx),
-                measured_arc, self.total_track_length, self.car_length, self.wheelbase,
-                self.overtake_measurement_uncertainty)
-            if self._pass_completion.clear_margin != self.overtake_clear_margin:
-                self._pass_completion = pass_completion.CompletionGate(
-                    self.overtake_clear_margin, self.overtake_completion_hold_sec,
-                    self.overtake_completion_hysteresis)
-            self._local_rejoining |= self._pass_completion.observe(now, lead, measured_arc is not None)
-            predicted = self.opponent.predicted_arc_length(now, self.total_track_length)
-            progress_lead = racing_math.track_lead_distance(
-                float(self.cumulative_arc_length[nearest_idx]), predicted, self.total_track_length)
-            if progress_lead > self._overtake_best_lead + self.overtake_min_lead_gain:
-                self._overtake_best_lead, self._overtake_best_lead_sec = progress_lead, now
-            expired = (now - self._overtake_started_sec > self.overtake_max_duration_sec
-                       or now - self._overtake_best_lead_sec > self.overtake_stall_sec
-                       or self.opponent.seconds_since_seen(now) > self.overtake_max_blind_sec)
-            candidate = None if expired else self._local_pass_candidate(
-                nearest_idx, rejoin=self._local_rejoining)
-            if candidate is not None:
-                self._local_candidate = candidate
-                self.follow_speed_cap = candidate.speed_cap
-                if self._local_rejoining and abs(float(np.dot(
-                        np.array([self.car_x, self.car_y]) - self.xy[nearest_idx],
-                        pass_planner.frame(self.xy, self.cumulative_arc_length,
-                                           float(self.cumulative_arc_length[nearest_idx]))[2]))) < 0.1:
-                    self.overtake_active = False
-                    self._local_rejoining = False
-                    self.last_opponent_status = 'overtake complete: measured gate and checked rejoin'
-                return
-            self.overtake_active = False
-            self._local_aborting = True
-            self._local_rejoining = False
-            self._overtake_retry_after_sec = now + self.overtake_retry_sec
-            # Count only the transition, not every subsequent braking tick.
-            self._local_abort_event = 'pending'
-        if self._local_aborting:
-            candidate = self._local_pass_candidate(nearest_idx, braking=True)
-            branch = 'follow_brake'
-            if candidate is None:
-                candidate = self._local_pass_candidate(nearest_idx, braking=True, rejoin=True)
-                branch = 'checked_rejoin'
-            if candidate is None:
-                self._local_zero = True
-                branch = 'zero_stop'
-            self._local_candidate = candidate
-            # Brake immediately while the selected path controls the residual
-            # physical motion. This is stricter than the reinstated follow cap.
-            self.follow_speed_cap = min(0.0, self.follow_speed_cap or 0.0)
-            if self._local_abort_event:
-                self._local_abort_event = branch
-                self.last_opponent_status = f'overtake abandoned: planner {branch}'
-            if candidate is not None and candidate.mode == 'rejoin':
-                _, distance = racing_math.find_nearest_index(
-                    self.xy, (self.car_x, self.car_y), closed=self.closed_loop)
-                if distance < 0.1:
-                    self._local_aborting = False
-            return
-        if not allow_pass or point is None or now < self._overtake_retry_after_sec:
-            return
-        gap = racing_math.track_progress_gap(float(self.cumulative_arc_length[nearest_idx]),
-                                             self.opponent.arc_length, self.total_track_length)
-        if (gap > self.overtake_trigger_gap
-                or self.speed_profile[nearest_idx] - self.opponent.progress_rate <= self.overtake_closing_margin):
-            return
-        candidate = self._local_pass_candidate(nearest_idx)
-        if candidate is None:
-            self.last_opponent_status += '; local pass declined: no swept-clear candidate'
-            return
-        self._local_candidate = candidate
-        self.overtake_side = candidate.side
+    def _pass_enter_abort(self, why):
+        if self._pass_state != 'abort':
+            self.get_logger().warn(f'pass planner: overtake abandoned: {why}', throttle_duration_sec=1.0)
+            self.last_opponent_status = f'overtake abandoned: {why}'
+        self._pass_state = 'abort'
         self.overtake_active = True
-        self._local_rejoining = False
-        self._overtake_started_sec = self._overtake_best_lead_sec = now
-        self._overtake_best_lead = -gap
-        self._pass_completion = pass_completion.CompletionGate(
-            self.overtake_clear_margin, self.overtake_completion_hold_sec,
-            self.overtake_completion_hysteresis)
-        self.follow_speed_cap = candidate.speed_cap
-        self.last_opponent_status = 'overtake active: local swept-clear path'
 
-    def _local_pass_steering(self, inp):
-        if self._local_zero:
-            return tracking_laws.SteeringResult(self.steering_basis, self.steering_basis,
-                                                'no checked braking path; hold current steering')
-        path = self.path_context if self._local_candidate is None else self._local_candidate.path
-        nearest, _ = racing_math.find_nearest_index(path.xy, (inp.x, inp.y), closed=path.closed)
-        local_input = tracking_laws.TrackingInput(inp.x, inp.y, inp.yaw, inp.speed,
-                                                  nearest, inp.previous_steering)
-        return self.tracking_law.steer(local_input, path)
+    def _pass_opponent(self, now):
+        rear, lateral = self._stall_anchor
+        extra = self.car_length if self._stall_moved else 0.0
+        # The stall speed was averaged over pass_stalled_sec from behind; once
+        # alongside, the centroid slides along the car's side and the
+        # tracker's rate is no longer its speed. A car that moved is judged
+        # by the tracker again.
+        speed = self.opponent.progress_rate if self._stall_moved else self._stall_speed
+        bound = max(0.0, speed) + self.following_speed_uncertainty
+        return pass_planner.StalledOpponent(rear - extra, lateral, bound,
+                                            max(0.0, now - self._stall_seen), extra)
+
+    def _local_pass_update(self, nearest_idx, now, point):
+        """One tick of the stopped-car pass. Sets follow_speed_cap only to a checked bound."""
+        self._pass_branch = ''
+        walls = self._pass_walls()
+        if walls is None or self.tracking_law.name != 'delay_lqr' or not self.closed_loop:
+            if self._pass_state != 'idle':
+                self._pass_enter_abort('no wall map or no delay_lqr')
+                self._pass_plan, self._pass_hold_steering = None, True
+                self.follow_speed_cap = 0.0
+            return
+        line = self._pass_line_frame()
+        limits = self._pass_limits()
+        pose = (self.car_x, self.car_y, self.car_yaw)
+        speed = abs(self.current_speed) if self._odom_fresh() else self.max_speed
+        s_ego, d_ego = line.frenet(self.car_x, self.car_y, hint=nearest_idx)
+        if not (math.isfinite(s_ego) and math.isfinite(speed)):
+            return
+
+        if point is not None:
+            s_o, d_o = line.frenet(point[0], point[1])
+            if self._pass_state == 'idle' and math.isfinite(s_o):
+                # Stopped = its AVERAGE progress over pass_stalled_sec is at
+                # most pass_stalled_speed (a centroid's tick-to-tick jitter
+                # is not motion). From behind, the centroid is the rear face.
+                history = [h for h in self._stall_history if now - h[0] <= self.pass_stalled_sec + 0.5]
+                history.append((now, s_o, d_o))
+                self._stall_history = history
+                old = [h for h in history if now - h[0] >= self.pass_stalled_sec]
+                if old:
+                    t0, s0_, _ = old[-1]
+                    self._stall_speed = line.wrap(s_o - s0_) / (now - t0)
+                    if self._stall_speed <= self.pass_stalled_speed:
+                        recent = [h for h in history if now - h[0] <= 0.3]
+                        rear = s_o + float(np.mean([line.wrap(h[1] - s_o) for h in recent]))
+                        lateral = float(np.mean([h[2] for h in recent]))
+                        self._stall_anchor = (rear % line.total, lateral)
+                        self._stall_seen, self._stall_moved = now, False
+                        if self._stall_since is None:
+                            self._stall_since = t0
+                    else:
+                        self._stall_since = self._stall_anchor = None
+            elif self._stall_anchor is not None and math.isfinite(s_o):
+                rear, lateral = self._stall_anchor
+                rel = line.wrap(s_o - rear)
+                if (-0.25 <= rel <= limits.opponent_length + 0.25
+                        and abs(d_o - lateral) <= limits.opponent_width / 2 + 0.25):
+                    self._stall_seen = now
+                else:
+                    # It moved: anchor on the new sighting, whatever face it is.
+                    self._stall_anchor, self._stall_seen, self._stall_moved = (s_o, d_o), now, True
+
+        state = self._pass_state
+        if state == 'idle':
+            self._pass_plan, self._pass_hold_steering = None, False
+            self.overtake_active = False
+            history = self._stall_history
+            if (len(history) >= 2 and now - history[-1][0] <= 0.1
+                    and history[-1][0] - history[0][0] >= 0.3 and self.follow_speed_cap is not None):
+                # Looks stopped (averaged so far): stop further back than plain
+                # following would, so a pass can still steer out around it.
+                moved = line.wrap(history[-1][1] - history[0][1]) / (history[-1][0] - history[0][0])
+                if moved <= self.pass_stalled_speed:
+                    front = s_ego + (self.wheelbase + self.car_length) / 2
+                    gap = line.wrap(history[-1][1] - front)
+                    if 0.0 < gap <= self.opponent_engagement_range:
+                        cap = following.speed_ceiling(
+                            gap, 0.0, 0.0, brake=self.following_brake, delay=self.following_response_sec,
+                            reserve=self.pass_standoff, speed_uncertainty=self.following_speed_uncertainty,
+                            stop_speed=self.following_stop_speed)
+                        self.follow_speed_cap = min(self.follow_speed_cap, cap)
+            if (self._stall_since is None or now - self._stall_since < self.pass_stalled_sec
+                    or point is None or now < self._pass_retry_after):
+                return
+            opponent = self._pass_opponent(now)
+            front = s_ego + (self.wheelbase + self.car_length) / 2
+            gap = line.wrap(opponent.rear_arc - front)
+            if not 0.0 < gap <= self.overtake_trigger_gap:
+                self.last_opponent_status += f'; stopped car {gap:.2f}m ahead: outside the pass window'
+                return
+            plan, manoeuvre, cap, why = pass_planner.entry(line, pose, speed, opponent, walls, limits)
+            if plan is None:
+                self.last_opponent_status += f'; stopped car ahead, no checked pass ({why})'
+                return
+            self._pass_state, self._pass_plan, self._pass_manoeuvre = 'pass', plan, manoeuvre
+            self._pass_started = now
+            self.overtake_active = True
+            self.follow_speed_cap = cap
+            self.last_opponent_status = (
+                f"overtake active: passing a stopped car on the {'left' if plan.side > 0 else 'right'}, "
+                f"checked stop at {cap:.2f}m/s")
+            return
+
+        opponent = self._pass_opponent(now)
+        ego_rear = s_ego + (self.wheelbase - self.car_length) / 2
+        if state == 'pass':
+            lead = pass_planner.worst_case_lead(ego_rear, opponent, line, limits)
+            if lead >= limits.clear_margin:
+                state = self._pass_state = 'return'
+                self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
+                self.last_opponent_status = (
+                    f'overtake rejoining: worst-case body lead {lead:.2f}m '
+                    f'(seen {opponent.age:.2f}s ago at <= {opponent.speed_bound:.2f}m/s)')
+            elif now - self._pass_started > self.overtake_max_duration_sec:
+                self._pass_enter_abort(f'pass unfinished after {self.overtake_max_duration_sec:.1f}s')
+                state = 'abort'
+            else:
+                plan = pass_planner.manoeuvre_plan(line, pose, speed, self._pass_manoeuvre, walls, limits,
+                                                   mode='pass', hold=True)
+                cap = pass_planner.safe_speed(plan, opponent, line, limits, speed)
+                if cap is not None:
+                    self._pass_plan, self.follow_speed_cap = plan, cap
+                    self.overtake_active = True
+                    self.last_opponent_status = (
+                        f"overtake active: passing a stopped car on the "
+                        f"{'left' if plan.side > 0 else 'right'}, checked stop at {cap:.2f}m/s; "
+                        f"worst-case body lead {lead:.2f}m")
+                    return
+                self._pass_enter_abort('the pass path no longer has a checked stop')
+                state = 'abort'
+        if state == 'return':
+            m = self._pass_manoeuvre
+            plan = pass_planner.manoeuvre_plan(line, pose, speed, m, walls, limits, mode='return')
+            cap = pass_planner.safe_speed(plan, opponent, line, limits, speed)
+            if cap is None:
+                self._pass_enter_abort('the rejoin path no longer has a checked stop')
+                state = 'abort'
+            elif abs(d_ego) < 0.10 and line.wrap(s_ego - m.s_start) >= m.back / 2:
+                self.get_logger().info('pass planner: overtake complete', throttle_duration_sec=1.0)
+                self.last_opponent_status = 'overtake complete: rejoined on a checked path'
+                self._pass_reset_after(now)
+                return
+            else:
+                self._pass_plan, self.follow_speed_cap = plan, cap
+                self.overtake_active = True
+                self.last_opponent_status = f'overtake rejoining on a checked path at {cap:.2f}m/s'
+                return
+        # Abort: brake to zero on the first checked path, never forget the car.
+        self.overtake_active = True
+        self.follow_speed_cap = 0.0
+        hold = pass_planner.plan_hold(line, pose, speed, walls, limits)
+        rejoin = pass_planner.plan_return(line, pose, speed, walls, limits)
+        if pass_planner.fallback_clear(hold, speed, opponent, line, limits):
+            self._pass_plan, self._pass_hold_steering, self._pass_branch = hold, False, 'brake_in_lane'
+        elif pass_planner.fallback_clear(rejoin, speed, opponent, line, limits):
+            self._pass_plan, self._pass_hold_steering, self._pass_branch = rejoin, False, 'checked_rejoin'
+        else:
+            self._pass_plan, self._pass_hold_steering, self._pass_branch = None, True, 'zero_stop'
+        if speed < 0.2:
+            # Stopped: leave only on a checked path, rejoining or passing again.
+            cap = pass_planner.safe_speed(rejoin, opponent, line, limits, speed)
+            if cap is not None and cap >= 0.3:
+                self._pass_state, self._pass_plan, self._pass_hold_steering = 'return', rejoin, False
+                self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
+                self.follow_speed_cap = cap
+                return
+            if not self._stall_moved:
+                plan, manoeuvre, cap, _ = pass_planner.entry(line, pose, speed, opponent, walls, limits)
+                if plan is not None:
+                    self._pass_state, self._pass_plan, self._pass_hold_steering = 'pass', plan, False
+                    self._pass_manoeuvre, self._pass_started = manoeuvre, now
+                    self.follow_speed_cap = cap
+
+    def _pass_reset_after(self, now):
+        line = self._pass_line
+        self._pass_reset_state()
+        self._pass_line = line
+        self._pass_retry_after = now + self.overtake_retry_sec
+        self.overtake_active = False
+        self._stall_history = []
 
     def _now_sec(self) -> float:
         """The clock the opponent gate and pass timers read (tests step it)."""
@@ -3084,7 +3182,7 @@ class PurePursuitNode(Node):
         elapsed = (now - self.last_command_time).nanoseconds / 1e9
         return now, min(self.command_slew_max_dt, max(0.0, elapsed))
 
-    def _steer_with_miss_policy(self, tracking_input):
+    def _steer_with_miss_policy(self, tracking_input, path=None):
         """Run the active law, applying spec 04's MPC miss policy on top.
 
         Non-MPC laws, and any non-miss exception, propagate unchanged (the
@@ -3092,8 +3190,9 @@ class PurePursuitNode(Node):
         not yet latched falls back to pure pursuit for this tick only and sets
         decision state 'mpc_fallback'; one that latches raises _stop directly.
         """
+        path = self.path_context if path is None else path
         if self.steering_law_name not in tracking_laws.DEADLINE_LAWS:
-            return self.tracking_law.steer(tracking_input, self.path_context)
+            return self.tracking_law.steer(tracking_input, path)
         policy = self.tracking_law.miss_policy
         if policy.latched():
             self._stop('mpc_miss_latched',
@@ -3101,7 +3200,7 @@ class PurePursuitNode(Node):
             raise _MpcStopped()
         started = time.perf_counter()
         try:
-            result = self.tracking_law.steer(tracking_input, self.path_context)
+            result = self.tracking_law.steer(tracking_input, path)
         except tracking_laws.MpcMiss as exc:
             outcome = policy.on_miss()
             if outcome == 'latched':
@@ -3110,7 +3209,7 @@ class PurePursuitNode(Node):
                            f'row (last: {exc}); holding until LB is released')
                 raise _MpcStopped()
             # 'fallback': pure pursuit for this tick only, then resume.
-            result = self._mpc_fallback_law.steer(tracking_input, self.path_context)
+            result = self._mpc_fallback_law.steer(tracking_input, path)
             result = tracking_laws.SteeringResult(
                 steering=result.steering, unclipped=result.unclipped,
                 detail=f'mpc_fallback ({exc}); {result.detail}',

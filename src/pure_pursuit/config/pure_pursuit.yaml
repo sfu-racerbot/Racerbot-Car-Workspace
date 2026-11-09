@@ -323,9 +323,6 @@ pure_pursuit_node:
     # docs/racing-autonomy.md's "Racing against opponents" for the full
     # strategy. Requires enable_lidar_safety above to also be true. ---
     enable_opponent_overtake: true
-    # Experimental swept-path planner; requires following and delay_lqr.
-    # Car 2 remains disabled until the independent traffic matrix meets its gate.
-    enable_local_pass_planner: false
     enable_opponent_following: false  # car 2 enables the measured braking envelope
     following_brake: 3.0  # measured physical braking, NOT max_braking_decel command slew
     following_response_sec: 0.45  # 0.10 s transport + 1/7 s loop lag + sensing/tracking allowance
@@ -333,6 +330,13 @@ pure_pursuit_node:
     following_speed_uncertainty: 1.0  # m/s; lost sightings consume additional gap
     following_reacquire_speed: 0.25  # lost track only: crawl if current/commanded swept arcs allow a delayed stop
     following_stop_speed: 0.30  # command zero before the speed-loop's asymptotic tail consumes the standstill reserve
+    # Stage 2: pass a STOPPED car (pass_planner.py; docs/racing-autonomy.md,
+    # "Passing a stopped car"). Needs enable_opponent_following and replaces
+    # enable_opponent_overtake (the node refuses both on at once).
+    enable_local_pass_planner: false
+    pass_stalled_speed: 0.5  # m/s -- tracked at or below this...
+    pass_stalled_sec: 1.5    # ...for this long counts as stopped (crashed, stalled, crawling)
+    pass_standoff: 2.0       # m -- stop this far behind a car that looks stopped, so a pass can steer out
     opponent_min_width: 0.15          # meters -- narrower than this is noise/a thin post, not a car
     opponent_max_width: 0.7           # meters -- wider than this is treated as a wall, not a car
     opponent_cluster_gap: 0.3         # meters -- a range jump bigger than this splits one cluster into two

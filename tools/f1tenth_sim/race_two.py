@@ -33,7 +33,8 @@ METHODS = {
     '_footprint_clearance', '_forward_body_clearance', '_arc_clearance',
     '_dynamic_closest_in_cone', '_static_closest_in_cone',
     '_sanitized_window', '_emergency_escape',
-    '_local_pass_limits', '_local_pass_candidate', '_local_pass_update', '_local_pass_steering',
+    '_pass_reset_state', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
+    '_pass_enter_abort', '_pass_opponent', '_local_pass_update', '_pass_reset_after',
 }
 
 
@@ -89,9 +90,8 @@ class NodeDecisions(Decisions):
         self.recovery_since = None
         self.recovery_exhausted = False
         self.follow_speed_cap = None
-        self._local_candidate = self._local_opponent = None
-        self._local_aborting = self._local_rejoining = self._local_zero = False
-        self._local_abort_event = ''
+        self.current_speed = 0.0
+        self._pass_reset_state()
 
     def _odom_fresh(self):
         return math.isfinite(self.current_speed)
@@ -122,22 +122,20 @@ class NodeDecisions(Decisions):
     def base_command(self, follower, state, previous_steering):
         """Node control_step's bounded off-line recovery, before opponents/safety."""
         self.follow_speed_cap = None
-        self.tracking_law = follower.law
-        self.path_context = follower.path_context
         nearest, error = racing_math.find_nearest_index(
             self.xy, state[:2], closed=True, prev_index=follower.previous_index,
             search_window=self.nearest_search_window)
         if error > self.max_cross_track_error:
             nearest, error = racing_math.find_nearest_index(self.xy, state[:2], closed=True)
         recovering = error > self.max_cross_track_error
+        self.tracking_law = follower.law
+        if recovering and self.enable_local_pass_planner and self._pass_state != 'idle':
+            # Node: aiming at the line beside a car is an unchecked rejoin, so stop.
+            self._pass_enter_abort('off the racing line mid-pass')
+            self._pass_plan, self._pass_hold_steering = None, True
+            self.follow_speed_cap = 0.0
+            return previous_steering, 0.0, nearest, None, 'off_racing_line_recovery'
         if recovering:
-            if self.enable_local_pass_planner and (self.overtake_active or self._local_aborting):
-                self._local_abort_event = 'zero_stop' if self.overtake_active else ''
-                self.overtake_active = False
-                self._local_aborting = self._local_zero = True
-                self._local_candidate = None
-                self.follow_speed_cap = 0.0
-                return previous_steering, 0.0, nearest, None, 'off_racing_line'
             if self.recovery_since is None:
                 self.recovery_since = self.now
             if self.now - self.recovery_since > self.off_racing_line_recovery_timeout_sec:
@@ -151,10 +149,17 @@ class NodeDecisions(Decisions):
             return steering, speed, nearest, self.xy[nearest], 'off_racing_line_recovery'
         self.recovery_since, self.recovery_exhausted = None, False
         # The node advances its stateful law once, even if a pass
-        # subsequently replaces the steering target.
-        if self.enable_local_pass_planner:
-            steering, speed = previous_steering, float(self.speed_profile[nearest])
+        # subsequently replaces the steering target. A stage-2 pass plan (from
+        # the previous tick, as in the node) replaces the path the law tracks.
+        if self.enable_local_pass_planner and (self._pass_hold_steering or self._pass_plan is not None):
             follower.previous_index = nearest
+            speed = float(self.speed_profile[nearest])
+            if self._pass_hold_steering:
+                steering = previous_steering
+            else:
+                inp = tracking_laws.TrackingInput(float(state[0]), float(state[1]), float(state[4]),
+                                                  abs(float(state[3])), nearest, previous_steering)
+                steering = follower.law.steer(self._pass_tracking_input(inp), self._pass_plan.context).steering
         else:
             steering, speed, nearest, _, _ = follower.command(state, previous_steering=previous_steering)
         target = self._update_opponent_and_overtake(
@@ -162,10 +167,6 @@ class NodeDecisions(Decisions):
         if target is not None:
             steering, speed, nearest, _, _ = follower.command(
                 state, target_override=target, previous_steering=previous_steering)
-        if self.enable_local_pass_planner:
-            inp = tracking_laws.TrackingInput(self.car_x, self.car_y, self.car_yaw,
-                                              abs(self.current_speed), nearest, previous_steering)
-            steering = self._local_pass_steering(inp).steering
         return steering, speed, nearest, target, None
 
 
@@ -218,8 +219,8 @@ def race_metrics(rows, dt, length, laps):
             if finish[i] is None and row[key] >= required:
                 finish[i] = row['time']
     return dict(attempted=attempts, completed=completed, abandoned=abandoned,
-                abort_branches={branch: sum(r.get('abort_branch') == branch for r in rows)
-                                for branch in ('follow_brake', 'checked_rejoin', 'zero_stop')},
+                abort_branch_ticks={b: sum(r.get('abort_branch') == b for r in rows)
+                                    for b in ('brake_in_lane', 'checked_rejoin', 'zero_stop')},
                 declared_completed=sum(r['status'].startswith('overtake complete:') for r in rows),
                 active_at_end=was_active, stuck_s=round(stuck * dt, 3),
                 race_time_s=finish[0], opponent_race_time_s=finish[1],
@@ -227,6 +228,18 @@ def race_metrics(rows, dt, length, laps):
                 safety_ticks=dict(Counter(r['safety'] for r in rows)),
                 car_contact_ticks=sum(bool(r['car_contact']) for r in rows),
                 wall_contact_ticks=sum(bool(r['wall_contact']) for r in rows))
+
+
+def stall_progress(opponent, seed, length):
+    """A crashed/stalled car stops for good at one of six evenly spaced spots.
+
+    The spot is the opponent's own race distance at which it is commanded to
+    stop: 4 m (past the start) plus seed-indexed sixths of a lap, so a
+    six-seed run samples the whole course rather than wherever it got to.
+    """
+    if opponent != 'stalled':
+        return None
+    return 4.0 + length * ((seed - 12345) % 6) / 6
 
 
 def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0,
@@ -241,7 +254,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     if pass_lookahead is not None:
         params['overtake_lookahead_distance'] = pass_lookahead
     followers = [rv.PathFollower(plan, law_name='delay_lqr', car_id='rb2')]
-    factor = {'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'braking': 0.8, 'gap': 1.0, 'solo': 1.0}[opponent]
+    factor = {'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'braking': 0.8, 'gap': 1.0, 'solo': 1.0,
+              'stalled': 0.8}[opponent]
     opp_plan = rv.PathPlan(plan.xy, plan.seg_len, np.minimum(plan.speed * factor, 1.5) if opponent == 'blocker' else plan.speed * factor)
     followers.append(rv.PathFollower(opp_plan, law_name='delay_lqr', car_id='rb2'))
     shapers = [rv.CommandShaper('rb2', 5.0, 2.7) for _ in range(2)]
@@ -255,6 +269,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     obs, _ = plant.reset(poses[:count])
     progress = [Progress(plan, plant.truth(i)[:2]) for i in range(count)]
     actual_head = (progress[1].arc - progress[0].arc) % progress[0].length if count == 2 else 0
+    stall = stall_progress(opponent, seed, progress[0].length)
     scan_sim = plant.env.unwrapped.sim.scan_sims[0]
 
     def wall_at(x, y):
@@ -270,7 +285,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
             return plant.expected_scan(index)[indices]
         agent_params = dict(params)
         if i == 0 and pass_planner_enabled:
-            agent_params.update(enable_local_pass_planner=True, enable_opponent_overtake=True)
+            agent_params.update(enable_local_pass_planner=True, enable_opponent_overtake=False)
         decisions.append(NodeDecisions(plan if i == 0 else opp_plan, lidar, expected, wall_at, agent_params))
     rows = []
     try:
@@ -308,6 +323,9 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                     # then resumes. The real plant supplies its braking/lag.
                     if i == 1 and opponent == 'braking' and 6 <= now < 9:
                         speed, cap = 0.0, 0.0
+                    # A crashed/stalled car: stops for good.
+                    if i == 1 and stall is not None and progress[1].distance >= stall:
+                        speed, cap = 0.0, 0.0
                     steering, speed = shape.command(steering, speed, cap, measured_speed=state[3])
                 commands.append((steering, speed))
                 states.append(safety or base_state or 'none')
@@ -325,8 +343,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                              ego_x=float(plant.truth(0)[0]), ego_y=float(plant.truth(0)[1]),
                              opp_x=float(plant.truth(1)[0]) if count == 2 else None,
                              opp_y=float(plant.truth(1)[1]) if count == 2 else None,
-                              active=decisions[0].overtake_active, status=statuses[0], safety=states[0],
-                              abort_branch=decisions[0]._local_abort_event,
+                             active=decisions[0].overtake_active, status=statuses[0], safety=states[0],
+                             pass_state=decisions[0]._pass_state, abort_branch=decisions[0]._pass_branch,
                              target=targets[0], desired_steering=desired[0],
                              follow_cap=decisions[0].follow_speed_cap,
                              tracked_arc=decisions[0].opponent.arc_length,
@@ -340,7 +358,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                                  decisions[0].last_scan, decisions[0].avoidance_fov_deg),
                              safety_detail=safety_details[0], car_contact=car_contact, wall_contact=wall_contact))
             if car_contact or wall_contact or (p[0] >= laps * progress[0].length
-                                               and (count == 1 or p[1] + actual_head >= laps * progress[0].length)):
+                                               and (count == 1 or stall is not None
+                                                    or p[1] + actual_head >= laps * progress[0].length)):
                 break
             if done:
                 raise RuntimeError('gym ended before independent race verdict')
@@ -369,7 +388,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--track', required=True)
     ap.add_argument('--line', required=True)
-    ap.add_argument('--opponent', choices=('map80', 'map90', 'gap', 'blocker', 'braking', 'solo'), required=True)
+    ap.add_argument('--opponent', choices=('map80', 'map90', 'gap', 'blocker', 'braking', 'solo', 'stalled'), required=True)
     ap.add_argument('--seeds', default='12345,12346,12347,12348,12349,12350')
     ap.add_argument('--head-start', type=float, default=3.0)
     ap.add_argument('--laps', type=int, default=4)
@@ -378,7 +397,8 @@ def main():
                     help='EXPERIMENT: override passing preview for both map cars, in metres')
     ap.add_argument('--cap-only', action='store_true',
                     help='EXPERIMENT: mapped pass cap can only lower the profile target')
-    ap.add_argument('--pass-planner', action='store_true', help='enable local passing on ego only')
+    ap.add_argument('--pass-planner', action='store_true',
+                    help='stage 2: ego passes stopped cars (enable_local_pass_planner)')
     ap.add_argument('--output', type=Path, required=True)
     args = ap.parse_args()
     if not math.isfinite(args.head_start) or not 2 <= args.head_start <= 4 or args.laps < 1 or not math.isfinite(args.timeout) or args.timeout <= 0:
@@ -389,7 +409,7 @@ def main():
     results = []
     for seed in map(int, args.seeds.split(',')):
         result, rows = run(args.track, args.line, args.opponent, seed, args.head_start, args.laps, args.timeout,
-                            args.pass_lookahead, args.cap_only, args.pass_planner)
+                           args.pass_lookahead, args.cap_only, args.pass_planner)
         with (args.output / f'{seed}.csv').open('w') as stream:
             writer = csv.DictWriter(stream, fieldnames=rows[0])
             writer.writeheader()
