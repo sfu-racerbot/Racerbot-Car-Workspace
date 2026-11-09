@@ -35,6 +35,7 @@ METHODS = {
     '_sanitized_window', '_emergency_escape',
     '_pass_reset_state', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
     '_pass_enter_abort', '_pass_opponent', '_local_pass_update', '_pass_reset_after',
+    '_following_reserve',
 }
 
 

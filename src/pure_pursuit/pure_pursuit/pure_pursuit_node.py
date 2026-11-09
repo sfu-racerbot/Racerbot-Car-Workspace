@@ -320,7 +320,7 @@ class PurePursuitNode(Node):
         self.declare_parameter('enable_local_pass_planner', False)
         self.declare_parameter('pass_stalled_speed', 0.5)
         self.declare_parameter('pass_stalled_sec', 1.5)
-        self.declare_parameter('pass_standoff', 2.0)
+        self.declare_parameter('pass_standoff', 2.5)
         self.declare_parameter('following_brake', 3.0)
         self.declare_parameter('following_response_sec', 0.45)
         self.declare_parameter('following_reserve', 0.65)
@@ -557,7 +557,8 @@ class PurePursuitNode(Node):
         self.pass_stalled_speed = float(self.get_parameter('pass_stalled_speed').value)
         self.pass_stalled_sec = float(self.get_parameter('pass_stalled_sec').value)
         self.pass_standoff = float(self.get_parameter('pass_standoff').value)
-        if not (math.isfinite(self.pass_standoff) and self.following_reserve <= self.pass_standoff <= 4.0):
+        reserve = float(self.get_parameter('following_reserve').value)
+        if not (math.isfinite(self.pass_standoff) and reserve <= self.pass_standoff <= 4.0):
             raise ValueError('pass_standoff must be between following_reserve and 4 m')
         if not (math.isfinite(self.pass_stalled_speed) and 0 <= self.pass_stalled_speed <= 1.0
                 and math.isfinite(self.pass_stalled_sec) and self.pass_stalled_sec >= 0.5):
@@ -2480,7 +2481,7 @@ class PurePursuitNode(Node):
             cap = following.speed_ceiling(
                 closest + self.laser_offset_x - (self.car_length + self.wheelbase) / 2,
                 0.0, 0.0, brake=self.following_brake, delay=self.following_response_sec,
-                reserve=self.following_reserve, speed_uncertainty=self.following_speed_uncertainty,
+                reserve=self._following_reserve(), speed_uncertainty=self.following_speed_uncertainty,
                 stop_speed=self.following_stop_speed)
             return None, cap, None, f"unconfirmed traffic: retain line steering, brake cap={cap:.2f}m/s"
         if closest >= trigger_distance:
@@ -2705,7 +2706,7 @@ class PurePursuitNode(Node):
             self.follow_speed_cap = following.speed_ceiling(
                 gap - (self.car_length / 2 + self.wheelbase / 2),
                 self.opponent.progress_rate, age, brake=self.following_brake,
-                delay=self.following_response_sec, reserve=self.following_reserve,
+                delay=self.following_response_sec, reserve=self._following_reserve(),
                 speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed,
                 speed_credit=credit, opponent_brake=self.following_brake)
             if (age > self.opponent_lost_timeout_sec and self.last_scan is not None
@@ -2738,7 +2739,7 @@ class PurePursuitNode(Node):
                     cap = following.speed_ceiling(
                         raw_gap + self.laser_offset_x - (self.car_length + self.wheelbase) / 2,
                         self.opponent.progress_rate, 0.0, brake=self.following_brake,
-                        delay=self.following_response_sec, reserve=self.following_reserve,
+                        delay=self.following_response_sec, reserve=self._following_reserve(),
                         speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed,
                         speed_credit=credit, opponent_brake=self.following_brake)
                     self.follow_speed_cap = min(self.follow_speed_cap, cap)
@@ -2937,6 +2938,17 @@ class PurePursuitNode(Node):
         self._stall_speed = 0.0
         self._pass_line = None
 
+    def _following_reserve(self):
+        """Stage-1 following reserve; with the planner on, the pass standoff.
+
+        Following every car pass_standoff back means a car that stops dead is
+        always left with room to steer out round it: the envelope can stop
+        that far behind wherever a braking leader could stop. Off: unchanged.
+        """
+        if self.enable_local_pass_planner:
+            return max(self.following_reserve, self.pass_standoff)
+        return self.following_reserve
+
     def _pass_limits(self):
         return pass_planner.Limits(
             wheelbase=self.wheelbase, length=self.car_length, width=self.car_width,
@@ -3039,21 +3051,6 @@ class PurePursuitNode(Node):
         if state == 'idle':
             self._pass_plan, self._pass_hold_steering = None, False
             self.overtake_active = False
-            history = self._stall_history
-            if (len(history) >= 2 and now - history[-1][0] <= 0.1
-                    and history[-1][0] - history[0][0] >= 0.3 and self.follow_speed_cap is not None):
-                # Looks stopped (averaged so far): stop further back than plain
-                # following would, so a pass can still steer out around it.
-                moved = line.wrap(history[-1][1] - history[0][1]) / (history[-1][0] - history[0][0])
-                if moved <= self.pass_stalled_speed:
-                    front = s_ego + (self.wheelbase + self.car_length) / 2
-                    gap = line.wrap(history[-1][1] - front)
-                    if 0.0 < gap <= self.opponent_engagement_range:
-                        cap = following.speed_ceiling(
-                            gap, 0.0, 0.0, brake=self.following_brake, delay=self.following_response_sec,
-                            reserve=self.pass_standoff, speed_uncertainty=self.following_speed_uncertainty,
-                            stop_speed=self.following_stop_speed)
-                        self.follow_speed_cap = min(self.follow_speed_cap, cap)
             if (self._stall_since is None or now - self._stall_since < self.pass_stalled_sec
                     or point is None or now < self._pass_retry_after):
                 return
@@ -3101,14 +3098,16 @@ class PurePursuitNode(Node):
                         f"{'left' if plan.side > 0 else 'right'}, checked stop at {cap:.2f}m/s; "
                         f"worst-case body lead {lead:.2f}m")
                     return
-                self._pass_enter_abort('the pass path no longer has a checked stop')
+                self._pass_enter_abort('the pass path no longer has a checked stop: ' + pass_planner.explain(
+                    plan, speed, opponent, line, limits))
                 state = 'abort'
         if state == 'return':
             m = self._pass_manoeuvre
             plan = pass_planner.manoeuvre_plan(line, pose, speed, m, walls, limits, mode='return')
             cap = pass_planner.safe_speed(plan, opponent, line, limits, speed)
             if cap is None:
-                self._pass_enter_abort('the rejoin path no longer has a checked stop')
+                self._pass_enter_abort('the rejoin path no longer has a checked stop: ' + pass_planner.explain(
+                    plan, speed, opponent, line, limits))
                 state = 'abort'
             elif abs(d_ego) < 0.10 and line.wrap(s_ego - m.s_start) >= m.back / 2:
                 self.get_logger().info('pass planner: overtake complete', throttle_duration_sec=1.0)

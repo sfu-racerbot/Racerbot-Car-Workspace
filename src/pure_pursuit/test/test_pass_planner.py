@@ -254,3 +254,68 @@ def test_a_pass_offset_beyond_max_offset_is_refused_on_that_side():
     off_left = pp.StalledOpponent(10.0, 0.30, 1.0, 0.0)
     assert pp.target_offset(off_left, 1, LIMITS) is None
     assert pp.target_offset(off_left, -1, LIMITS) is not None
+
+
+def test_a_shift_to_the_right_curves_right_then_left_in_the_laws_signed_convention():
+    # The tracking laws feed path curvature forward, signed + left / - right.
+    # Oracle: a quintic shift towards -d on a straight has d'' < 0 over its
+    # first half and > 0 over its second (d''(t) ~ 60t - 180t^2 + 120t^3).
+    shift = pp.Manoeuvre(5.0, 0.0, -0.6, 3.0, math.inf, 3.0, -1)
+    plan = pp.manoeuvre_plan(LINE, (5.0, 0.0, 0.0), 1.0, shift, corridor(1.5), LIMITS,
+                             mode='pass', hold=True)
+    curvature = plan.context.curvature
+    first = curvature[(plan.dist > 0.3) & (plan.dist < 1.2)]
+    second = curvature[(plan.dist > 1.8) & (plan.dist < 2.7)]
+    assert first.size and second.size
+    assert np.all(first < 0) and np.all(second > 0)
+
+
+def test_a_pass_that_cannot_get_wide_before_reaching_the_car_is_refused_though_it_can_stop_now():
+    # 1.0 m behind: a stop from standstill is trivially clear, but a 2.1 m
+    # shift has the body only ~0.1 m across by the time its front reaches the
+    # box (0.55 m of room), so crawling the pass would lose the checked stop.
+    m = pp.new_pass(LINE, pose_behind(1.0), 0.0, STOPPED, LIMITS, -1)
+    plan = pp.manoeuvre_plan(LINE, pose_behind(1.0), 0.0, m, corridor(1.5), LIMITS,
+                             mode='pass', hold=True)
+    assert pp.fallback_clear(plan, 0.0, STOPPED, LINE, LIMITS)
+    assert not pp.progress_clear(plan, STOPPED, LINE, LIMITS)
+    plan, _, _, why = pp.entry(LINE, pose_behind(1.0), 0.0, STOPPED, corridor(1.5), LIMITS)
+    assert plan is None and 'crawl along the pass' in why
+    # From 2.0 m back the same pass can be crawled.
+    m = pp.new_pass(LINE, pose_behind(2.0), 0.0, STOPPED, LIMITS, -1)
+    plan = pp.manoeuvre_plan(LINE, pose_behind(2.0), 0.0, m, corridor(1.5), LIMITS,
+                             mode='pass', hold=True)
+    assert pp.progress_clear(plan, STOPPED, LINE, LIMITS)
+
+
+def test_a_stop_that_starts_later_meets_a_box_that_has_grown_since():
+    # Ego ahead at 2 m/s pulling away from a car (bound 1 m/s) whose reach,
+    # starting now, never closes the 0.2 m gap. Starting 5 s from now its
+    # reach has saturated (closed form) and covers ego's first sample.
+    v, s0 = 2.0, 12.0
+    plan = pp.plan_hold(LINE, (s0, 0.0, 0.0), v, corridor(1.5), LIMITS)
+    ego_rear = s0 + (LIMITS.wheelbase - LIMITS.length) / 2
+    front = ego_rear - LIMITS.long_margin - 0.2
+    rear = front - LIMITS.opponent_length - LIMITS.opponent_long_uncertainty
+    behind = pp.StalledOpponent(rear_arc=rear, lateral=0.0, speed_bound=1.0, age=0.0)
+    assert float(pp.reach_long(math.inf, 1.0, LIMITS)) > 0.2
+    assert pp.fallback_clear(plan, v, behind, LINE, LIMITS, t0=0.0)
+    assert not pp.fallback_clear(plan, v, behind, LINE, LIMITS, t0=5.0)
+
+
+def test_a_shift_from_standstill_peaks_at_80_percent_of_the_steering_curvature():
+    # Spec (shift_length docstring): from standstill the steering term sizes
+    # the shift so its quintic d'' peaks at 80% of tan(steering)/wheelbase.
+    # Oracle: the path's curvature there is d''/(1 + d'^2)^1.5, with d'' and
+    # d' of the quintic at t* = (3 - sqrt 3)/6 (closed forms below).
+    kmax = math.tan(LIMITS.steering) / LIMITS.wheelbase
+    delta, length = 0.6, pp.shift_length(0.6, 0.0, LIMITS)
+    shift = pp.Manoeuvre(5.0, 0.0, -delta, length, math.inf, 3.0, -1)
+    plan = pp.manoeuvre_plan(LINE, (5.0, 0.0, 0.0), 0.0, shift, corridor(1.5), LIMITS,
+                             mode='pass', hold=True)
+    t_star = (3 - math.sqrt(3)) / 6
+    d2 = 0.8 * kmax
+    assert 10 * math.sqrt(3) / 3 * delta / length ** 2 == pytest.approx(d2, rel=1e-9)
+    d1 = 30 * t_star ** 2 * (1 - t_star) ** 2 * delta / length
+    peak = float(np.max(np.abs(plan.context.curvature)))
+    assert peak == pytest.approx(d2 / (1 + d1 ** 2) ** 1.5, rel=0.03)   # 3 %: 0.1 m sampling

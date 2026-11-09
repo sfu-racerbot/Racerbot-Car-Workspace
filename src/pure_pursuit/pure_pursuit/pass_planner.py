@@ -115,7 +115,7 @@ class Line:
         vertex = seg_normal + np.roll(seg_normal, 1, 0)
         self.normal = vertex / np.linalg.norm(vertex, axis=1)[:, None]
         self.tangent = tangent
-        self.curvature = racing_math.estimate_path_curvature(xy, closed=True)
+        self.curvature = racing_math.estimate_signed_path_curvature(xy, closed=True)
 
     def _locate(self, s):
         s = np.asarray(s, float) % self.total
@@ -167,17 +167,21 @@ def smooth(t):
     return t ** 3 * (10 - 15 * t + 6 * t ** 2)
 
 
+QUINTIC_PEAK = 10 * math.sqrt(3) / 3   # max of the quintic smoothstep's second derivative
+
+
 def shift_length(delta_d, speed, limits):
     """Length of a quintic shift of delta_d.
 
     Its curvature peaks at 5.77*delta/L^2: keep v^2 times that inside
-    shift_accel, and the curvature itself inside half of what the steering
-    limit allows (the other half is left for the line's own bends).
+    shift_accel, and the curvature itself inside 80% of what the steering
+    limit allows. build() then refuses any path whose total curvature (the
+    line's own bend plus the shift) still needs more steering than the car has.
     """
-    curvature = 0.5 * math.tan(limits.steering) / limits.wheelbase
+    curvature = 0.8 * math.tan(limits.steering) / limits.wheelbase
     return max(limits.min_shift,
-               speed * math.sqrt(5.7735 * abs(delta_d) / limits.shift_accel),
-               math.sqrt(5.7735 * abs(delta_d) / curvature))
+               speed * math.sqrt(QUINTIC_PEAK * abs(delta_d) / limits.shift_accel),
+               math.sqrt(QUINTIC_PEAK * abs(delta_d) / curvature))
 
 
 def lateral_profile(s, d0, target, shift_out, s_return, shift_back):
@@ -208,7 +212,7 @@ def build(line, s0, d, mode, limits, walls, *, side=0, target=0.0):
     if np.any(step < 1e-6):
         return None
     seg = np.r_[step, step[-1]]
-    curvature = racing_math.estimate_path_curvature(xy, closed=False)
+    curvature = racing_math.estimate_signed_path_curvature(xy, closed=False)  # signed: the laws feed it forward
     if np.any(np.abs(np.arctan(limits.wheelbase * curvature)) > limits.steering):
         return None
     speed = np.minimum(line.sample(line.speed, s),
@@ -292,9 +296,13 @@ def _overlaps(plan, k, t, opponent, line, limits):
     return longitudinal and lateral
 
 
-def fallback_clear(plan, speed, opponent, line, limits):
-    """Can the car stop along this plan from `speed`, clear of walls and the opponent?"""
-    if plan is None or not math.isfinite(speed) or speed < 0:
+def fallback_clear(plan, speed, opponent, line, limits, t0=0.0):
+    """Can the car stop along this plan from `speed`, clear of walls and the opponent?
+
+    t0 is when the car is at the plan's first sample, seconds from now (the
+    opponent's reachable box keeps growing until then).
+    """
+    if plan is None or not math.isfinite(speed) or speed < 0 or not math.isfinite(t0) or t0 < 0:
         return False
     stop = stop_distance(speed, limits)
     reached = plan.dist <= stop + limits.spacing
@@ -304,14 +312,38 @@ def fallback_clear(plan, speed, opponent, line, limits):
         return False
     if opponent is None:
         return True
-    times = braking_times(plan.dist, speed, limits)
+    times = braking_times(plan.dist, speed, limits) + t0
     last = int(np.flatnonzero(reached)[-1])
     for k in np.flatnonzero(reached):
-        t = times[k] if math.isfinite(times[k]) else limits.response + speed / limits.brake
+        t = times[k] if math.isfinite(times[k]) else t0 + limits.response + speed / limits.brake
         if _overlaps(plan, k, t, opponent, line, limits):
             return False
     # The stopped car stays there; the opponent's reach saturates.
     return not _overlaps(plan, last, math.inf, opponent, line, limits)
+
+
+def _suffix(plan, k):
+    """The plan from sample k on, distances re-based (the tracked path is unchanged)."""
+    return Plan(plan.mode, plan.context, plan.s[k:], plan.d[k:], plan.heading[k:],
+                plan.dist[k:] - plan.dist[k], plan.wall[k:], plan.side, plan.target)
+
+
+def progress_clear(plan, opponent, line, limits, speed=0.6, every=3):
+    """Could the car crawl the whole plan at `speed`, able to stop clear from every point?
+
+    fallback_clear only proves the car can stop now. A pass that may start
+    must also be able to get somewhere: this checks the stop from each point
+    along the way, at the time the crawl would reach it.
+    """
+    if plan is None or speed <= 0:
+        return False
+    for k in range(0, len(plan.dist), every):
+        sub = _suffix(plan, k)
+        if sub.dist[-1] < stop_distance(speed, limits) + limits.spacing:
+            break
+        if not fallback_clear(sub, speed, opponent, line, limits, t0=float(plan.dist[k]) / speed):
+            return False
+    return True
 
 
 def safe_speed(plan, opponent, line, limits, current_speed, grid=0.25):
@@ -384,7 +416,9 @@ def new_pass(line, pose, speed, opponent, limits, side):
         return None    # it is beside or behind us: that is a return, not a pass
     if limits.pass_speed - opponent.speed_bound <= 0.2:
         return None    # the unseen bound would never fall behind
-    out = shift_length(target - d0, max(speed, limits.pass_speed), limits)
+    # Sized at the speed the car has now; the plan's speed profile then holds
+    # it to what that curvature allows (lateral_accel), so it cannot be run faster.
+    out = shift_length(target - d0, speed, limits)
     # Nominal: the front corner leaves the scan ~0.35 m before ego's rear
     # passes it; from there ego gains (v - speed_bound) on the unseen bound.
     rear_offset = (limits.wheelbase - limits.length) / 2
@@ -472,9 +506,34 @@ def entry(line, pose, speed, opponent, walls, limits):
         if v is None or v < 0.3:
             reasons.append(f'{name}: no checked stop at a crawl')
             continue
+        if not progress_clear(plan, opponent, line, limits):
+            reasons.append(f'{name}: a crawl along the pass would lose its checked stop')
+            continue
         score = float(nominal.wall.min())
         if best is None or score > best[0]:
             best = (score, plan, manoeuvre, v)
     if best is None:
         return None, None, None, '; '.join(reasons)
     return best[1], best[2], best[3], ''
+
+
+def explain(plan, speed, opponent, line, limits):
+    """Why fallback_clear refuses, for the decision log (empty when it is clear)."""
+    if plan is None:
+        return 'no steerable path'
+    stop = stop_distance(speed, limits)
+    if plan.dist[-1] < stop + limits.spacing:
+        return f'path {plan.dist[-1]:.1f}m shorter than the {stop:.1f}m stop'
+    reached = plan.dist <= stop + limits.spacing
+    walls = np.flatnonzero(reached & (plan.wall < limits.wall_margin))
+    if walls.size:
+        return f'wall {plan.wall[walls[0]]:.2f}m at {plan.dist[walls[0]]:.1f}m of the stop'
+    if opponent is not None:
+        times = braking_times(plan.dist, speed, limits)
+        for k in np.flatnonzero(reached):
+            t = times[k] if math.isfinite(times[k]) else limits.response + speed / limits.brake
+            if _overlaps(plan, k, t, opponent, line, limits):
+                return f'stopped car reachable at {plan.dist[k]:.1f}m (d={plan.d[k]:+.2f}, t={t:.2f}s)'
+        if _overlaps(plan, int(np.flatnonzero(reached)[-1]), math.inf, opponent, line, limits):
+            return 'stopped car reaches the stopped pose'
+    return ''

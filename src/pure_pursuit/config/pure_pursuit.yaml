@@ -336,7 +336,7 @@ pure_pursuit_node:
     enable_local_pass_planner: false
     pass_stalled_speed: 0.5  # m/s -- tracked at or below this...
     pass_stalled_sec: 1.5    # ...for this long counts as stopped (crashed, stalled, crawling)
-    pass_standoff: 2.0       # m -- stop this far behind a car that looks stopped, so a pass can steer out
+    pass_standoff: 2.5       # m -- stop this far behind a car that looks stopped, so a pass can steer out
     opponent_min_width: 0.15          # meters -- narrower than this is noise/a thin post, not a car
     opponent_max_width: 0.7           # meters -- wider than this is treated as a wall, not a car
     opponent_cluster_gap: 0.3         # meters -- a range jump bigger than this splits one cluster into two
