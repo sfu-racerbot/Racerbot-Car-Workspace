@@ -330,6 +330,14 @@ pure_pursuit_node:
     following_speed_uncertainty: 1.0  # m/s; lost sightings consume additional gap
     following_reacquire_speed: 0.25  # lost track only: crawl if current/commanded swept arcs allow a delayed stop
     following_stop_speed: 0.30  # command zero before the speed-loop's asymptotic tail consumes the standstill reserve
+    # Stage 2: racing passes round any slower car that physically fits
+    # (pass_planner.py; docs/racing-autonomy.md, "Passing: stage 2"). Needs
+    # enable_opponent_following and replaces enable_opponent_overtake (the
+    # node refuses both on at once).
+    enable_local_pass_planner: false
+    pass_speed_uncertainty: 0.5  # m/s added to the car's measured speed while it is out of sight
+    pass_clear_margin: 0.5   # m -- worst-case body lead before moving back across in front of it
+    pass_standoff: 2.5       # m -- planner on: follow this far back, so a car that stops dead can be passed
     opponent_min_width: 0.15          # meters -- narrower than this is noise/a thin post, not a car
     opponent_max_width: 0.7           # meters -- wider than this is treated as a wall, not a car
     opponent_cluster_gap: 0.3         # meters -- a range jump bigger than this splits one cluster into two

@@ -24,6 +24,8 @@ reads the scan directly and is not behind this gate, so an unconfirmed object is
 from dataclasses import dataclass
 import math
 
+import numpy as np
+
 
 @dataclass(frozen=True)
 class GateVerdict:
@@ -112,3 +114,12 @@ class WallDistance:
         if not (math.isfinite(x) and math.isfinite(y)):
             return 0.0
         return float(self._map.clearance_at([x], [y], self._field)[0])
+
+    def at_many(self, xs, ys):
+        """Vectorised at(): one clearance per point, 0.0 for any non-finite point."""
+        xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+        ok = np.isfinite(xs) & np.isfinite(ys)
+        out = np.zeros(xs.shape, float)
+        if np.any(ok):
+            out[ok] = np.asarray(self._map.clearance_at(xs[ok], ys[ok], self._field), float)
+        return out

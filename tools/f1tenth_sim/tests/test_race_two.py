@@ -318,3 +318,193 @@ def test_source_adapter_completes_only_on_persistent_measured_body_lead():
     assert d._update_opponent_and_overtake(105, allow_pass=True) is None
     assert not d.overtake_active
     assert d.last_opponent_status.startswith('overtake complete: measured body lead')
+
+
+# --- Stage 2: passing a stopped car (node's _local_pass_update bodies) ------
+
+def straight_stadium():
+    """30 m straights (y = 0 and y = 12), 6 m bends; 0.15 m stations."""
+    step, straight, radius = .15, 30.0, 6.0
+    pts = [(i * step, 0.0) for i in range(int(straight / step))]
+    m = int(math.pi * radius / step)
+    pts += [(straight + radius * math.cos(-math.pi / 2 + math.pi * i / m),
+             radius + radius * math.sin(-math.pi / 2 + math.pi * i / m)) for i in range(m)]
+    pts += [(straight - i * step, 2 * radius) for i in range(int(straight / step))]
+    pts += [(radius * math.cos(math.pi / 2 + math.pi * i / m),
+             radius + radius * math.sin(math.pi / 2 + math.pi * i / m)) for i in range(m)]
+    points = np.array(pts)
+    return race.rv.PathPlan(points, race.racing_math.compute_segment_lengths(points, closed=True),
+                            np.full(len(points), 4.0))
+
+
+def planner_decisions(walls):
+    """Planner on; `walls['at']` is swapped by tests (first straight: y = 0)."""
+    lidar = SimpleNamespace(angle_min=-3 * math.pi / 4, angle_increment=math.pi / 720, range_min=.05)
+    expected = lambda x, y, yaw, angles: np.full(len(angles), 10.0)
+    params = dict(race.rv._pure_pursuit_params('rb2'), enable_local_pass_planner=True,
+                  enable_opponent_overtake=False)
+    d = race.NodeDecisions(straight_stadium(), lidar, expected, lambda x, y: walls['at'](x, y), params)
+    d.tracking_law = SimpleNamespace(name='delay_lqr')
+    return d
+
+
+def stopped_car_scan(d, ego_x, car_rear_x):
+    """A stopped car's rear face dead ahead on the line (the first straight)."""
+    scan = np.full(1081, 10.0)
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    scan[np.abs(angles) < .08] = car_rear_x - (ego_x + d.laser_offset_x)
+    return scan
+
+
+def follow_stopped_car(d, ego_x=5.0, car_rear_x=7.5, until=1.8, speed=0.0):
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, (ego_x, 0.0), closed=True)
+    for now in np.arange(0, until, .025):
+        d.observe([ego_x, 0, 0, speed, 0], stopped_car_scan(d, ego_x, car_rear_x), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+    return nearest
+
+
+def test_pass_planner_needs_a_speed_from_behind_then_commits_on_a_checked_path():
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d = planner_decisions(walls)
+    follow_stopped_car(d, until=0.2)
+    # Node spec: confirmation (six sightings over 0.15 s) and then a speed
+    # measured from behind over at least 0.3 s, before any pass.
+    assert d._pass_state == 'idle' and not d.overtake_active and d._opp_speed is None
+    follow_stopped_car(d, until=0.8)
+    assert d._opp_speed == pytest.approx(0.0, abs=1e-6)   # m/s: it is not moving
+    assert d._pass_state == 'pass' and d.overtake_active
+    assert d._pass_plan.mode == 'pass'
+    # The pass replaces the stage-1 cap only with its own checked stop speed.
+    assert 0.3 <= d.follow_speed_cap <= float(np.max(d.speed_profile))
+    assert d.last_opponent_status.startswith('overtake active: passing on the')
+
+
+def test_pass_planner_never_commits_in_a_corridor_too_narrow_for_two_cars():
+    walls = dict(at=lambda x, y: 0.80 - abs(y))
+    d = planner_decisions(walls)
+    follow_stopped_car(d, until=3.0)
+    assert d._pass_state == 'idle' and not d.overtake_active
+    assert 'no checked pass' in d.last_opponent_status
+
+
+def started_pass(walls):
+    d = planner_decisions(walls)
+    nearest = follow_stopped_car(d, until=0.8)
+    assert d._pass_state == 'pass'
+    return d, nearest
+
+
+EGO_PAST = (10.5, -0.75)   # past the stopped car (rear 7.5 m), in the right-hand lane
+
+
+def abort_once(d, ego, now=1.9, speed=2.0):
+    d.overtake_max_duration_sec = 0.0          # forces the abort this tick
+    # Last sighting 1.05 s ago: past max_unseen, so no rejoin is authorised
+    # and the abort (not the return) is what this tick decides.
+    d._opp_seen = now - 1.05
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, ego, closed=True)
+    d.observe([ego[0], ego[1], 0, speed, 0], np.full(1081, 10.0), now, 0)
+    d._update_opponent_and_overtake(nearest)
+
+
+@pytest.mark.parametrize('branch, walls_at, plan_mode', [
+    # Lane held clear: brake in it.
+    ('brake_in_lane', lambda x, y: 1.5 - abs(y), 'hold'),
+    # The lane (y < -0.62) walled off from 1.9 m ahead: inside a 2 m/s stop
+    # (1.57 m + body) holding the lane, but a 2.9 m shift back has the body
+    # inside y > -0.55 by then (quintic: d(1.43 m) = -0.39 m).
+    ('checked_rejoin', lambda x, y: (0.05 if (x > EGO_PAST[0] + 1.9 and y < -0.62) else 1.5 - abs(y)),
+     'return'),
+    # Walled off ahead everywhere: no checked path, hold the steering.
+    ('zero_stop', lambda x, y: (0.0 if x > EGO_PAST[0] + 0.6 else 1.5 - abs(y)), None),
+])
+def test_an_abort_brakes_to_zero_on_the_first_checked_path_and_keeps_the_car(branch, walls_at, plan_mode):
+    # Approved order (2026-11-08): lane, then checked rejoin, then hold steering.
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    anchor, arc = d._opp_anchor, d.opponent.arc_length
+    walls['at'] = walls_at
+    abort_once(d, EGO_PAST)
+    assert d._pass_state == 'abort' and d.overtake_active
+    assert d._pass_branch == branch
+    assert d.follow_speed_cap == 0.0
+    assert (d._pass_plan.mode if d._pass_plan is not None else None) == plan_mode
+    assert d._pass_hold_steering is (branch == 'zero_stop')
+    # Never forget the car on an abort.
+    assert d._opp_anchor == anchor and d.opponent.arc_length == arc
+    assert d.last_opponent_status.startswith('overtake abandoned:')
+
+
+def test_no_rejoin_without_a_sighting_in_the_last_second_however_far_ahead():
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    # Far past the car (rear 7.5 m), offset in the passing lane, but the last
+    # consistent sighting is 1.2 s old: the approved bound needs <= 1.0 s.
+    ego_x = 14.0
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, (ego_x, -0.75), closed=True)
+    d._opp_seen = 0.6
+    d.observe([ego_x, -0.75, 0, 1.0, 0], np.full(1081, 10.0), 1.8, 0)
+    d._update_opponent_and_overtake(nearest)
+    assert d._pass_state != 'return'
+    # The same place with a fresh sighting is authorised.
+    d2, _ = started_pass(walls)
+    d2._opp_seen = 1.8
+    d2.observe([ego_x, -0.75, 0, 1.0, 0], np.full(1081, 10.0), 1.8, 0)
+    d2._update_opponent_and_overtake(nearest)
+    assert d2._pass_state == 'return'
+    assert d2.last_opponent_status.startswith('overtake rejoining')
+
+
+def test_no_pass_is_started_on_a_car_that_is_still_speeding_up():
+    # A race start: the car ahead pulls away at 2 m/s^2 from rest. Oracle:
+    # for constant acceleration the two half-window mean speeds differ by
+    # exactly a times the time between their midpoints, so the estimate is
+    # 2 m/s^2 > the 1.5 m/s^2 gate at every window length, and no pass may
+    # start on that stale speed.
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d = planner_decisions(walls)
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, (5.0, 0.0), closed=True)
+    for now in np.arange(0, 1.0, .025):
+        rear = 7.5 + 0.5 * 2.0 * float(now) ** 2
+        d.observe([5.0, 0, 0, 0.0, 0], stopped_car_scan(d, 5.0, rear), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+        assert d._pass_state == 'idle' and not d.overtake_active
+    assert d._opp_accelerating
+
+
+def test_mid_pass_a_lost_car_keeps_its_measured_speed_bound():
+    # Review 2026-11-08: losing sight must not turn its speed into zero.
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, nearest = started_pass(walls)
+    d._opp_speed = 1.0                       # as measured from behind
+    bound = d._pass_opponent(1.0).speed_bound
+    lost = 0.8 + d.opponent_lost_timeout_sec + 0.5
+    d.observe([5.0, -0.5, 0, 0.5, 0], np.full(1081, 10.0), lost, 0)
+    d._update_opponent_and_overtake(nearest)
+    assert d._opp_speed == 1.0
+    assert d._pass_opponent(lost).speed_bound == pytest.approx(bound, abs=1e-12)
+    # Idle (a corridor too narrow to pass in), a car reacquired after being
+    # lost starts a fresh speed estimate.
+    idle = planner_decisions(dict(at=lambda x, y: 0.80 - abs(y)))
+    follow_stopped_car(idle, until=0.5)
+    assert idle._opp_speed is not None
+    back = 0.5 + idle.opponent_lost_timeout_sec + 0.1
+    for now in np.arange(back, back + 0.2, 0.025):   # re-confirmed, under 0.3 s of history
+        idle.observe([5.0, 0, 0, 0.0, 0], stopped_car_scan(idle, 5.0, 7.5), float(now), 0)
+        idle._update_opponent_and_overtake(nearest)
+    assert idle._opp_speed is None and idle._pass_state == 'idle'
+
+
+def test_a_localization_jump_mid_pass_stops_like_the_node_and_keeps_the_pass_state():
+    # Node order: beyond off_racing_line_recovery_max_error the hard watchdog
+    # stop returns before the planner, so the planner state is untouched.
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d, _ = started_pass(walls)
+    follower = race.rv.PathFollower(straight_stadium(), law_name='delay_lqr', car_id='rb2')
+    # Beyond recovery range from the line AND from the pass path (~0.8 m off it).
+    far = [9.0, -(d.off_racing_line_recovery_max_error + 1.5), 0, 1.0, 0]
+    d.observe(far, np.full(1081, 10.0), 1.9, 0)
+    steering, speed, *_, state = d.base_command(follower, far, 0.1)
+    assert speed == 0.0 and state == 'off_racing_line'
+    assert d._pass_state == 'pass'
