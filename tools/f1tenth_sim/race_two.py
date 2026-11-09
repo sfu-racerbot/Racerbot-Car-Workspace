@@ -92,6 +92,7 @@ class NodeDecisions(Decisions):
         self.recovery_exhausted = False
         self.follow_speed_cap = None
         self.current_speed = 0.0
+        self.speed_profile = plan.speed
         self._pass_reset_state()
 
     def _odom_fresh(self):

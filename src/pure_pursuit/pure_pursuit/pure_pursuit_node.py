@@ -2952,11 +2952,17 @@ class PurePursuitNode(Node):
     def _following_reserve(self):
         """Stage-1 following reserve; with the planner on, the pass standoff.
 
-        Following every car pass_standoff back leaves room to steer out round
+        Following a slow car pass_standoff back leaves room to steer out round
         it, even if it stops dead: the envelope can stop that far behind
         wherever a braking leader could stop. Planner off: unchanged.
         """
-        if self.enable_local_pass_planner:
+        if (self.enable_local_pass_planner and self._opp_speed is not None and self.speed_profile is not None
+                and self._opp_speed < 0.5 * float(np.mean(self.speed_profile))):
+            # Only behind a car at under half our pace (stalled, crashed,
+            # crawling): further back costs nothing there, and room to steer
+            # out is the only way past it. Behind anything faster, following
+            # is stage 1's exactly (a 2.5 m reserve there loses sight of it
+            # in bends and costs whole seconds).
             return max(self.following_reserve, self.pass_standoff)
         return self.following_reserve
 
@@ -3090,7 +3096,7 @@ class PurePursuitNode(Node):
             self._pass_state, self._pass_plan, self._pass_manoeuvre = 'pass', plan, manoeuvre
             self._pass_started = now
             self.overtake_active = True
-            self.follow_speed_cap = cap
+            self.follow_speed_cap = min(cap, opponent.speed_bound + limits.max_closing)
             self.last_opponent_status = (
                 f"overtake active: passing on the {'left' if plan.side > 0 else 'right'}, "
                 f"checked stop at {cap:.2f}m/s")
@@ -3114,6 +3120,8 @@ class PurePursuitNode(Node):
                                                    mode='pass', hold=True)
                 cap = pass_planner.safe_speed(plan, opponent, line, limits, speed)
                 if cap is not None:
+                    # Alongside a car, close on it at no more than max_closing.
+                    cap = min(cap, opponent.speed_bound + limits.max_closing)
                     self._pass_plan, self.follow_speed_cap = plan, cap
                     self.overtake_active = True
                     self.last_opponent_status = (
