@@ -53,7 +53,7 @@ class Limits:
     accel: float = 4.0                # car 2's measured speed loop
     brake: float = 3.0
     response: float = 0.45
-    wall_margin: float = 0.05         # body to wall (racing: "if it physically fits")
+    wall_margin: float = 0.10         # body to wall: what fits once delay_lqr's offset-path error is in
     car_margin: float = 0.05          # body to the opponent's reachable box, laterally
     long_margin: float = 0.15         # same, longitudinally
     max_offset: float = 0.85          # inside max_cross_track_error (1.0 m)
@@ -349,13 +349,40 @@ def progress_clear(plan, opponent, line, limits, speed=0.6, every=3):
     return True
 
 
+def box_free_distance(plan, opponent, line, limits):
+    """Distance along the plan to the first pose inside the opponent's box at its full reach.
+
+    inf when the planned path clears everywhere the opponent could ever be
+    (its box once its reach has saturated): a pass on such a path can always
+    keep going. A finite value means the path, still shifting out, would
+    meet the box there; no stop may run past it.
+    """
+    if plan is None:
+        return 0.0
+    if opponent is None:
+        return math.inf
+    for k in range(len(plan.dist)):
+        if _overlaps(plan, k, math.inf, opponent, line, limits):
+            return float(plan.dist[k])
+    return math.inf
+
+
 def safe_speed(plan, opponent, line, limits, current_speed, grid=0.25):
-    """Largest commandable speed whose stop is clear; None if even the current one is not."""
+    """Largest commandable speed whose stop is clear; None if even the current one is not.
+
+    Also never faster than stops short of where the path meets the
+    opponent's full-reach box (box_free_distance): a car allowed whatever
+    stops clear *now* would otherwise run itself into a pass it cannot finish.
+    """
     if plan is None or not math.isfinite(current_speed) or current_speed < 0:
         return None
     if not fallback_clear(plan, current_speed, opponent, line, limits):
         return None
     top = float(plan.context.speed_profile[0])
+    free = box_free_distance(plan, opponent, line, limits) - 2 * limits.spacing
+    if math.isfinite(free):
+        r, b = limits.response, limits.brake
+        top = min(top, max(0.0, -b * r + math.sqrt((b * r) ** 2 + 2 * b * max(free, 0.0))))
     candidates = np.arange(math.floor(top / grid) * grid, current_speed, -grid)
     for v in candidates:
         if fallback_clear(plan, float(v), opponent, line, limits):
@@ -510,6 +537,9 @@ def entry(line, pose, speed, opponent, walls, limits, *, nominal):
             reasons.append(f'{name}: {what} {whole.dist[k]:.1f}m along a {whole.dist[-1]:.1f}m pass')
             continue
         plan = manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, mode='pass', hold=True)
+        if math.isfinite(box_free_distance(plan, opponent, line, limits)):
+            reasons.append(f'{name}: the pass lane meets the car\'s full-reach box')
+            continue
         # A crawl is enough to start: the cap rises as the shift clears the
         # car. new_pass already required the pass speed to outrun the bound.
         v = safe_speed(plan, opponent, line, limits, speed)

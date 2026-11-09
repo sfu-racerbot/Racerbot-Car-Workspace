@@ -2491,7 +2491,7 @@ class PurePursuitNode(Node):
             cap = following.speed_ceiling(
                 closest + self.laser_offset_x - (self.car_length + self.wheelbase) / 2,
                 0.0, 0.0, brake=self.following_brake, delay=self.following_response_sec,
-                reserve=self._following_reserve(), speed_uncertainty=self.following_speed_uncertainty,
+                reserve=self.following_reserve, speed_uncertainty=self.following_speed_uncertainty,
                 stop_speed=self.following_stop_speed)
             return None, cap, None, f"unconfirmed traffic: retain line steering, brake cap={cap:.2f}m/s"
         if closest >= trigger_distance:
@@ -2749,7 +2749,7 @@ class PurePursuitNode(Node):
                     cap = following.speed_ceiling(
                         raw_gap + self.laser_offset_x - (self.car_length + self.wheelbase) / 2,
                         self.opponent.progress_rate, 0.0, brake=self.following_brake,
-                        delay=self.following_response_sec, reserve=self._following_reserve(),
+                        delay=self.following_response_sec, reserve=self.following_reserve,
                         speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed,
                         speed_credit=credit, opponent_brake=self.following_brake)
                     self.follow_speed_cap = min(self.follow_speed_cap, cap)

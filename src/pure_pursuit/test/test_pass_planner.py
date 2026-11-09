@@ -292,7 +292,8 @@ def test_a_pass_that_cannot_get_wide_before_reaching_the_car_is_refused_though_i
     assert pp.fallback_clear(plan, 0.0, STOPPED, LINE, LIMITS)
     assert not pp.progress_clear(plan, STOPPED, LINE, LIMITS)
     plan, _, _, why = pp.entry(LINE, pose_behind(1.0), 0.0, STOPPED, corridor(1.5), LIMITS, nominal=PACE)
-    assert plan is None and 'crawl along the pass' in why
+    # Refused before the crawl check: the lane itself meets the full-reach box.
+    assert plan is None and "meets the car's full-reach box" in why
     # From 2.0 m back the same pass can be crawled.
     m = pp.new_pass(LINE, pose_behind(2.0), 0.0, STOPPED, LIMITS, -1, PACE)
     plan = pp.manoeuvre_plan(LINE, pose_behind(2.0), 0.0, m, corridor(1.5), LIMITS,
@@ -331,3 +332,32 @@ def test_a_shift_from_standstill_peaks_at_80_percent_of_the_steering_curvature()
     d1 = 30 * t_star ** 2 * (1 - t_star) ** 2 * delta / length
     peak = float(np.max(np.abs(plan.context.curvature)))
     assert peak == pytest.approx(d2 / (1 + d1 ** 2) ** 1.5, rel=0.03)   # 3 %: 0.1 m sampling
+
+
+def test_a_pass_lane_that_never_meets_the_full_reach_box_has_no_extra_speed_limit():
+    m = pp.new_pass(LINE, pose_behind(2.0), 0.0, STOPPED, LIMITS, -1, PACE)
+    plan = pp.manoeuvre_plan(LINE, pose_behind(2.0), 0.0, m, corridor(1.5), LIMITS, mode='pass', hold=True)
+    assert pp.box_free_distance(plan, STOPPED, LINE, LIMITS) == math.inf
+    assert pp.box_free_distance(plan, None, LINE, LIMITS) == math.inf
+    assert pp.box_free_distance(None, STOPPED, LINE, LIMITS) == 0.0
+
+
+def test_a_lane_that_meets_the_box_caps_speed_to_stop_short_of_it():
+    # Held on the line straight at the stopped car: the box (saturated) starts
+    # where the body's front plus long_margin reaches its lo, so the cap is
+    # the delayed-stop speed for that distance less two samples (closed form).
+    plan = hold_plan(3.0)
+    free = pp.box_free_distance(plan, STOPPED, LINE, LIMITS)
+    room = 3.0 - LIMITS.opponent_long_uncertainty - LIMITS.long_margin
+    assert free == pytest.approx(room, abs=LIMITS.spacing + 1e-9)
+    r, b = LIMITS.response, LIMITS.brake
+    d = free - 2 * LIMITS.spacing
+    expected = -b * r + math.sqrt((b * r) ** 2 + 2 * b * d)
+    cap = pp.safe_speed(plan, STOPPED, LINE, LIMITS, 0.0)
+    assert cap is not None and cap <= expected + 1e-9
+    assert pp.stop_distance(cap, LIMITS) <= free - 2 * LIMITS.spacing + 1e-9
+    assert cap >= expected - 0.25          # m/s: the 0.25 m/s grid below the bound
+    # An entry along that lane is refused for meeting the box.
+    walls = corridor(0.6)                   # only the line fits: no offset lane
+    plan, _, _, why = pp.entry(LINE, pose_behind(2.0), 0.0, STOPPED, walls, LIMITS, nominal=PACE)
+    assert plan is None
