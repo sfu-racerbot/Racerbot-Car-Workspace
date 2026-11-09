@@ -703,3 +703,20 @@ def test_a_stopped_abort_keeps_a_car_it_can_still_see_ahead():
         d._update_opponent_and_overtake(nearest)
     assert d._pass_flank_since is not None                   # the flank itself is seen clear
     assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+
+
+def test_no_pass_starts_before_a_full_acceleration_window():
+    # Node spec: the acceleration gate clears only on a window spanning at
+    # least 0.55 s of the 0.6 s history, even once a speed is known (0.3 s).
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d = planner_decisions(walls)
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, (5.0, 0.0), closed=True)
+    states = {}
+    for now in np.arange(0, 0.8, .025):
+        d.observe([5.0, 0, 0, 0.0, 0], stopped_car_scan(d, 5.0, 7.5), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+        states[round(float(now), 3)] = (d._pass_state, d._opp_speed is not None, d._opp_accelerating)
+    # Confirmed by 0.15 s; a speed once 0.3 s of history exists; at 0.5 s the
+    # window spans ~0.35 s: still gated, and still idle.
+    assert states[0.5] == ('idle', True, True)
+    assert d._pass_state == 'pass'            # a full window of a car that is not speeding up

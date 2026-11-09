@@ -3075,7 +3075,11 @@ class PurePursuitNode(Node):
                 mid = history[len(history) // 2]
                 first = line.wrap(mid[1] - history[0][1]) / max(mid[0] - history[0][0], 1e-3)
                 second = line.wrap(history[-1][1] - mid[1]) / max(history[-1][0] - mid[0], 1e-3)
-                self._opp_accelerating = (second - first) / ((history[-1][0] - history[0][0]) / 2) > 1.5
+                # Only a (nearly) full 0.6 s window may clear it: over 0.3 s,
+                # centroid noise hid a 4 m/s^2 launch (indoor_wide seed 12349,
+                # 2026-11-09: a pass started 0.6 s into the race).
+                span = history[-1][0] - history[0][0]
+                self._opp_accelerating = span < 0.55 or (second - first) / (span / 2) > 1.5
             self._opp_anchor = (s_o, d_o, 0.0)
         else:
             # Alongside, the centroid is its near side face, half a width
