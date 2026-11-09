@@ -3019,12 +3019,15 @@ class PurePursuitNode(Node):
             self._opp_history = history
             if history[-1][0] - history[0][0] >= 0.3:
                 self._opp_speed = line.wrap(history[-1][1] - history[0][1]) / (history[-1][0] - history[0][0])
-                # Speeding up (a race start, a car leaving a bend)? Compare the
-                # window's halves: a pass on a stale speed would be cut short.
+                # Speeding up (a race start, a car leaving a bend)? The two
+                # half-window speeds, over the time between their midpoints,
+                # give its acceleration; a pass on a stale speed would be cut
+                # short. 1.5 m/s^2 sits above centroid noise (~0.7 m/s^2 over
+                # 0.15 s halves) and below a launch (3-4 m/s^2).
                 mid = history[len(history) // 2]
                 first = line.wrap(mid[1] - history[0][1]) / max(mid[0] - history[0][0], 1e-3)
                 second = line.wrap(history[-1][1] - mid[1]) / max(history[-1][0] - mid[0], 1e-3)
-                self._opp_accelerating = second - first > 0.3
+                self._opp_accelerating = (second - first) / ((history[-1][0] - history[0][0]) / 2) > 1.5
             self._opp_anchor = (s_o, d_o, 0.0)
         else:
             # Alongside, the centroid is its near side face, half a width

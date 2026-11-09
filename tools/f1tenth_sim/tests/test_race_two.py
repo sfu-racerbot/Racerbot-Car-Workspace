@@ -454,3 +454,20 @@ def test_no_rejoin_without_a_sighting_in_the_last_second_however_far_ahead():
     d2._update_opponent_and_overtake(nearest)
     assert d2._pass_state == 'return'
     assert d2.last_opponent_status.startswith('overtake rejoining')
+
+
+def test_no_pass_is_started_on_a_car_that_is_still_speeding_up():
+    # A race start: the car ahead pulls away at 2 m/s^2 from rest. Oracle:
+    # for constant acceleration the two half-window mean speeds differ by
+    # exactly a times the time between their midpoints, so the estimate is
+    # 2 m/s^2 > the 1.5 m/s^2 gate at every window length, and no pass may
+    # start on that stale speed.
+    walls = dict(at=lambda x, y: 1.5 - abs(y))
+    d = planner_decisions(walls)
+    nearest, _ = race.racing_math.find_nearest_index(d.xy, (5.0, 0.0), closed=True)
+    for now in np.arange(0, 1.0, .025):
+        rear = 7.5 + 0.5 * 2.0 * float(now) ** 2
+        d.observe([5.0, 0, 0, 0.0, 0], stopped_car_scan(d, 5.0, rear), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+        assert d._pass_state == 'idle' and not d.overtake_active
+    assert d._opp_accelerating
