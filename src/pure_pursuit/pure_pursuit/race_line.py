@@ -11,7 +11,7 @@ import numpy as np
 from pure_pursuit import recorded_path
 from pure_pursuit.min_time_line import (
     CarPhysics, body_floor_at, cone_clearance, footprint_clearance, lap_time, optimize_min_time,
-    speed_profile,
+    speed_floor_extra, speed_profile,
 )
 from pure_pursuit.occupancy_map import OccupancyMap
 from pure_pursuit.racing_math import load_xy_csv
@@ -41,6 +41,9 @@ class RaceLineConfig:
     max_deviation: float = 0.35
     # Where the minimum-time optimizer starts; the fastest result that passes is kept (_min_time_starts).
     min_time_starts: tuple = ('min_curvature', 'recorded', 'shortest')
+    # Extra body room for planned speed: gain * max(v - from, 0) m (min_time_line.speed_floor_extra).
+    speed_floor_gain: float = 0.0
+    speed_floor_from: float = 3.0
 
     @classmethod
     def from_params(cls, values: dict):
@@ -69,6 +72,8 @@ class RaceLineConfig:
         tight = values.get('race_line_body_floor_tight')   # optional: absent = constant floor
         return cls(physics=CarPhysics(**{k: values[v] for k, v in physics_keys.items()}),
                    body_floor_tight=None if tight is None else float(tight),
+                   speed_floor_gain=float(values.get('race_line_speed_floor_gain', 0.0)),
+                   speed_floor_from=float(values.get('race_line_speed_floor_from', 3.0)),
                    **{k: values[v] for k, v in config_keys.items()})
 
     def __post_init__(self):
@@ -120,7 +125,8 @@ def check_line(field_at, xy, cfg: RaceLineConfig) -> tuple[bool, float, float, f
         raise ValueError('duplicate consecutive points')
     cone = float(np.min(cone_clearance(field_at, xy, laser_x=cfg.laser_x)))
     bodies = np.asarray(footprint_clearance(field_at, xy, half_width=cfg.half_width), dtype=float)
-    floors = body_floor_at(xy, cfg.body_floor, cfg.body_floor_tight, cfg.physics.curvature_limit)
+    floors = body_floor_at(xy, cfg.body_floor, cfg.body_floor_tight, cfg.physics.curvature_limit) \
+        + speed_floor_extra(xy, cfg.physics, cfg.speed_floor_gain, cfg.speed_floor_from)
     # Judged station by station: the floor is higher near the steering limit. Reported as the
     # station with the least room over its own floor.
     worst = int(np.argmin(bodies - floors))
@@ -167,7 +173,7 @@ def _min_time_from(start_offsets, mc, field_at, cfg):
             emergency_stop_distance=cfg.emergency_stop_distance,
             cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor + 0.01 * run,
             body_floor_tight=tight + 0.01 * run,
-            laser_x=cfg.laser_x)
+            laser_x=cfg.laser_x, speed_floor_gain=cfg.speed_floor_gain, speed_floor_from=cfg.speed_floor_from)
         candidate = _candidate('min_time', resample_closed_path(result.xy, cfg.spacing), field_at, cfg)
         if candidate.ok:
             break

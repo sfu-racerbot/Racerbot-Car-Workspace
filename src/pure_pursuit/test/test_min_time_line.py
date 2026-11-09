@@ -1,4 +1,5 @@
 """ROS-free minimum-time line tests, collected by the pure_pursuit suite."""
+import math
 
 from dataclasses import replace
 
@@ -321,3 +322,30 @@ def test_respond_early_moves_a_braking_point_back_by_speed_times_delay():
     assert np.all(out[station < 4.0] == 4.0)
     assert np.all(out[station >= 4.0] == 2.0)
     assert np.array_equal(min_time_line._respond_early(speed, s, 0.0), speed)
+
+
+# --- speed_floor_extra: body clearance that grows with planned speed ---
+
+def _circle(radius, n=400):
+    theta = np.arange(n) * (2 * np.pi / n)
+    return np.column_stack((radius * np.cos(theta), radius * np.sin(theta)))
+
+
+def test_speed_floor_extra_on_a_circle_is_gain_times_the_excess_corner_speed():
+    # oracle: closed form. A circle has one curvature, so the planned speed is sqrt(a_lat * r) everywhere
+    # (below v_max, no curvature change, no accel/brake zone): r = 4 m, 3.2 m/s^2 -> 3.5777 m/s, and the
+    # extra room is 0.1 * (3.5777 - 3.0) = 0.0578 m at every station.
+    phys = CarPhysics(a_lat_left=3.2, a_lat_right=3.2, v_max=7.0, max_steering_angle=0.38)
+    extra = min_time_line.speed_floor_extra(_circle(4.0), phys, 0.1, 3.0)
+    assert extra == pytest.approx(np.full(400, 0.1 * (math.sqrt(3.2 * 4.0) - 3.0)), abs=1e-3)  # m
+    # above the corner speed: no extra room
+    assert np.all(min_time_line.speed_floor_extra(_circle(4.0), phys, 0.1, 3.6) == 0.0)
+
+
+def test_speed_floor_extra_with_zero_gain_is_zero_and_bad_gains_are_refused():
+    # oracle: spec, gain 0 leaves the floor unchanged; a negative or non-finite gain is refused.
+    phys = CarPhysics()
+    assert np.all(min_time_line.speed_floor_extra(_circle(4.0), phys, 0.0, 3.0) == 0.0)
+    for gain in (-0.01, float('nan'), float('inf')):
+        with pytest.raises(ValueError, match='speed floor gain must be finite'):
+            min_time_line.speed_floor_extra(_circle(4.0), phys, gain, 3.0)

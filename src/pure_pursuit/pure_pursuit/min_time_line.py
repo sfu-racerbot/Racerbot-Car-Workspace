@@ -225,7 +225,7 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
                       half_width=0.155, wall_margin=0.10, emergency_stop_distance=0.35, cone_margin=0.10,
                       body_floor=0.08, control_spacing=1.0, smoothing=0.5, max_iter=300, repairs=8,
                       body_floor_tight=None,
-                      laser_x=0.26):
+                      laser_x=0.26, speed_floor_gain=0.0, speed_floor_from=3.0):
     """The fastest closed line inside the corridor that keeps every safety margin.
 
     center: (n, 2) closed, smooth reference line (the minimum-curvature line, normally); width_left/right:
@@ -299,7 +299,9 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
         cone = cone_clearance(field_at, xy, laser_x=laser_x)
         body = footprint_clearance(field_at, xy, half_width=half_width)
         too_tight = np.abs(signed_curvature(xy)) > limit + 0.02
-        bad = (cone < need_cone) | (body < body_floor_at(xy, body_floor, body_floor_tight, limit))
+        floors = body_floor_at(xy, body_floor, body_floor_tight, limit) + speed_floor_extra(
+            xy, physics, speed_floor_gain, speed_floor_from)
+        bad = (cone < need_cone) | (body < floors)
         if not bad.any() and not too_tight.any():
             speed, _, _ = speed_profile(xy, physics)
             lap = lap_time(xy, physics)
@@ -351,6 +353,22 @@ def body_floor_at(xy, body_floor, body_floor_tight, curvature_limit, window_m=0.
     if half:
         weight = np.max([np.roll(weight, j) for j in range(-half, half + 1)], axis=0)
     return body_floor + (body_floor_tight - body_floor) * weight
+
+
+def speed_floor_extra(xy, physics: 'CarPhysics', gain, from_speed):
+    """Extra body clearance at each station for its planned speed: gain * max(v - from_speed, 0).
+
+    Tracking error grows with speed: on car 2's fitted floor the cross-track error was 0.09 m mean around
+    3 m/s, and a 4.1 m/s sweeper on a 7 m/s line ran a steady 0.25 m wide (2026-11-09), into a line
+    planned at the constant floor. ``gain`` 0 returns zeros (the constant/curvature floor alone).
+    """
+    xy = np.asarray(xy, dtype=float)
+    if not (math.isfinite(gain) and gain >= 0.0) or not math.isfinite(from_speed):
+        raise ValueError('speed floor gain must be finite and >= 0, from_speed finite')
+    if gain == 0.0:
+        return np.zeros(len(xy))
+    speed = speed_profile(xy, physics)[0]
+    return gain * np.maximum(speed - from_speed, 0.0)
 
 
 def offsets_of(center, line_xy):

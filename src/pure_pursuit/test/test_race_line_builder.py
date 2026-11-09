@@ -78,6 +78,18 @@ def test_check_line_clear_wall_and_curvature():
     assert not ok and curvature > cfg.physics.curvature_limit + 0.02 and 'curvature' in reason
 
 
+def test_check_line_judges_body_room_against_the_speed_floor_too():
+    # oracle: closed form. A clearance field of 0.40 m everywhere gives 0.40 m of body room on a 4 m
+    # circle (footprint_clearance reads the field at the footprint): passes the 0.08 m default floor.
+    # The circle's planned speed is sqrt(2.45 * 4) = 3.13 m/s (left turns, default physics): a speed floor
+    # of gain 3.0 from 3.0 m/s adds 3.0 * 0.13 = 0.39 m -> 0.47 m needed, so the same line fails on body.
+    room = lambda x, y: np.full(np.broadcast(x, y).shape, 0.40)
+    ok, *_ = check_line(room, circle(4), RaceLineConfig())
+    assert ok
+    ok, _, _, _, reason = check_line(room, circle(4), replace(RaceLineConfig(), speed_floor_gain=3.0))
+    assert not ok and 'body' in reason
+
+
 def test_invalid_line_and_configuration():
     # oracle: spec, malformed geometry cannot be a safe closed path.
     at = lambda x, y: np.ones(np.broadcast(x, y).shape)
