@@ -33,7 +33,7 @@ METHODS = {
     '_footprint_clearance', '_forward_body_clearance', '_arc_clearance',
     '_dynamic_closest_in_cone', '_static_closest_in_cone',
     '_sanitized_window', '_emergency_escape',
-    '_pass_reset_state', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
+    '_pass_reset_state', '_pass_flank_clear', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
     '_pass_enter_abort', '_pass_opponent', '_local_pass_update', '_pass_reset_after', '_pass_observe',
     '_following_reserve',
 }

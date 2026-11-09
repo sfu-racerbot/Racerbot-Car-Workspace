@@ -438,3 +438,18 @@ def test_the_offset_blend_is_a_steerable_shift():
     after = plan.dist >= blend + LIMITS.spacing
     assert np.allclose(plan.d[after], -0.60, atol=1e-6)             # m
     assert plan.d[0] == pytest.approx(-0.85, abs=1e-6)
+
+
+def test_the_offset_blend_lengthens_with_speed():
+    # At 3 m/s the speed term sets the blend: 3 * sqrt(QUINTIC_PEAK * 0.25 /
+    # shift_accel) = 2.55 m (closed form, > min_shift 1.5 m). Halfway through,
+    # the quintic has removed exactly half the 0.25 m error.
+    blend = 3.0 * math.sqrt(pp.QUINTIC_PEAK * 0.25 / LIMITS.shift_accel)
+    assert blend > LIMITS.min_shift + 0.5
+    hold = pp.Manoeuvre(4.0, 0.0, -0.60, 2.0, math.inf, 3.0, -1)
+    plan = pp.manoeuvre_plan(LINE, (8.0, -0.85, 0.0), 3.0, hold, corridor(1.5), LIMITS, mode='pass', hold=True)
+    arc = plan.s - 8.0                    # the blend runs along the line's arc, not the path's
+    mid = int(np.argmin(np.abs(arc - blend / 2)))
+    assert plan.d[mid] == pytest.approx(-0.60 - 0.25 * (1 - pp.smooth(arc[mid] / blend)), abs=1e-6)
+    assert plan.d[mid] == pytest.approx(-0.725, abs=0.01)          # m: half the error left
+    assert np.allclose(plan.d[arc >= blend], -0.60, atol=1e-6)

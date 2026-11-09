@@ -592,3 +592,56 @@ def test_a_stopped_abort_carries_on_in_a_clear_lane_when_the_way_back_is_blocked
     # clear, but a crawl along it is not, so it stays stopped.
     both = lambda x, y: 0.0 if (x > ego[0] + 0.47 + 1.2 and y < -0.45) else line_blocked(x, y)
     assert stop_there(both)._pass_state == 'abort'
+
+
+def flank_scan(d, bearing_deg, rng):
+    """An unexplained return (expected map range is 10 m) at one bearing, e.g. a car beside us."""
+    scan = np.full(1081, 10.0)
+    angles = d.lidar.angle_min + np.arange(1081) * d.lidar.angle_increment
+    scan[np.abs(angles - math.radians(bearing_deg)) < 0.15] = rng
+    return scan
+
+
+def test_a_stopped_abort_keeps_the_car_while_its_flank_shows_an_unconfirmed_return():
+    # Review 2026-11-09: no confirmed sighting is not evidence of an empty
+    # flank (a car can fail confirmation, e.g. reversing, or another object
+    # can replace the anchor). A return 0.6 m off at +80 deg, on the side
+    # car 2 (right of the line) would rejoin toward, keeps the abort and its
+    # zero cap however long the anchor has been stale.
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    for now in np.arange(1.0, 0.9 + 3 * d.opponent_lost_timeout_sec, 0.1):
+        d.observe([*ego, 0, 0.0, 0], flank_scan(d, 80.0, 0.6), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+        assert d._pass_state == 'abort' and d.follow_speed_cap == 0.0
+    # The same return on the far side (-80 deg) is not across the rejoin.
+    d2, nearest, ego = stopped_in_abort(_lanes_walled)
+    for now in np.arange(1.0, 0.9 + d2.opponent_lost_timeout_sec + 0.2, 0.1):
+        d2.observe([*ego, 0, 0.0, 0], flank_scan(d2, -80.0, 0.6), float(now), 0)
+        d2._update_opponent_and_overtake(nearest)
+    assert d2._pass_state == 'idle'
+
+
+def test_the_flank_must_stay_clear_for_the_whole_lost_timeout():
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    lost = d.opponent_lost_timeout_sec
+    gone = 0.9 + 2 * lost                    # the return leaves here
+    for now in np.arange(1.0, gone, 0.1):
+        d.observe([*ego, 0, 0.0, 0], flank_scan(d, 60.0, 0.8), float(now), 0)
+        d._update_opponent_and_overtake(nearest)
+    tick_unseen(d, nearest, ego, gone)
+    tick_unseen(d, nearest, ego, gone + lost - 0.05)
+    assert d._pass_state == 'abort'          # clear, but not for long enough yet
+    tick_unseen(d, nearest, ego, gone + lost + 0.05)
+    assert d._pass_state == 'idle'
+
+
+def test_a_nan_or_too_short_beam_in_the_flank_is_not_seen_clear():
+    d, nearest, ego = stopped_in_abort(_lanes_walled)
+    d.observe([*ego, 0, 0.0, 0], np.full(1081, 10.0), 2.0, 0)
+    assert d._pass_flank_clear(True)
+    for bad in (math.nan, 0.01):              # NaN; under range_min (0.05 m)
+        d.observe([*ego, 0, 0.0, 0], flank_scan(d, 80.0, bad), 2.0, 0)
+        assert not d._pass_flank_clear(True)
+    # A return beyond the 2 m reach is not across the rejoin.
+    d.observe([*ego, 0, 0.0, 0], flank_scan(d, 80.0, 2.5), 2.0, 0)
+    assert d._pass_flank_clear(True)
