@@ -216,3 +216,27 @@ def test_car2_builds_a_minimum_time_line_on_course_06b(tmp_path):
     assert report['ok'] is True and report['choice'] == 'min_time', report
     chosen = next(c for c in report['candidates'] if c['source'] == 'min_time')
     assert chosen['ok'] and chosen['min_body_m'] >= 0.22, chosen   # m, the shipped body floor
+
+
+def test_min_time_keeps_the_fastest_passing_start(course):
+    # The minimum-time optimizer is local; started from the minimum-curvature line alone it stays near
+    # that wide line. The builder also starts from the recorded lap and the shortest line, and keeps the
+    # fastest result that passes the final checks (race_line._best_min_time, 2026-11-09).
+    grid, seed, cfg, _ = course
+    # Starts ordered so the fastest is neither the first nor the last tried.
+    order = ('recorded', 'shortest', 'min_curvature')
+    multi = {c.source: c for c in build_race_line(grid, seed, replace(cfg, min_time_starts=order)).candidates}
+    single = {c.source: c for c in
+              build_race_line(grid, seed, replace(cfg, min_time_starts=('min_curvature',))).candidates}
+    best, alone = multi['min_time'], single['min_time']
+    assert best.ok and alone.ok
+    # oracle: invariant, the single start is one of those tried, and the kept result is the fastest.
+    assert best.est_lap_s <= alone.est_lap_s
+    # oracle: recorded measurement, this fixture with the default config (2026-11-09): shortest start
+    # 10.818 s, minimum-curvature start 11.337 s, recorded start 14.106 s.
+    assert alone.est_lap_s - best.est_lap_s >= 0.3   # s
+    assert 'start shortest of: recorded' in best.reason
+    # oracle: independent, the kept line still passes the builder's own final check.
+    field = grid.clearance_field()
+    ok, *_ = check_line(lambda x, y: grid.clearance_at(x, y, field), best.xy, cfg)
+    assert ok

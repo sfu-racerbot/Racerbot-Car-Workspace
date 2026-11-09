@@ -53,8 +53,8 @@ def _fmt(value):
     return value
 
 
-def trace(track, params, seed, timeout_s, calibration=None, car_id=None):
-    plant = make_plant(track, seed, calibration=calibration, car_id=car_id)
+def trace(track, params, seed, timeout_s, calibration=None, car_id=None, max_laps=1):
+    plant = make_plant(track, seed, calibration=calibration, car_id=car_id, max_laps=max_laps)
     line = plant.env.unwrapped.track.raceline
     obs, _ = plant.reset(np.array([[line.xs[0], line.ys[0], line.yaws[0]]]))
 
@@ -109,7 +109,7 @@ def trace(track, params, seed, timeout_s, calibration=None, car_id=None):
         if plant.chassis_contact_steps > 0 or obs["agent_0"]["collision"]:
             rows[-1]["contact"] = 1
             break
-        if done or laps >= 1.0:
+        if done or laps >= max_laps:
             break
     plant.close()
     return rows, laps
@@ -153,6 +153,7 @@ def main(argv=None):
     ap.add_argument("--track", default="indoor_tight")
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--laps", type=int, default=1, help="laps to trace before stopping (default 1)")
     ap.add_argument("--set", action="append", default=[],
                     help="override a parameter, name=value (repeatable)")
     ap.add_argument("--out", help="write the per-tick CSV here")
@@ -165,7 +166,7 @@ def main(argv=None):
     car_id = car_from_args(ap, args)
     rows, laps = trace(args.track, parse_set(args.set, car_id), args.seed, args.timeout,
                        calibration=with_friction(args.friction, with_floor(args.floor, calibration_for_car(car_id))),
-                       car_id=car_id)
+                       car_id=car_id, max_laps=args.laps)
     if args.out:
         with open(args.out, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(COLUMNS))

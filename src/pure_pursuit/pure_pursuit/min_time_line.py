@@ -132,9 +132,15 @@ def _respond_early(speed, s, delay):
     pos = np.concatenate([s[:-1], s[:-1] + total])
     plan = np.concatenate([speed, speed]).astype(float)
     out = speed.astype(float).copy()
-    for i in range(n):
-        j = int(np.searchsorted(pos, pos[i] + speed[i] * delay, side='right'))
-        out[i] = float(plan[i:max(j, i + 1)].min())
+    # out[i] = min(plan[i : max(j_i, i + 1)]), vectorized over i: the windows are only a few stations
+    # long (speed * delay over the station spacing), so loop over the offset k within a window instead
+    # of over the stations (the optimizer calls this once per lap-time evaluation, 2026-11-09).
+    idx = np.arange(n)
+    j = np.searchsorted(pos, pos[:n] + np.asarray(speed, dtype=float) * delay, side='right')
+    width = np.maximum(j - idx, 1)
+    for k in range(1, int(width.max())):
+        reach = width > k
+        out[reach] = np.minimum(out[reach], plan[idx[reach] + k])
     return out
 
 

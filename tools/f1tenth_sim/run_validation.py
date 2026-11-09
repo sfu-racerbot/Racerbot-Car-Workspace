@@ -570,8 +570,13 @@ class PathFollower:
         use_measured_lookahead: bool = True,
         car_id=None,
         steering_limit: Optional[float] = None,
+        speed_lead_time: Optional[float] = None,
     ):
         select_profile(PROFILE.name, car_id)
+        # The node's speed_lead_time (pure_pursuit.yaml, then the car's overlays) unless given.
+        self.speed_lead_time = float(PURE_PURSUIT_PARAMS.get('speed_lead_time', 0.0)
+                                     if speed_lead_time is None else speed_lead_time)
+        self._cumulative = None
         self.VEHICLE_LIMITS = tracking_laws.VehicleLimits(
             wheelbase=WHEELBASE,
             max_steering_angle=(STEERING_LIMIT if steering_limit is None else steering_limit),
@@ -638,6 +643,14 @@ class PathFollower:
         )
         lookahead_basis = (
             abs(float(velocity)) if self.use_measured_lookahead else speed_command)
+        if speed is None and self.speed_lead_time > 0.0:
+            # pure_pursuit_node: the lookahead is sized from the profile speed at the car, and only
+            # the speed command leads (racing_math.lead_speed).
+            if self._cumulative is None:
+                self._cumulative = racing_math.compute_cumulative_arc_length(self.plan.seg_len)
+            speed_command = racing_math.lead_speed(
+                self.plan.speed, self._cumulative, float(np.sum(self.plan.seg_len)), nearest,
+                float(velocity), self.speed_lead_time, closed=True)
         lookahead = racing_math.adaptive_lookahead(
             lookahead_basis,
             self.lookahead_gain,

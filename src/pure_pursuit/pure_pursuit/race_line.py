@@ -39,6 +39,8 @@ class RaceLineConfig:
     min_feature_wavelength: float = 1.5
     curvature_margin: float = 1.0
     max_deviation: float = 0.35
+    # Where the minimum-time optimizer starts; the fastest result that passes is kept (_min_time_starts).
+    min_time_starts: tuple = ('min_curvature', 'recorded', 'shortest')
 
     @classmethod
     def from_params(cls, values: dict):
@@ -148,6 +150,79 @@ def _candidate(source, xy, field_at, cfg):
     return Candidate(source, xy, speed, lap_time(xy, cfg.physics), cone, body, curvature, ok, reason)
 
 
+def _min_time_from(start_offsets, mc, field_at, cfg):
+    """One minimum-time line from these start offsets on the minimum-curvature corridor.
+
+    The optimizer checks its own stations (optimize_spacing); the line is judged again on the final,
+    denser waypoints, where a clearance a few cm short can show. Each retry asks the optimizer for more
+    room than the final check needs: cone margin +3 cm and both body floors +1 cm per retry. The judgement
+    always uses the configured limits (2026-11-07: course 06b's line failed the final body check by 1.4 cm
+    with no body headroom on retry).
+    """
+    tight = cfg.body_floor_tight if cfg.body_floor_tight is not None else cfg.body_floor
+    for run in range(5):
+        result = optimize_min_time(
+            mc['line'], mc['remaining_left'], mc['remaining_right'], cfg.physics, field_at,
+            start=start_offsets, half_width=cfg.half_width, wall_margin=cfg.wall_margin,
+            emergency_stop_distance=cfg.emergency_stop_distance,
+            cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor + 0.01 * run,
+            body_floor_tight=tight + 0.01 * run,
+            laser_x=cfg.laser_x)
+        candidate = _candidate('min_time', resample_closed_path(result.xy, cfg.spacing), field_at, cfg)
+        if candidate.ok:
+            break
+    return candidate
+
+
+def _min_time_starts(mc, prepared, field_at, cfg):
+    """(name, offsets) the minimum-time optimizer starts from.
+
+    Its solver is local: started from the minimum-curvature line alone it stays near that line, which
+    swings wide round every corner. On the 6 Nov course 06a that line was 35.0 m against the 31.6 m
+    gap_follow drove, and the planner's own model rated gap_follow's path faster (10.53 s against 10.58 s);
+    started there it found a line that keeps every limit at 10.15 s (2026-11-09). So it also starts from
+    the recorded lap (the mapping laps' own path) and from the shortest line the steering allows, found by
+    the same optimizer with grip that never binds, and keeps whichever finishes fastest.
+    """
+    from dataclasses import replace
+    from pure_pursuit.min_time_line import offsets_of
+    center = np.asarray(mc['line'], dtype=float)
+    for name in cfg.min_time_starts:
+        if name == 'min_curvature':
+            yield name, np.zeros(len(center))
+        elif name == 'recorded' and prepared is not None:
+            yield name, offsets_of(center, prepared.xy)
+        elif name == 'shortest':
+            loose = replace(cfg.physics, a_lat_left=SHORTEST_GRIP, a_lat_right=SHORTEST_GRIP)
+            short = optimize_min_time(
+                center, mc['remaining_left'], mc['remaining_right'], loose, field_at,
+                half_width=cfg.half_width, wall_margin=cfg.wall_margin,
+                emergency_stop_distance=cfg.emergency_stop_distance, cone_margin=cfg.cone_margin,
+                body_floor=cfg.body_floor, body_floor_tight=cfg.body_floor_tight, laser_x=cfg.laser_x)
+            yield name, offsets_of(center, short.xy)
+
+
+# Lateral grip for the 'shortest' start, m/s^2: far above any car's, so only length, the steering
+# limit and the clearances shape that line.
+SHORTEST_GRIP = 50.0
+
+
+def _best_min_time(mc, prepared, field_at, cfg):
+    """The fastest minimum-time line over every start that passes the final checks; else the first tried."""
+    best, best_name = None, None
+    tried = []
+    for name, start in _min_time_starts(mc, prepared, field_at, cfg):
+        candidate = _min_time_from(start, mc, field_at, cfg)
+        tried.append(f'{name} {candidate.est_lap_s:.3f} s{"" if candidate.ok else " (failed)"}')
+        if best is None or (candidate.ok and (not best.ok or candidate.est_lap_s < best.est_lap_s)):
+            best, best_name = candidate, name
+    if best is None:
+        raise ValueError('no minimum-time start available')
+    return Candidate(best.source, best.xy, best.speed, best.est_lap_s, best.min_cone_m, best.min_body_m,
+                     best.max_curvature, best.ok,
+                     f'{best.reason}; start {best_name} of: {", ".join(tried)}')
+
+
 def build_race_line(grid: OccupancyMap, seed_xy, cfg: RaceLineConfig) -> RaceLine:
     field = grid.clearance_field()
 
@@ -188,25 +263,7 @@ def build_race_line(grid: OccupancyMap, seed_xy, cfg: RaceLineConfig) -> RaceLin
     try:
         if mc is None:
             raise ValueError(f'minimum-curvature corridor unavailable: {corridor_error}')
-        for run in range(5):
-            # The optimizer checks its own stations (optimize_spacing); the line is judged
-            # again on the final, denser waypoints, where a clearance a few cm short can show.
-            # Each retry asks the optimizer for more room than the final check needs: cone
-            # margin +3 cm and both body floors +1 cm per retry. The judgement below always
-            # uses the configured limits (2026-11-07: course 06b's line failed the final body
-            # check by 1.4 cm with no body headroom on retry).
-            tight = cfg.body_floor_tight if cfg.body_floor_tight is not None else cfg.body_floor
-            result = optimize_min_time(
-                mc['line'], mc['remaining_left'], mc['remaining_right'], cfg.physics, field_at,
-                half_width=cfg.half_width, wall_margin=cfg.wall_margin,
-                emergency_stop_distance=cfg.emergency_stop_distance,
-                cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor + 0.01 * run,
-                body_floor_tight=tight + 0.01 * run,
-                laser_x=cfg.laser_x)
-            candidate = _candidate('min_time', resample_closed_path(result.xy, cfg.spacing), field_at, cfg)
-            if candidate.ok:
-                break
-        candidates.append(candidate)
+        candidates.append(_best_min_time(mc, prepared, field_at, cfg))
     except Exception as exc:
         candidates.append(_failed('min_time', exc))
 

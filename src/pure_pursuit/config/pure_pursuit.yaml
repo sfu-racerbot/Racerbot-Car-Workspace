@@ -202,6 +202,13 @@ pure_pursuit_node:
     # Give up and hard-stop if recovery has not closed the error back under
     # max_cross_track_error within this long.
     off_racing_line_recovery_timeout_sec: 5.0
+    # Accelerate early: where the speed profile rises within the distance
+    # covered in this many seconds, command that higher speed now, so a lagging
+    # speed loop is not still climbing after a corner exit
+    # (racing_math.lead_speed). Never brings braking forward; the curvature
+    # ceiling and every safety stage still apply. 0 = the profile speed at the
+    # car. Per-car values belong in the car's tuning overlay.
+    speed_lead_time: 0.0
 
     # Frozen-localization watchdog. pose_timeout_sec above cannot catch a
     # pose that keeps *arriving* on time while no longer *tracking* the car
