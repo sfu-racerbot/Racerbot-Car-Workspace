@@ -2944,6 +2944,7 @@ class PurePursuitNode(Node):
         self._pass_retry_after = 0.0
         self._opp_history = []        # (time, arc, lateral) seen from behind
         self._opp_speed = None        # m/s along the line, from behind
+        self._opp_accelerating = True  # until a window shows otherwise
         self._opp_anchor = None       # (rear arc, lateral, length_extra)
         self._opp_seen = None
         self._pass_line = None
@@ -3018,9 +3019,23 @@ class PurePursuitNode(Node):
             self._opp_history = history
             if history[-1][0] - history[0][0] >= 0.3:
                 self._opp_speed = line.wrap(history[-1][1] - history[0][1]) / (history[-1][0] - history[0][0])
+                # Speeding up (a race start, a car leaving a bend)? Compare the
+                # window's halves: a pass on a stale speed would be cut short.
+                mid = history[len(history) // 2]
+                first = line.wrap(mid[1] - history[0][1]) / max(mid[0] - history[0][0], 1e-3)
+                second = line.wrap(history[-1][1] - mid[1]) / max(history[-1][0] - mid[0], 1e-3)
+                self._opp_accelerating = second - first > 0.3
             self._opp_anchor = (s_o, d_o, 0.0)
         else:
-            self._opp_anchor = ((s_o - self.car_length) % line.total, d_o, self.car_length)
+            # Alongside, the centroid is its near side face, half a width
+            # nearer to us than its centre. Keep the centre measured from
+            # behind unless the face says it has come closer than that.
+            _, d_ego = line.frenet(self.car_x, self.car_y)
+            implied = d_o + math.copysign(self.car_width / 2, d_o - d_ego)
+            lateral = implied
+            if self._opp_anchor is not None and abs(self._opp_anchor[1] - d_ego) < abs(implied - d_ego):
+                lateral = self._opp_anchor[1]
+            self._opp_anchor = ((s_o - self.car_length) % line.total, lateral, self.car_length)
 
     def _pass_opponent(self, now):
         rear, lateral, extra = self._opp_anchor
@@ -3050,13 +3065,14 @@ class PurePursuitNode(Node):
         if state == 'idle':
             self._pass_plan, self._pass_hold_steering = None, False
             self.overtake_active = False
-            if (point is None or self._opp_speed is None or self._opp_anchor[2] != 0.0
-                    or now < self._pass_retry_after):
+            if (point is None or self._opp_speed is None or self._opp_accelerating
+                    or self._opp_anchor[2] != 0.0 or now < self._pass_retry_after):
                 return
             opponent = self._pass_opponent(now)
             front = s_ego + (self.wheelbase + self.car_length) / 2
             gap = line.wrap(opponent.rear_arc - front)
-            if not 0.0 < gap <= self.overtake_trigger_gap:
+            # Following sits pass_standoff back; look a metre beyond that.
+            if not 0.0 < gap <= max(self.overtake_trigger_gap, self.pass_standoff + 1.0):
                 return
             nominal = pass_planner.nominal_speed(line, s_ego)
             if nominal - opponent.speed_bound <= 0.3:
@@ -3134,21 +3150,25 @@ class PurePursuitNode(Node):
         else:
             self._pass_plan, self._pass_hold_steering, self._pass_branch = None, True, 'zero_stop'
         if speed < 0.2:
-            # Stopped: leave only on a checked path, rejoining or passing again.
-            cap = pass_planner.safe_speed(rejoin, opponent, line, limits, speed)
-            if cap is not None and cap >= 0.3:
-                self._pass_state, self._pass_plan, self._pass_hold_steering = 'return', rejoin, False
-                self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
-                self.follow_speed_cap = cap
-                return
+            # Stopped: leave only on a path the car could crawl all along with
+            # a checked stop. Carry on past a car still ahead of our rear
+            # first; rejoining the line behind it would aim at it.
             nominal = pass_planner.nominal_speed(line, s_ego)
-            if nominal - opponent.speed_bound > 0.3:
+            if (line.wrap(opponent.rear_arc - ego_rear) > -limits.opponent_length
+                    and nominal - opponent.speed_bound > 0.3):
                 plan, manoeuvre, cap, _ = pass_planner.entry(line, pose, speed, opponent, walls, limits,
                                                              nominal=nominal)
                 if plan is not None:
                     self._pass_state, self._pass_plan, self._pass_hold_steering = 'pass', plan, False
                     self._pass_manoeuvre, self._pass_started = manoeuvre, now
                     self.follow_speed_cap = cap
+                    return
+            cap = pass_planner.safe_speed(rejoin, opponent, line, limits, speed)
+            if (cap is not None and cap >= 0.3
+                    and pass_planner.progress_clear(rejoin, opponent, line, limits)):
+                self._pass_state, self._pass_plan, self._pass_hold_steering = 'return', rejoin, False
+                self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
+                self.follow_speed_cap = cap
 
     def _pass_reset_after(self, now):
         line, history, speed, anchor, seen = (self._pass_line, self._opp_history, self._opp_speed,

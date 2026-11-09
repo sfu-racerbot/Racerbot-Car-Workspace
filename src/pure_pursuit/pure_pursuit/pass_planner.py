@@ -201,7 +201,13 @@ def body_points(limits):
 
 
 def build(line, s0, d, mode, limits, walls, *, side=0, target=0.0):
-    """Plan from Frenet samples; None if it needs more steering than the car has."""
+    """Plan from Frenet samples.
+
+    A sample needing more steering than the car has is marked blocked, like a
+    wall: a stop that reaches it is refused, and an entry needs none anywhere
+    along the whole manoeuvre, but a bend far beyond the stop does not veto
+    the plan. None only for degenerate geometry.
+    """
     s_rel = np.arange(len(d)) * limits.spacing
     s = s0 + s_rel
     xy = line.point(s, d)
@@ -212,8 +218,7 @@ def build(line, s0, d, mode, limits, walls, *, side=0, target=0.0):
         return None
     seg = np.r_[step, step[-1]]
     curvature = racing_math.estimate_signed_path_curvature(xy, closed=False)  # signed: the laws feed it forward
-    if np.any(np.abs(np.arctan(limits.wheelbase * curvature)) > limits.steering):
-        return None
+    unsteerable = np.abs(np.arctan(limits.wheelbase * curvature)) > limits.steering
     speed = np.minimum(line.sample(line.speed, s),
                        np.sqrt(limits.lateral_accel / np.maximum(np.abs(curvature), 1e-9)))
     for i in range(len(speed) - 2, -1, -1):
@@ -231,6 +236,7 @@ def build(line, s0, d, mode, limits, walls, *, side=0, target=0.0):
     turn = np.abs(np.r_[np.diff(np.unwrap(yaw)), 0.0])
     radius = math.hypot(limits.length, limits.width / 2)
     clear = clear - slack - seg / 2 - radius * turn / 2
+    clear = np.where(unsteerable, -math.inf, clear)
     cumulative = racing_math.compute_cumulative_arc_length(seg)
     context = tracking_laws.PathContext(xy, seg, cumulative, speed, curvature, False)
     return Plan(mode, context, s, np.asarray(d, float), heading, np.r_[0.0, np.cumsum(step)],
@@ -499,8 +505,9 @@ def entry(line, pose, speed, opponent, walls, limits, *, nominal):
             reasons.append(f'{name}: no pass path (steering, speed bound or length)')
             continue
         if np.any(whole.wall < limits.wall_margin):
-            short = float(whole.dist[int(np.argmax(whole.wall < limits.wall_margin))])
-            reasons.append(f'{name}: wall {short:.1f}m along a {whole.dist[-1]:.1f}m pass')
+            k = int(np.argmax(whole.wall < limits.wall_margin))
+            what = 'wall' if math.isfinite(whole.wall[k]) else 'unsteerable'
+            reasons.append(f'{name}: {what} {whole.dist[k]:.1f}m along a {whole.dist[-1]:.1f}m pass')
             continue
         plan = manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, mode='pass', hold=True)
         # A crawl is enough to start: the cap rises as the shift clears the
@@ -530,13 +537,19 @@ def explain(plan, speed, opponent, line, limits):
     reached = plan.dist <= stop + limits.spacing
     walls = np.flatnonzero(reached & (plan.wall < limits.wall_margin))
     if walls.size:
+        if not math.isfinite(plan.wall[walls[0]]):
+            return f'unsteerable at {plan.dist[walls[0]]:.1f}m of the stop'
         return f'wall {plan.wall[walls[0]]:.2f}m at {plan.dist[walls[0]]:.1f}m of the stop'
     if opponent is not None:
         times = braking_times(plan.dist, speed, limits)
         for k in np.flatnonzero(reached):
             t = times[k] if math.isfinite(times[k]) else limits.response + speed / limits.brake
             if _overlaps(plan, k, t, opponent, line, limits):
-                return f'stopped car reachable at {plan.dist[k]:.1f}m (d={plan.d[k]:+.2f}, t={t:.2f}s)'
+                lo, hi, half = opponent_box(opponent, t, limits)
+                return (f'car reachable at {plan.dist[k]:.1f}m (d={plan.d[k]:+.2f}, t={t:.2f}s; '
+                        f'car d={opponent.lateral:+.2f} +/-{half:.2f}, arc {line.wrap(lo - plan.s[k]):+.2f}'
+                        f'..{line.wrap(hi - plan.s[k]):+.2f} from ours, bound {opponent.speed_bound:.2f}m/s '
+                        f'unseen {opponent.age:.2f}s)')
         if _overlaps(plan, int(np.flatnonzero(reached)[-1]), math.inf, opponent, line, limits):
             return 'stopped car reaches the stopped pose'
     return ''
