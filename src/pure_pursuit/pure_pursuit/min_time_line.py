@@ -168,6 +168,148 @@ def lap_time(xy, physics: CarPhysics) -> float:
     return float(np.sum(2.0 * seg / (speed + np.roll(speed, -1))))
 
 
+# Batched copies of the lap-time chain above, one path per row, for the optimizer's gradient.
+#
+# L-BFGS-B with no gradient function estimates one by finite differences: one full lap-time evaluation per
+# control point per step, each a few hundred stations of NumPy, so Python overhead, not arithmetic, set the
+# build time (20.6 min on one core for car 2's 2026-10-30 course, 2026-11-10). These compute the same
+# quantities for B paths at once. They must stay in step with the single-path functions above;
+# tests/test_min_time_batch.py checks every one row by row against them.
+
+def _row_searchsorted(table, query, side):
+    """np.searchsorted(table[r], query[r], side) for every row r. table: (B, T) ascending; query: (B, Q)."""
+    rows, width = table.shape
+    # Place each row in its own band so one flat search finds indices row by row. Only the indices come
+    # from the shifted values; every interpolated value is computed from the unshifted ones.
+    lo = np.minimum(table[:, :1], query.min(axis=1, keepdims=True))
+    span = float(np.max(np.maximum(table[:, -1:], query.max(axis=1, keepdims=True)) - lo)) + 1.0
+    band = (np.arange(rows, dtype=float) * span)[:, None]
+    flat = np.searchsorted((table - lo + band).ravel(), (query - lo + band).ravel(), side=side)
+    return flat.reshape(query.shape) - (np.arange(rows) * width)[:, None]
+
+
+def _row_interp(x, xp, fp):
+    """np.interp(x[r], xp[r], fp[r]) for every row, x inside [xp[r, 0], xp[r, -1]]."""
+    j = np.clip(_row_searchsorted(xp, x, 'right') - 1, 0, xp.shape[1] - 2)
+    x0 = np.take_along_axis(xp, j, axis=1)
+    x1 = np.take_along_axis(xp, j + 1, axis=1)
+    y0 = np.take_along_axis(fp, j, axis=1)
+    y1 = np.take_along_axis(fp, j + 1, axis=1)
+    return (y1 - y0) / (x1 - x0) * (x - x0) + y0     # numpy's own form: slope * (x - xp[j]) + fp[j]
+
+
+def _batch_curvature(xy):
+    """signed_curvature for every row of xy (B, n, 2)."""
+    previous = np.roll(xy, 1, axis=1)
+    following = np.roll(xy, -1, axis=1)
+    a = np.hypot(*np.moveaxis(following - xy, 2, 0))
+    b = np.hypot(*np.moveaxis(xy - previous, 2, 0))
+    c = np.hypot(*np.moveaxis(following - previous, 2, 0))
+    cross = ((xy[..., 0] - previous[..., 0]) * (following[..., 1] - previous[..., 1])
+             - (xy[..., 1] - previous[..., 1]) * (following[..., 0] - previous[..., 0]))
+    denominator = a * b * c
+    usable = denominator > 1e-12
+    return np.where(usable, 2.0 * cross / np.where(usable, denominator, 1.0), 0.0)
+
+
+def _batch_accel_brake(cap, seg, physics):
+    n = cap.shape[1]
+    w = np.tile(cap ** 2, (1, 3))
+    ds = np.tile(seg, (1, 3))
+    S = np.concatenate([np.zeros((len(cap), 1)), np.cumsum(ds, axis=1)[:, :-1]], axis=1)
+    R = np.cumsum(ds[:, ::-1], axis=1)[:, ::-1]
+    two_a, two_b = 2.0 * physics.a_accel, 2.0 * physics.a_brake
+    accel = two_a * S + np.minimum.accumulate(w - two_a * S, axis=1)
+    brake = two_b * R + np.minimum.accumulate((w - two_b * R)[:, ::-1], axis=1)[:, ::-1]
+    return np.sqrt(np.minimum(accel, brake)[:, n:2 * n])
+
+
+def _batch_respond_early(speed, s, delay):
+    if delay <= 0.0:
+        return speed
+    rows, n = speed.shape
+    total = s[:, -1:]
+    pos = np.concatenate([s[:, :-1], s[:, :-1] + total], axis=1)
+    plan = np.concatenate([speed, speed], axis=1)
+    out = speed.copy()
+    idx = np.arange(n)[None, :]
+    j = _row_searchsorted(pos, pos[:, :n] + speed * delay, 'right')
+    width = np.maximum(j - idx, 1)
+    for k in range(1, int(width.max())):
+        out = np.where(width > k, np.minimum(out, plan[:, k:k + n]), out)
+    return out
+
+
+def _batch_speed_profile(xy, physics: CarPhysics, passes: int = 3):
+    """speed_profile for every row of xy (B, n, 2), without its input checks (the optimizer's own paths)."""
+    d = np.roll(xy, -1, axis=1) - xy
+    seg = np.hypot(d[..., 0], d[..., 1])
+    kappa = _batch_curvature(xy)
+    grip = np.where(kappa >= 0.0, physics.a_lat_left, physics.a_lat_right)
+    with np.errstate(divide='ignore'):
+        v_corner = np.sqrt(grip / np.maximum(np.abs(kappa), 1e-9))
+    cap = np.minimum(v_corner, physics.v_max)
+    rows = len(xy)
+    s = np.concatenate([np.zeros((rows, 1)), np.cumsum(seg, axis=1)], axis=1)
+    total = s[:, -1:]
+    kappa_closed = np.concatenate([kappa, kappa[:, :1]], axis=1)
+    mean_seg = np.mean(seg, axis=1, keepdims=True)
+    speed = cap.copy()
+    for _ in range(passes):
+        window = np.maximum(speed * physics.steering_delay, 2.0 * mean_seg)
+        ahead = _row_interp((s[:, :-1] + window) % total, s, kappa_closed)
+        behind = _row_interp((s[:, :-1] - window) % total, s, kappa_closed)
+        slope = np.maximum(np.abs(ahead - kappa), np.abs(kappa - behind)) / window
+        with np.errstate(divide='ignore'):
+            v_rate = physics.curvature_rate / np.maximum(slope, 1e-9)
+        speed = np.minimum(cap, v_rate)
+        speed = _batch_accel_brake(speed, seg, physics)
+        speed = _batch_respond_early(speed, s, physics.speed_delay)
+    return np.maximum(speed, physics.v_min), kappa, seg
+
+
+def _batch_lap_time(xy, physics: CarPhysics):
+    """lap_time for every row of xy (B, n, 2): an array of B lap times."""
+    speed, _, seg = _batch_speed_profile(xy, physics)
+    return np.sum(2.0 * seg / (speed + np.roll(speed, -1, axis=1)), axis=1)
+
+
+def _forward_difference_steps(x0, lo, hi, step):
+    """The steps scipy 1.11's 2-point approx_derivative takes for L-BFGS-B's `eps` (an absolute step):
+    +step, or -step where +step would leave the bounds, or the room to the further bound where neither fits
+    (scipy.optimize._numdiff, approx_derivative and _adjust_scheme_to_bounds, '1-sided')."""
+    h = np.full_like(x0, step)
+    sign_x0 = (x0 >= 0).astype(float) * 2 - 1
+    h = np.where((x0 + h) - x0 == 0, np.finfo(float).eps ** 0.5 * sign_x0 * np.maximum(1.0, np.abs(x0)), h)
+    if np.all((lo == -np.inf) & (hi == np.inf)):
+        return h
+    lower_dist, upper_dist = x0 - lo, hi - x0
+    x = x0 + h
+    violated = (x < lo) | (x > hi)
+    fitting = np.abs(h) <= np.maximum(lower_dist, upper_dist)
+    h = np.where(violated & fitting, -h, h)
+    forward = (upper_dist >= lower_dist) & ~fitting
+    backward = (upper_dist < lower_dist) & ~fitting
+    h = np.where(forward, upper_dist, h)
+    return np.where(backward, -lower_dist, h)
+
+
+def forward_difference_gradient(batch_cost, x0, lo, hi, step):
+    """(f(x0), gradient) by scipy's 2-point rule, every perturbed point evaluated in one batch_cost call.
+
+    batch_cost maps (B, m) points to B costs. Matches scipy.optimize.approx_derivative(method='2-point',
+    abs_step=step, bounds=(lo, hi)) exactly (tests/test_min_time_batch.py), except that a control fixed by
+    lo == hi gets 0 where scipy gives NaN."""
+    x0 = np.asarray(x0, dtype=float)
+    h = _forward_difference_steps(x0, lo, hi, step)
+    points = np.vstack([x0, x0 + np.diag(h)])
+    values = batch_cost(points)
+    dx = np.diagonal(points[1:]) - x0          # scipy recomputes dx as the exactly representable step
+    # A control whose bounds have closed onto it (a repair pulls both to the corridor's middle) cannot
+    # move: scipy divides 0 by 0 there and hands L-BFGS-B a NaN; its derivative within the bounds is 0.
+    return float(values[0]), (values[1:] - values[0]) / np.where(dx == 0.0, 1.0, dx)
+
+
 def cone_clearance(field_at, xy, laser_x=0.26, half_fov=math.radians(30.0), beams=13, max_range=1.5,
                    step_floor=0.01):
     """Shortest forward-cone LiDAR range at each station, driving along the path's own heading.
@@ -225,7 +367,7 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
                       half_width=0.155, wall_margin=0.10, emergency_stop_distance=0.35, cone_margin=0.10,
                       body_floor=0.08, control_spacing=1.0, smoothing=0.5, max_iter=300, repairs=8,
                       body_floor_tight=None,
-                      laser_x=0.26, speed_floor_gain=0.0, speed_floor_from=3.0):
+                      laser_x=0.26, speed_floor_gain=0.0, speed_floor_from=3.0, batched_gradient=True):
     """The fastest closed line inside the corridor that keeps every safety margin.
 
     center: (n, 2) closed, smooth reference line (the minimum-curvature line, normally); width_left/right:
@@ -234,6 +376,9 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
     candidate line is smooth: free per-point offsets make kinks that the curvature, and so the speed
     profile, cannot tell from real corners.
     Returns MinTimeLine; ok is False, with the reason, when no line keeps the margins.
+    batched_gradient: evaluate L-BFGS-B's finite-difference gradient in one batched pass (the same steps
+    scipy takes, forward_difference_gradient) rather than letting scipy call the cost once per control
+    point. False is the original path, kept to compare against.
     """
     from scipy.interpolate import CubicSpline
     from scipy.optimize import minimize
@@ -286,13 +431,28 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
         return (lap_time(xy, physics) + smoothing * float(np.sum(second ** 2))
                 + 1000.0 * float(np.sum(excess ** 2)))
 
+    # The spline is linear in its control values, so stations(c) == basis @ c for every c.
+    basis = CubicSpline(knots, np.vstack([np.eye(m), np.eye(m)[:1]]), bc_type='periodic')(s[:-1])
+
+    def batch_cost(controls):
+        xy = center[None] + (controls @ basis.T)[..., None] * normals[None]
+        second = np.roll(controls, -1, axis=1) - 2.0 * controls + np.roll(controls, 1, axis=1)
+        excess = np.maximum(np.abs(_batch_curvature(xy)) - limit, 0.0)
+        return (_batch_lap_time(xy, physics) + smoothing * np.sum(second ** 2, axis=1)
+                + 1000.0 * np.sum(excess ** 2, axis=1))
+
     start_lap = lap_time(line(stations(control)), physics)
     need_cone = emergency_stop_distance + cone_margin
     for _ in range(repairs + 1):
         lo, hi = control_bounds()
         control = np.clip(control, lo, hi)
-        result = minimize(cost, control, method='L-BFGS-B', bounds=list(zip(lo, hi)),
-                          options={'maxiter': max_iter, 'eps': 1e-4})
+        if batched_gradient:
+            result = minimize(lambda c, lo=lo, hi=hi: forward_difference_gradient(batch_cost, c, lo, hi, 1e-4),
+                              control, jac=True, method='L-BFGS-B', bounds=list(zip(lo, hi)),
+                              options={'maxiter': max_iter})
+        else:
+            result = minimize(cost, control, method='L-BFGS-B', bounds=list(zip(lo, hi)),
+                              options={'maxiter': max_iter, 'eps': 1e-4})
         control = np.clip(result.x, lo, hi)
         offsets = stations(control)
         xy = line(offsets)
