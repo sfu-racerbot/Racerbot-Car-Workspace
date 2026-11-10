@@ -127,3 +127,29 @@ def test_november_floor_reaches_the_plant_and_new_track_contact_layer():
             SIM / 'maps' / 'car2_course_2026_11_06b_centerline.csv').read_bytes()
     finally:
         plant.close()
+
+
+def test_november_9_floor_is_november_6_plus_braking_and_a_grip_circle():
+    # Oracle: the 2026-11-09 hypothesis in calibration.py -- run 20261109-190202 braked at
+    # ~4.4 m/s^2 and cornered 2.6-2.8; everything else is the 2026-11-06 fit, unchanged.
+    old, new = FLOORS[NAME].overrides, FLOORS['sfu_course_2026_11_09'].overrides
+    changed = {k for k in set(old) | set(new) if old.get(k) != new.get(k)}
+    assert changed == {'floor', 'speed_loop_brake_max', 'grip_circle_radius'}
+    assert new['speed_loop_brake_max'] == 4.4 and new['grip_circle_radius'] == 4.9  # m/s^2
+    assert set(FLOORS['sfu_course_2026_11_09'].sources) >= set(new)
+
+
+def test_november_9_grip_circle_reaches_the_plant():
+    import eval_gap
+    plant = eval_gap.make_plant('car2_course_2026_11_09', 12345,
+                                with_floor('sfu_course_2026_11_09', calibration_for_car('rb2')))
+    try:
+        assert isinstance(plant.grip[0], ProgressiveGrip)
+        assert plant.grip[0].circle_radius == 4.9
+    finally:
+        plant.close()
+    plant = eval_gap.make_plant('car2_course_2026_11_09', 12345, with_floor(NAME, calibration_for_car('rb2')))
+    try:
+        assert plant.grip[0].circle_radius is None
+    finally:
+        plant.close()

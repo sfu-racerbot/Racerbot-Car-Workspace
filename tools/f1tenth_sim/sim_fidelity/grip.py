@@ -153,6 +153,10 @@ class ProgressiveGrip:
 
     curve: tuple
     wheelbase: float
+    # Radius of a friction circle in m/s^2 that braking and accelerating draw on, or None
+    # for none (the 2026-10-30 and 2026-11-06 floors: up to 3 m/s^2 of braking cost no
+    # cornering). Harder braking does: see calibration.grip_circle_radius.
+    circle_radius: float | None = None
     limited_steps: int = 0
     total_steps: int = 0
     max_demanded_lateral: float = 0.0
@@ -176,6 +180,9 @@ class ProgressiveGrip:
             return steering
         demanded = abs(math.tan(steering)) * speed * speed / self.wheelbase
         allowed = self.deliver(demanded)
+        if self.circle_radius is not None:
+            remaining = self.circle_radius ** 2 - longitudinal_accel ** 2
+            allowed = min(allowed, math.sqrt(remaining) if remaining > 0.0 else 0.0)
         self.max_demanded_lateral = max(self.max_demanded_lateral, demanded)
         self.max_allowed_lateral = max(self.max_allowed_lateral, allowed)
         if allowed < demanded:

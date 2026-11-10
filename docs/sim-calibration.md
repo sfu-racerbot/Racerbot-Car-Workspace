@@ -375,6 +375,21 @@ RB_NO_QUEUE=1 RB_WS=$(pwd) rb python3 -m pytest tools/f1tenth_sim/tests/ -q -p n
 
 **Working when:** the build finishes with one package and pytest reports **572 passed**, including all 12 new cases (six tests under two car selections). Without that local build, two existing node-parity cases fail to import `drive_intent`; no test was changed to bypass them.
 
+## Car 2 on 2026-11-09: a hypothesis, not a calibration
+
+On 2026-11-09 car 2's map racer ran wide into the wall at the same corner in all four runs on course `car2_course_2026_11_09`. The 2026-11-06 floor laps that same line cleanly, so it cannot be trusted at this corner.
+
+`--floor sfu_course_2026_11_09` adds the two things the crash runs showed, and nothing else:
+
+- **Harder braking:** `speed_loop_brake_max` 4.4 m/s² instead of 3.0. Run `20261109-190202` slowed from 4.91 to 3.07 m/s on the wheels in 0.40 s at turn-in.
+- **A friction circle under the grip curve:** `grip_circle_radius` 4.9 m/s². Braking now takes grip away from cornering (`sim_fidelity/grip.py`, `ProgressiveGrip`). The radius fits both days. At 3 m/s² of braking it leaves 3.9 m/s² for cornering, more than the ~2.7 the car achieved on 2026-11-06. At 4.4 m/s² it leaves 2.2, close to the 2.6-2.8 the car achieved on 2026-11-09.
+
+**It still does not reproduce the crash.** The simulated car lapped the real line with no contact and at most 0.27 m cross-track. So do not use this floor to certify a fix for that corner.
+
+Replaying the real commands open-loop through the plant matches the car's turning rate through the corner closely. What the plant does not model is localization: the particle filter's heading in that corner trailed the scan-matched truth by 4-7°. The filter predicts from `/odom`, whose steering-model heading assumes no tyre slip. The gyro stayed within about 3° of truth.
+
+Only a floor test can check the fixes made in response: the particle filter on gyro odometry (`race_launch.py`, `pf_gyro_odom`) and a lower top speed.
+
 ## Measuring a new floor
 
 1. Drive at least six runs on it, including some hard corners and one hard straight-line stop from over 3 m/s, and save a map.

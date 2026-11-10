@@ -179,6 +179,9 @@ class CarCalibration:
     # Lateral acceleration the rack asks for to what the tyres deliver,
     # ((asked, delivered), ...), ascending. None keeps GripEnvelope's sharp limit.
     grip_curve: tuple | None = None
+    # With grip_curve: the radius of the friction circle that longitudinal acceleration
+    # draws on, m/s^2. None: braking and accelerating cost no cornering.
+    grip_circle_radius: float | None = None
     # True speed the car settles at per unit of commanded speed.
     speed_command_scale: float = 1.0
     # What /odom reads per unit of true speed.
@@ -422,6 +425,7 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     ),
     "steering_linkage": (Provenance.ESTIMATED, "off: the plain calibration has no linkage model. See FLOORS"),
     "grip_curve": (Provenance.ESTIMATED, "off: the plain calibration has a sharp friction circle. See FLOORS"),
+    "grip_circle_radius": (Provenance.ESTIMATED, "off: no friction circle on top of grip_curve. See FLOORS"),
     "speed_command_scale": (Provenance.DERIVED, "1: command taken as true speed. See FLOORS"),
     "odom_speed_scale": (Provenance.DERIVED, "1: odometry taken as true speed. See FLOORS"),
     "lidar_noise_per_metre": (Provenance.ESTIMATED, "0: flat noise. See FLOORS"),
@@ -670,6 +674,34 @@ FLOORS: dict[str, Floor] = {
         ),
     ),
 }
+
+# 2026-11-09: car 2's map racer ran wide into the wall on all four runs at one corner of
+# course car2_course_2026_11_09. Scan-to-map matching of run 20261109-190202 (no ROS stall
+# before the corner) shows it braking at ~4.4 m/s^2 (wheel 4.91 -> 3.07 m/s in 0.4 s, true
+# speed alike) while achieving only 2.6-2.8 m/s^2 of cornering against 6-7.5 asked. The
+# 2026-11-06 floor caps braking at 3.0 and charges it no grip, so it lapped that line clean.
+# One friction circle of radius 4.9 m/s^2 fits both days: at 3 m/s^2 of braking it leaves
+# 3.9 (no cost against the ~2.7 achieved on 2026-11-06), at 4.4 it leaves 2.2-2.7.
+SFU_COURSE_2026_11_09_RUNS = ("20261109-190202", "20261109-190837")
+FLOORS["sfu_course_2026_11_09"] = Floor(
+    name="sfu_course_2026_11_09",
+    description="The 2026-11-06 floor fit plus what car 2's 2026-11-09 crashes showed: braking "
+                "to 4.4 m/s^2 and a 4.9 m/s^2 friction circle under the grip curve. ESTIMATED "
+                "from two runs, not a replay fit.",
+    track="car2_course_2026_11_09",
+    fit_runs=SFU_COURSE_2026_11_09_RUNS,
+    held_out_runs=(),
+    overrides={**FLOORS["sfu_course_2026_11_06"].overrides,
+               "floor": "sfu_course_2026_11_09",
+               "speed_loop_brake_max": 4.4,
+               "grip_circle_radius": 4.9},
+    sources={**FLOORS["sfu_course_2026_11_06"].sources,
+             "floor": "2026-11-06 fit plus 2026-11-09 runs 190202, 190837 (scan-to-map matched poses)",
+             "speed_loop_brake_max": "ESTIMATED: run 20261109-190202, wheel 4.91 -> 3.07 m/s in 0.40 s at the "
+                                     "wp 78-89 corner; the 2026-10-30 wall stop measured 4.5",
+             "grip_circle_radius": "ESTIMATED: run 20261109-190202 achieved 2.6-2.8 m/s^2 lateral while braking "
+                                   "~4.4; sqrt(4.9^2 - 4.4^2) = 2.2, sqrt(4.9^2 - 3^2) = 3.9"},
+)
 
 
 def with_floor(name: str | None, base: CarCalibration | None = None) -> CarCalibration:
