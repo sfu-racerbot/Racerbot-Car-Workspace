@@ -643,6 +643,21 @@ not map the run, the report says so and still shows the other available data.
 
 ---
 
+## Finding graph stalls
+
+A graph stall is a moment when every ROS topic goes quiet at once. One slow topic means one slow sensor or node. All of them together means the whole ROS graph paused. A car at 5 m/s drives 1.75 m on its last command through a 0.35 s stall.
+
+On 2026-11-09, six of car 2's fourteen recorded runs had such a stall. In each one, `/scan`, `/odom`, the [particle filter](glossary.md#particle-filter)'s pose (the car's position on a saved map) and `/drive` stopped together for about 0.35 s, within seconds of a recorder joining the ROS graph. A process with no ROS in it kept running throughout, so the machine itself was not frozen.
+
+```bash
+# Dev box or car, workspace root, ROS sourced (rb on the dev box). Reads the bag, writes nothing.
+python3 tools/run_analysis/graph_stalls.py data/rb2/racerbot_runs/<time> [more runs ...]
+```
+
+**Working when:** it prints one line per run, `N graph stall(s) over /scan, /odom, ...`, followed by one line per stall giving when it started and how long it lasted. It exits 1 if any run had a stall, so a script can check a test run.
+
+Only topics with at least two messages count, and only the stretch where all of them were publishing is judged. A topic that started late or stopped early cannot fake a stall. `--min-gap` (default 0.15 s) sets how long a silence must be; `--topics` replaces the list.
+
 ## Rebuilding a racing folder from a run
 
 `map_course` does this for you after every run. Run it by hand for an older run, or one whose check was interrupted:

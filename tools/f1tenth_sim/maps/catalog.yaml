@@ -21,6 +21,19 @@ car2_course_2026_11_06a:
   width_median_m: 1.5
   width_min_m: 0.9
   width_p10_m: 1.06
+car2_course_2026_11_06a_scans:
+  import_command: python3 tools/run_analysis/scan_map.py data/rb2/racerbot_runs/20261106-163633
+    data/rb2/racerbot_runs/20261106-164401 data/rb2/racerbot_runs/20261106-170803
+    --map data/rb2/racerbot_auto/20261106-164002-rebuilt --check data/rb2/racerbot_runs/20261106-171030
+    --out tools/f1tenth_sim/maps/car2_course_2026_11_06a_scans; the centerline is
+    car2_course_2026_11_06a's
+  lap_length_m: 32.28
+  source: 'car 2 course, 2026-11-06 afternoon: walls of car2_course_2026_11_06a corrected
+    by where real scans landed, on fit runs 163633, 164401, 170803. Contact walls''
+    median offset on held-out run 171030 -0.3 cm, against +4.2 cm before'
+  width_median_m: 1.5
+  width_min_m: 0.9
+  width_p10_m: 1.06
 car2_course_2026_11_06b:
   import_command: 'python3 tools/f1tenth_sim/track_import.py data/rb2/racerbot_auto/20261106-184753-rebuilt/map.yaml
     --name car2_course_2026_11_06b --source ''car 2 course, 2026-11-06 evening (22
@@ -42,6 +55,16 @@ car2_course_2026_11_06b_scans:
   width_median_m: 1.4
   width_min_m: 0.98
   width_p10_m: 1.1
+car2_course_2026_11_09:
+  import_command: python3 tools/f1tenth_sim/track_import.py data/rb2/racerbot_auto/20261109-185146-rebuilt/map.yaml
+    --name car2_course_2026_11_09 --source 'car 2 SLAM map, run 20261109-185146 (rebuilt
+    line); the course where all four 2026-11-09 map-racer runs hit the wall'
+  lap_length_m: 43.94
+  source: car 2 SLAM map, run 20261109-185146 (rebuilt line); the course where all
+    four 2026-11-09 map-racer runs hit the wall
+  width_median_m: 1.6
+  width_min_m: 0.1
+  width_p10_m: 1.18
 circular_obs:
   import_command: python3 tools/f1tenth_sim/track_import.py tools/f1tenth_sim/maps/sources/circularTrack.yaml
     --name circular_obs --source 'sfu-racerbot/racerbot_a src/maps/circularTrack.yaml
@@ -103,15 +126,3 @@ room_2026_07_27:
   width_median_m: 1.42
   width_min_m: 0.98
   width_p10_m: 1.1
-car2_course_2026_11_06a_scans:
-  import_command: python3 tools/run_analysis/scan_map.py data/rb2/racerbot_runs/20261106-163633
-    data/rb2/racerbot_runs/20261106-164401 data/rb2/racerbot_runs/20261106-170803 --map data/rb2/racerbot_auto/20261106-164002-rebuilt
-    --check data/rb2/racerbot_runs/20261106-171030 --out tools/f1tenth_sim/maps/car2_course_2026_11_06a_scans;
-    the centerline is car2_course_2026_11_06a's
-  lap_length_m: 32.28
-  source: 'car 2 course, 2026-11-06 afternoon: walls of car2_course_2026_11_06a corrected
-    by where real scans landed, on fit runs 163633, 164401, 170803. Contact walls'' median
-    offset on held-out run 171030 -0.3 cm, against +4.2 cm before'
-  width_median_m: 1.5
-  width_min_m: 0.9
-  width_p10_m: 1.06

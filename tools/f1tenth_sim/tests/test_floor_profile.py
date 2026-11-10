@@ -60,6 +60,33 @@ def test_progressive_grip_leaves_slow_steering_alone():
     assert g.apply(0.4, KINEMATIC_SPEED - 0.01) == 0.4
 
 
+def test_progressive_grip_without_a_circle_ignores_braking():
+    # Pins the 2026-10-30 / 2026-11-06 floors: braking cost no cornering there.
+    g = ProgressiveGrip(CURVE, L)
+    assert g.apply(0.2, 3.0, longitudinal_accel=-4.4) == pytest.approx(g.apply(0.2, 3.0), abs=1e-12)
+
+
+def test_progressive_grip_circle_caps_cornering_by_what_braking_leaves():
+    # Oracle: friction circle, a_lat <= sqrt(R^2 - a_x^2), and a_lat = v^2 tan(delta) / L.
+    radius, v, steering = 4.9, 3.0, 0.3            # asks 9 tan(0.3)/0.36 = 7.7 m/s^2
+    g = ProgressiveGrip(CURVE, L, circle_radius=radius)
+    for a_x in (-4.4, 4.4):                        # braking and accelerating alike
+        out = g.apply(steering, v, longitudinal_accel=a_x)
+        assert v * v * math.tan(out) / L == pytest.approx(math.sqrt(radius ** 2 - 4.4 ** 2), abs=1e-9)  # m/s^2
+    # Gentle braking leaves more than the curve delivers: the curve binds, not the circle.
+    # 0.12 rad asks 9 tan(0.12)/0.36 = 3.0 m/s^2; the curve delivers 2.5, the circle leaves 3.9.
+    gentle = g.apply(0.12, v, longitudinal_accel=-3.0)
+    assert v * v * math.tan(gentle) / L == pytest.approx(g.deliver(v * v * math.tan(0.12) / L), abs=1e-9)
+    assert g.apply(-steering, v, longitudinal_accel=-4.4) == pytest.approx(
+        -g.apply(steering, v, longitudinal_accel=-4.4), abs=1e-12)
+
+
+def test_progressive_grip_circle_leaves_nothing_past_its_radius():
+    g = ProgressiveGrip(CURVE, L, circle_radius=4.9)
+    assert g.apply(0.3, 3.0, longitudinal_accel=-4.9) == pytest.approx(0.0, abs=1e-12)
+    assert g.apply(0.3, 3.0, longitudinal_accel=-6.0) == pytest.approx(0.0, abs=1e-12)
+
+
 @pytest.mark.parametrize("curve", [((0.0, 0.0),), ((0.0, 0.0), (2.0, 2.0), (1.0, 3.0)),
                                    ((0.0, 0.0), (2.0, 2.0), (3.0, 1.0))])
 def test_progressive_grip_refuses_a_curve_that_is_not_ascending(curve):
