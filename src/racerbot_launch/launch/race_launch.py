@@ -3,16 +3,6 @@ import os
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription,
-                            LogInfo, OpaqueFunction, RegisterEventHandler)
-from launch.event_handlers import OnProcessExit
-from launch.events import Shutdown
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
-from pure_pursuit import run_commands
-from racerbot_car.layers import effective_values, layered, launch_car_id
 
 # The car's Hokuyo UST-10LX publishes 1081 beams (0.25 deg over 270 deg) --
 # same constant racerbot_sim uses, see sim_bridge.py's LIDAR_BEAMS.
@@ -22,6 +12,33 @@ LIDAR_BEAMS = 1081
 # CHUNK_SIZE floats at construction (kernels.cu's cudaMalloc calls), and
 # CHUNK_SIZE is fixed at compile time in range_libc/pywrapper/setup.py.
 RANGE_LIBC_CHUNK_SIZE = 262144
+
+
+def _flag(name, value):
+    """Parse a launch boolean using the same values as IfCondition."""
+    text = str(value).strip().lower()
+    if text in ('true', '1'):
+        return True
+    if text in ('false', '0'):
+        return False
+    raise RuntimeError(f"{name}:={value!r}: expected 'true' or 'false'")
+
+
+def pf_odometry_topic(imu, pf_gyro_odom, run_dir):
+    """Choose PF odometry; an empty flag follows imu only with a saved run."""
+    imu_enabled = _flag('imu', imu)
+    gyro = (imu_enabled and bool(run_dir) if pf_gyro_odom == ''
+            else _flag('pf_gyro_odom', pf_gyro_odom))
+    if gyro and not imu_enabled:
+        raise RuntimeError(
+            'pf_gyro_odom:=true needs imu:=true: /odom/imu comes from the IMU '
+            'stack, and without it the particle filter would have no odometry at all.')
+    if gyro and not run_dir:
+        raise RuntimeError(
+            'pf_gyro_odom:=true needs run_dir:=<directory>: particle_filter\'s '
+            'localize_launch.py cannot select odometry. Pass run_dir:=<directory> '
+            'or pf_gyro_odom:=false.')
+    return '/odom/imu' if gyro else '/odom'
 
 
 def _check_gpu_ray_caster(pf_params):
@@ -123,6 +140,19 @@ def generate_launch_description():
           ros2 launch racerbot_launch race_launch.py \
               waypoints_file:=/path/to/track_profiled.csv
     """
+    # Keep the decision helpers importable without ROS.
+    from gap_follow.launch_imu import select_imu_hardware
+    from launch import LaunchDescription
+    from launch.actions import (DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription,
+                                LogInfo, OpaqueFunction, RegisterEventHandler)
+    from launch.event_handlers import OnProcessExit
+    from launch.events import Shutdown
+    from launch.launch_description_sources import PythonLaunchDescriptionSource
+    from launch.substitutions import LaunchConfiguration
+    from launch_ros.actions import Node
+    from pure_pursuit import run_commands
+    from racerbot_car.layers import effective_values, layered, launch_car_id
+
     # Read pure_pursuit's own config at generation time (same pattern
     # particle_filter's localize_launch.py and pure_pursuit_launch.py
     # both already use) so that *not* passing waypoints_file here falls
@@ -159,6 +189,18 @@ def generate_launch_description():
     start_arg = DeclareLaunchArgument(
         'start', default_value='anywhere', choices=run_commands.START_MODES,
         description='anywhere: find the car from LiDAR; start_pose: use the mapping stop.')
+    imu_args = [
+        DeclareLaunchArgument(
+            'imu', default_value='true',
+            description='Run the IMU stack. Keep the car still for about 3 s for gyro bias.'),
+        DeclareLaunchArgument(
+            'imu_hardware', default_value='auto',
+            description='auto detects the simulator; true/false select real/simulated IMU inputs.'),
+        DeclareLaunchArgument(
+            'pf_gyro_odom', default_value='',
+            description='Use /odom/imu for localization. Empty follows imu with run_dir, '
+                        'otherwise false. true needs imu:=true and run_dir.'),
+    ]
 
     # Same trick for particle_filter's config, but to check it rather than to
     # read a default out of it: a bad GPU ray-caster setting fails here, at
@@ -171,6 +213,19 @@ def generate_launch_description():
 
     def layers(context):
         run_dir = os.path.expanduser(LaunchConfiguration('run_dir').perform(context))
+        imu = LaunchConfiguration('imu').perform(context)
+        odometry_topic = pf_odometry_topic(
+            imu, LaunchConfiguration('pf_gyro_odom').perform(context), run_dir)
+        imu_actions = []
+        if _flag('imu', imu):
+            hardware, _ = select_imu_hardware(
+                LaunchConfiguration('imu_hardware').perform(context))
+            imu_actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(os.path.join(
+                    get_package_share_directory('imu_bridge'),
+                    'launch', 'vehicle_state_launch.py')),
+                # PF owns map -> laser; racing must never parent odom.
+                launch_arguments={'hardware': hardware, 'publish_odom_tf': 'false'}.items()))
         steering_law = LaunchConfiguration('steering_law').perform(context)
         seeder = None
         if not run_dir:
@@ -190,7 +245,8 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(os.path.join(
                     get_package_share_directory('racerbot_launch'),
                     'launch', 'localize_run_launch.py')),
-                launch_arguments={'map_yaml': map_yaml, 'standalone': 'true'}.items())]
+                launch_arguments={'map_yaml': map_yaml, 'standalone': 'true',
+                                  'odometry_topic': odometry_topic}.items())]
             if LaunchConfiguration('seed_start').perform(context).lower() in ('true', '1', 'yes'):
                 start = LaunchConfiguration('start').perform(context)
                 laser_offset_x = float(pp_params.get('laser_offset_x', 0.26))
@@ -224,7 +280,7 @@ def generate_launch_description():
                     'waypoints_file': waypoints, 'steering_law': steering_law,
                     'opponent_detection_settle_sec': 0.0}])
         if seeder is None:
-            return localize + [pure_pursuit]
+            return imu_actions + localize + [pure_pursuit]
 
         # pure_pursuit starts only once the filter has taken the seed (the
         # seeder exits 0). Before that the filter publishes its own unseeded
@@ -236,8 +292,8 @@ def generate_launch_description():
                                 'pure_pursuit. See the seed_start_pose error above.'),
                     EmitEvent(event=Shutdown(reason='start pose not confirmed'))]
 
-        return localize + [seeder, RegisterEventHandler(
+        return imu_actions + localize + [seeder, RegisterEventHandler(
             OnProcessExit(target_action=seeder, on_exit=after_seed))]
 
     return LaunchDescription([waypoints_arg, run_dir_arg, profile_arg, steering_law_arg, seed_arg, start_arg,
-                              OpaqueFunction(function=layers)])
+                              *imu_args, OpaqueFunction(function=layers)])
