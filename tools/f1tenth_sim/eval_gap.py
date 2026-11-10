@@ -145,7 +145,7 @@ def track_map_yaml(track_spec: str):
     return Path(path).parent / f"{Path(path).name}_map.yaml"
 
 
-def make_plant(track_spec: str, seed: int, calibration=None, car_id=None) -> FidelityPlant:
+def make_plant(track_spec: str, seed: int, calibration=None, car_id=None, max_laps: int = 1) -> FidelityPlant:
     """Build a fidelity plant for a gym circuit name or an indoor layout."""
     # The selected car's own calibration unless one (e.g. with a floor profile) is given.
     calibration = calibration if calibration is not None else calibration_for_car(car_id)
@@ -162,7 +162,7 @@ def make_plant(track_spec: str, seed: int, calibration=None, car_id=None) -> Fid
             integrator_timestep=INTEGRATOR_DT,
             integrator=IntegratorType.RK4,
             dynamics_model=DynamicModel.ST,
-            max_laps=1,
+            max_laps=max_laps,
         ),
         observation_config=ObservationConfig(type=ObservationType.DIRECT),
         lidar_config=components["lidar_config"],

@@ -78,6 +78,18 @@ def test_check_line_clear_wall_and_curvature():
     assert not ok and curvature > cfg.physics.curvature_limit + 0.02 and 'curvature' in reason
 
 
+def test_check_line_judges_body_room_against_the_speed_floor_too():
+    # oracle: closed form. A clearance field of 0.40 m everywhere gives 0.40 m of body room on a 4 m
+    # circle (footprint_clearance reads the field at the footprint): passes the 0.08 m default floor.
+    # The circle's planned speed is sqrt(2.45 * 4) = 3.13 m/s (left turns, default physics): a speed floor
+    # of gain 3.0 from 3.0 m/s adds 3.0 * 0.13 = 0.39 m -> 0.47 m needed, so the same line fails on body.
+    room = lambda x, y: np.full(np.broadcast(x, y).shape, 0.40)
+    ok, *_ = check_line(room, circle(4), RaceLineConfig())
+    assert ok
+    ok, _, _, _, reason = check_line(room, circle(4), replace(RaceLineConfig(), speed_floor_gain=3.0))
+    assert not ok and 'body' in reason
+
+
 def test_invalid_line_and_configuration():
     # oracle: spec, malformed geometry cannot be a safe closed path.
     at = lambda x, y: np.ones(np.broadcast(x, y).shape)
@@ -216,3 +228,27 @@ def test_car2_builds_a_minimum_time_line_on_course_06b(tmp_path):
     assert report['ok'] is True and report['choice'] == 'min_time', report
     chosen = next(c for c in report['candidates'] if c['source'] == 'min_time')
     assert chosen['ok'] and chosen['min_body_m'] >= 0.22, chosen   # m, the shipped body floor
+
+
+def test_min_time_keeps_the_fastest_passing_start(course):
+    # The minimum-time optimizer is local; started from the minimum-curvature line alone it stays near
+    # that wide line. The builder also starts from the recorded lap and the shortest line, and keeps the
+    # fastest result that passes the final checks (race_line._best_min_time, 2026-11-09).
+    grid, seed, cfg, _ = course
+    # Starts ordered so the fastest is neither the first nor the last tried.
+    order = ('recorded', 'shortest', 'min_curvature')
+    multi = {c.source: c for c in build_race_line(grid, seed, replace(cfg, min_time_starts=order)).candidates}
+    single = {c.source: c for c in
+              build_race_line(grid, seed, replace(cfg, min_time_starts=('min_curvature',))).candidates}
+    best, alone = multi['min_time'], single['min_time']
+    assert best.ok and alone.ok
+    # oracle: invariant, the single start is one of those tried, and the kept result is the fastest.
+    assert best.est_lap_s <= alone.est_lap_s
+    # oracle: recorded measurement, this fixture with the default config (2026-11-09): shortest start
+    # 10.818 s, minimum-curvature start 11.337 s, recorded start 14.106 s.
+    assert alone.est_lap_s - best.est_lap_s >= 0.3   # s
+    assert 'start shortest of: recorded' in best.reason
+    # oracle: independent, the kept line still passes the builder's own final check.
+    field = grid.clearance_field()
+    ok, *_ = check_line(lambda x, y: grid.clearance_at(x, y, field), best.xy, cfg)
+    assert ok

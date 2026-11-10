@@ -962,6 +962,37 @@ def detect_opponent_cluster(ranges: np.ndarray, angle_min: float, angle_incremen
     return best
 
 
+def lead_speed(speed_profile: np.ndarray, cumulative: np.ndarray, total_length: float,
+               nearest_idx: int, measured_speed: float, lead_time: float, closed: bool = True) -> float:
+    """The profile's speed for the car at waypoint ``nearest_idx``, accelerating ``lead_time`` early.
+
+    A speed loop answers a command late: car 2's fitted VESC loop waits about 0.1 s, then closes on the
+    command at 7/s, so following a profile that rises at a m/s^2 it trails by about a/7 m/s (0.4-0.6 m/s
+    out of every corner on the 6 Nov courses). Where the profile rises within the distance the car covers
+    in ``lead_time`` (at its measured speed, at least 0.5 m/s), this returns the higher speed found there,
+    linearly interpolated, so the speed loop starts climbing on time. It never returns less than the
+    profile here: braking is left to the planned profile, whose braking points already move earlier by the
+    speed loop's delay (min_time_line._respond_early). lead_time <= 0 returns speed_profile[nearest_idx]
+    exactly. Any curvature ceiling or slew stage after this still applies to the result.
+    """
+    here = float(speed_profile[nearest_idx])
+    if not (lead_time > 0.0) or not math.isfinite(lead_time):
+        return here
+    v = abs(float(measured_speed)) if math.isfinite(float(measured_speed)) else 0.0
+    reach = max(v, 0.5) * float(lead_time)
+    s_here = float(cumulative[nearest_idx])
+    s_ahead = s_here + reach
+    n = len(speed_profile)
+    if closed and total_length > 0.0:
+        xs = np.concatenate([cumulative, [total_length], cumulative + total_length])
+        vs = np.concatenate([speed_profile, [speed_profile[0]], speed_profile])
+    else:
+        xs, vs = np.asarray(cumulative, dtype=float), np.asarray(speed_profile, dtype=float)
+        s_ahead = min(s_ahead, float(cumulative[n - 1]))
+    ahead = float(np.interp(s_ahead, xs, vs))
+    return max(here, ahead)
+
+
 def compute_cumulative_arc_length(seg_len: np.ndarray) -> np.ndarray:
     """Running total of track distance up to (not including) each
     waypoint: cumulative[i] is how far along the track waypoint i is from

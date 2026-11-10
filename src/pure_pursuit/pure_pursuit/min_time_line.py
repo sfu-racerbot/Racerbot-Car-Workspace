@@ -132,9 +132,15 @@ def _respond_early(speed, s, delay):
     pos = np.concatenate([s[:-1], s[:-1] + total])
     plan = np.concatenate([speed, speed]).astype(float)
     out = speed.astype(float).copy()
-    for i in range(n):
-        j = int(np.searchsorted(pos, pos[i] + speed[i] * delay, side='right'))
-        out[i] = float(plan[i:max(j, i + 1)].min())
+    # out[i] = min(plan[i : max(j_i, i + 1)]), vectorized over i: the windows are only a few stations
+    # long (speed * delay over the station spacing), so loop over the offset k within a window instead
+    # of over the stations (the optimizer calls this once per lap-time evaluation, 2026-11-09).
+    idx = np.arange(n)
+    j = np.searchsorted(pos, pos[:n] + np.asarray(speed, dtype=float) * delay, side='right')
+    width = np.maximum(j - idx, 1)
+    for k in range(1, int(width.max())):
+        reach = width > k
+        out[reach] = np.minimum(out[reach], plan[idx[reach] + k])
     return out
 
 
@@ -219,7 +225,7 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
                       half_width=0.155, wall_margin=0.10, emergency_stop_distance=0.35, cone_margin=0.10,
                       body_floor=0.08, control_spacing=1.0, smoothing=0.5, max_iter=300, repairs=8,
                       body_floor_tight=None,
-                      laser_x=0.26):
+                      laser_x=0.26, speed_floor_gain=0.0, speed_floor_from=3.0):
     """The fastest closed line inside the corridor that keeps every safety margin.
 
     center: (n, 2) closed, smooth reference line (the minimum-curvature line, normally); width_left/right:
@@ -293,7 +299,9 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
         cone = cone_clearance(field_at, xy, laser_x=laser_x)
         body = footprint_clearance(field_at, xy, half_width=half_width)
         too_tight = np.abs(signed_curvature(xy)) > limit + 0.02
-        bad = (cone < need_cone) | (body < body_floor_at(xy, body_floor, body_floor_tight, limit))
+        floors = body_floor_at(xy, body_floor, body_floor_tight, limit) + speed_floor_extra(
+            xy, physics, speed_floor_gain, speed_floor_from)
+        bad = (cone < need_cone) | (body < floors)
         if not bad.any() and not too_tight.any():
             speed, _, _ = speed_profile(xy, physics)
             lap = lap_time(xy, physics)
@@ -345,6 +353,22 @@ def body_floor_at(xy, body_floor, body_floor_tight, curvature_limit, window_m=0.
     if half:
         weight = np.max([np.roll(weight, j) for j in range(-half, half + 1)], axis=0)
     return body_floor + (body_floor_tight - body_floor) * weight
+
+
+def speed_floor_extra(xy, physics: 'CarPhysics', gain, from_speed):
+    """Extra body clearance at each station for its planned speed: gain * max(v - from_speed, 0).
+
+    Tracking error grows with speed: on car 2's fitted floor the cross-track error was 0.09 m mean around
+    3 m/s, and a 4.1 m/s sweeper on a 7 m/s line ran a steady 0.25 m wide (2026-11-09), into a line
+    planned at the constant floor. ``gain`` 0 returns zeros (the constant/curvature floor alone).
+    """
+    xy = np.asarray(xy, dtype=float)
+    if not (math.isfinite(gain) and gain >= 0.0) or not math.isfinite(from_speed):
+        raise ValueError('speed floor gain must be finite and >= 0, from_speed finite')
+    if gain == 0.0:
+        return np.zeros(len(xy))
+    speed = speed_profile(xy, physics)[0]
+    return gain * np.maximum(speed - from_speed, 0.0)
 
 
 def offsets_of(center, line_xy):

@@ -236,6 +236,13 @@ class PurePursuitNode(Node):
         # closes in a few seconds; one that never does is not going to on
         # its own.
         self.declare_parameter('off_racing_line_recovery_timeout_sec', 5.0)
+        # Accelerate early: where the speed profile rises within the distance
+        # covered in this many seconds, command that higher speed now, so a
+        # lagging speed loop is not still climbing after the corner exit
+        # (racing_math.lead_speed). 0 = the profile speed at the car, exactly.
+        # Braking is never brought forward by this; the curvature ceiling and
+        # every safety stage still apply to the result.
+        self.declare_parameter('speed_lead_time', 0.0)
         # Frozen-localization watchdog: only armed once odometry is sure the
         # car is really moving, so a legitimately parked car never trips it.
         self.declare_parameter('pose_frozen_timeout_sec', 0.5)
@@ -496,6 +503,10 @@ class PurePursuitNode(Node):
             self.get_parameter('off_racing_line_recovery_speed').value)
         self.off_racing_line_recovery_timeout_sec = float(
             self.get_parameter('off_racing_line_recovery_timeout_sec').value)
+        self.speed_lead_time = float(self.get_parameter('speed_lead_time').value)
+        if not (math.isfinite(self.speed_lead_time) and 0.0 <= self.speed_lead_time <= 1.0):
+            raise ValueError(
+                f'speed_lead_time must be finite and in [0, 1] s, got {self.speed_lead_time}')
         self.pose_frozen_timeout_sec = float(
             self.get_parameter('pose_frozen_timeout_sec').value)
         self.pose_frozen_min_speed = float(
@@ -1726,7 +1737,10 @@ class PurePursuitNode(Node):
         if recovering:
             speed_cmd = min(self.off_racing_line_recovery_speed, self.max_speed)
         else:
-            speed_cmd = float(np.clip(speed_here, self.min_speed, self.max_speed))
+            profiled = racing_math.lead_speed(
+                self.speed_profile, self.cumulative_arc_length, self.total_track_length,
+                nearest_idx, self.current_speed, self.speed_lead_time, closed=self.closed_loop)
+            speed_cmd = float(np.clip(profiled, self.min_speed, self.max_speed))
         hard_speed_cap = self.max_speed
         decision_state = (
             'off_racing_line_recovery' if recovering else self.steering_law_name)

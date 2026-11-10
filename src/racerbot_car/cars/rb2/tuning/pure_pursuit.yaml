@@ -13,3 +13,7 @@ pure_pursuit_node:
     enable_opponent_overtake: false
     # why: car 2's measured 4/3 m/s² speed loop and transport/lag require braking before the emergency tier
     enable_opponent_following: true
+    # Car 2's fitted speed loop waits ~0.1 s then closes at 7/s, so it trails a
+    # rising profile by ~0.4-0.6 m/s out of every corner (2026-11-09 traces).
+    # why: car 2's measured speed-loop lag; leading acceleration by 0.25 s cut 06a 11.42 -> 11.31 s with no contact
+    speed_lead_time: 0.25

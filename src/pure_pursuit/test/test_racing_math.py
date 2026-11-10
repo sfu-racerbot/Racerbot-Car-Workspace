@@ -1284,3 +1284,72 @@ def test_every_contact_within_a_tenth_of_a_metre_trips_tier1(steering):
         if arc <= TRUST_CONTACT_M and not _single_return_free([point], _curvature(steering)) < TIER1_TRIP_M:
             misses.append((point, arc))
     assert not misses, misses[:5]
+
+
+# ============================================================================
+# lead_speed: accelerate early by the speed loop's response time
+# ============================================================================
+# A 10-waypoint profile 1 m apart: 1 m/s for waypoints 0-2, 3 m/s for 3-6, 1 m/s for 7-9. Every
+# expected value is linear interpolation on this profile, recomputed by hand in each test.
+LEAD_PROFILE = np.array([1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0, 1.0, 1.0, 1.0])
+LEAD_CUM = np.arange(10, dtype=float)      # cumulative[i] = i m
+LEAD_TOTAL = 10.0                          # closed: waypoint 9 -> 0 is 1 m
+
+
+@pytest.mark.parametrize('lead', [0.0, -0.3, float('nan'), float('inf')])
+def test_lead_speed_without_a_finite_positive_lead_is_the_profile_here(lead):
+    # oracle: spec (docstring), lead_time <= 0 or non-finite returns speed_profile[nearest] exactly.
+    for idx in range(10):
+        assert racing_math.lead_speed(LEAD_PROFILE, LEAD_CUM, LEAD_TOTAL, idx, 2.0, lead) == LEAD_PROFILE[idx]
+
+
+@pytest.mark.parametrize('lead,expected', [
+    (0.5, 1.0),     # reach 1.0 m -> s = 1.0, still 1 m/s
+    (1.0, 1.0),     # reach 2.0 m -> s = 2.0, the last 1 m/s waypoint
+    (1.25, 2.0),    # reach 2.5 m -> half way from 1 (wp 2) to 3 (wp 3): 1 + 0.5 * 2
+    (1.4, 2.6),     # reach 2.8 m -> 1 + 0.8 * 2
+    (2.0, 3.0),     # reach 4.0 m -> wp 4, 3 m/s
+])
+def test_lead_speed_commands_the_rise_ahead_by_speed_times_lead(lead, expected):
+    # oracle: closed form, linear interpolation of the profile at s + v * lead (car at wp 0, 2 m/s).
+    got = racing_math.lead_speed(LEAD_PROFILE, LEAD_CUM, LEAD_TOTAL, 0, 2.0, lead)
+    assert got == pytest.approx(expected, abs=1e-9)  # m/s, exact interpolation
+
+
+def test_lead_speed_never_brings_braking_forward():
+    # oracle: spec, never less than the profile here. At wp 5 (3 m/s) the profile falls at wp 7;
+    # 2 m/s for 1 s reaches s = 7 (1 m/s), and the result stays 3 m/s.
+    assert racing_math.lead_speed(LEAD_PROFILE, LEAD_CUM, LEAD_TOTAL, 5, 2.0, 1.0) == 3.0
+
+
+def test_lead_speed_wraps_round_a_closed_loop():
+    # oracle: closed form. Profile 1 at wp 8 and 9, then 5 m/s at wp 0 (s = 10 on the next lap).
+    profile = LEAD_PROFILE.copy()
+    profile[0] = 5.0
+    # car at wp 9 (s = 9), 1 m/s, lead 0.75 -> s = 9.75: 1 + 0.75 * (5 - 1) = 4.0
+    got = racing_math.lead_speed(profile, LEAD_CUM, LEAD_TOTAL, 9, 1.0, 0.75, closed=True)
+    assert got == pytest.approx(4.0, abs=1e-9)  # m/s
+
+
+def test_lead_speed_on_an_open_path_stops_at_its_end():
+    # oracle: closed form. Open path: s is clamped at the last waypoint (s = 9, 1 m/s); with the
+    # last point raised to 2 m/s, a reach far past the end returns that 2 m/s, never wrapping to wp 0.
+    profile = LEAD_PROFILE.copy()
+    profile[0], profile[9] = 5.0, 2.0
+    got = racing_math.lead_speed(profile, LEAD_CUM, LEAD_TOTAL, 8, 3.0, 1.0, closed=False)
+    assert got == pytest.approx(2.0, abs=1e-9)  # m/s
+
+
+@pytest.mark.parametrize('measured', [0.0, 0.2, float('nan')])
+def test_lead_speed_reaches_at_least_half_a_metre_per_second_of_lead(measured):
+    # oracle: spec, reach = max(|v|, 0.5) * lead (NaN speed counts as 0). Car at wp 2 (s = 2),
+    # lead 1.0: reach 0.5 m -> s = 2.5 -> 1 + 0.5 * 2 = 2.0 m/s.
+    got = racing_math.lead_speed(LEAD_PROFILE, LEAD_CUM, LEAD_TOTAL, 2, measured, 1.0)
+    assert got == pytest.approx(2.0, abs=1e-9)  # m/s
+
+
+def test_lead_speed_uses_the_magnitude_of_a_negative_measured_speed():
+    # oracle: closed form, |-2| * 0.25 = 0.5 m from wp 2 -> 2.0 m/s, the same as +2 m/s.
+    a = racing_math.lead_speed(LEAD_PROFILE, LEAD_CUM, LEAD_TOTAL, 2, -2.0, 0.25)
+    b = racing_math.lead_speed(LEAD_PROFILE, LEAD_CUM, LEAD_TOTAL, 2, 2.0, 0.25)
+    assert a == b == pytest.approx(2.0, abs=1e-9)  # m/s

@@ -11,7 +11,29 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-09 (latest): passing planner follow-up, still off by default
+## 2026-11-09 (latest): map racer, faster lines and an earlier throttle
+
+The map racer (`auto_map_race` line + `pure_pursuit`) now beats car 2's best gap_follow configuration on our own courses at the current 5 m/s VESC limit, in simulation only: 06a 10.75 s against 11.33 s (about 5 % faster), 06b 8.63 s against 8.28-8.60 s across gap_follow configurations (up to 4 % slower; its zero-margin plan bound is 7.78 s), no contact on 6 seeds each. Never run on the floor yet. The 10 % target across the course suite was met only with a 7 m/s top speed (24 courses, +6.1 % mean, 0 contact), which is not shipped: the acceleration model above 5.4 m/s is estimated, not measured.
+
+### pure_pursuit
+
+- Race line builder: the minimum-time optimizer starts from the minimum-curvature, recorded and shortest lines and keeps the fastest one that passes the body checks (`RaceLineConfig.min_time_starts`). It had been stuck on the wide minimum-curvature line.
+- New `race_line_speed_floor_gain` / `race_line_speed_floor_from` (`auto_map_race.yaml`): extra body clearance per m/s of planned speed. Shipped at 0.0; set 0.06 before raising the top speed (at 7 m/s three suite courses touched walls without it, none with it).
+- New `speed_lead_time` (`pure_pursuit_node`, shared default 0.0, range 0-1 s): command the speed the profile asks for that far ahead whenever it is higher, so a lagging speed loop starts accelerating earlier. It never brakes early. `racing_math.lead_speed`.
+- **Car 2:** `speed_lead_time: 0.25` (tuning overlay, car 2's measured speed-loop lag) and online `max_lateral_accel` 2.7 -> 3.1 (calibration). **Car 1 unchanged.**
+
+### tools/f1tenth_sim
+
+- `course_suite/`: map racer against gap_follow on 50 courses (our physical courses, F1TENTH maps, scaled real F1 circuits, generated ones), local or on the pit PC. See its README.
+- Speed loop: acceleration falls off linearly above `speed_loop_accel_fade_from` to zero at `speed_loop_accel_no_load` (car 2's floor: 5.4 / 16 m/s, ESTIMATED). It changes nothing at or below 5.4 m/s.
+- `law_sweep.py`: the cache digest encodes infinite calibration values.
+
+### Tests
+
+- New: `lead_speed` (16 cases), the node's `speed_lead_time` refusals and lead (8), multi-start keeps the fastest passing start, the speed floor in `check_line`, `speed_floor_extra`, `_respond_early` equivalence, the speed-loop fade (28). Each was seen to fail against a broken unit.
+- `test_line_calibration.py`: car 2's online cap pin 2.7 -> 3.1, same equality check.
+
+## 2026-11-09: passing planner follow-up, still off by default
 
 ### pure_pursuit
 
