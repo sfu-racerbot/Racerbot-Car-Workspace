@@ -9,8 +9,11 @@ from racerbot_car.layers import effective_config
 # ceiling (pure_pursuit max_lateral_accel) 2.9 -> 2.7, deliberately BELOW the planning grip:
 # the ceiling binds only near full lock, where car 2 achieved 2.42 when asked 2.5-3
 # (cars/rb2/calibration/*.yaml comments give the measurements and simulator evidence).
+# 2026-11-09: online ceiling 2.7 -> 3.1 with the multi-start lines and speed lead: no contact
+# on 06a/06b (6 simulator seeds) or the 50-course suite; still under the ~3.4 the floor
+# achieves at hard asks (cars/rb2/calibration/pure_pursuit.yaml).
 @pytest.mark.parametrize('car,angle,grip,accel,gain,delay,online', [
-    ('rb1', 0.30, 2.5, 6.0, 1.0, 0.10, None), ('rb2', 0.38, 3.2, 4.0, 0.99, 0.22, 2.7)])
+    ('rb1', 0.30, 2.5, 6.0, 1.0, 0.10, None), ('rb2', 0.38, 3.2, 4.0, 0.99, 0.22, 3.1)])
 def test_effective_line_physics(car, angle, grip, accel, gain, delay, online):
     values = effective_config('auto_map_race.yaml', 'auto_map_race_node', car)
     # oracle: measured runs above; rb1 retains shared defaults by specification.

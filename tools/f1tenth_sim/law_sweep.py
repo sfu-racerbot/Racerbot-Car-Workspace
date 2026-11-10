@@ -19,6 +19,7 @@ import argparse
 from dataclasses import asdict
 import hashlib
 import json
+import math
 import statistics
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -43,6 +44,22 @@ def _one(job):
     return result
 
 
+def _json_safe(value):
+    """Spell non-finite floats as strings for the cache digest.
+
+    Calibration uses math.inf for "no limit" (speed_loop_accel_fade_from /
+    _no_load), which strict JSON cannot encode; 'inf' still hashes differently
+    from any finite value, so the digest keeps telling calibrations apart.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def prepare_jobs(laws, tracks, seeds, params, timeout, car_id, cache_path=None):
     """Return reusable baseline rows, actual worker jobs, and cache identity.
 
@@ -55,7 +72,8 @@ def prepare_jobs(laws, tracks, seeds, params, timeout, car_id, cache_path=None):
     values = {'plant': asdict(calibration_for_car(car_id)),
               'controller': effective_config('pure_pursuit.yaml', 'pure_pursuit_node', car_id)}
     digest = hashlib.sha256(json.dumps(
-        values, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
+        _json_safe(values), sort_keys=True, separators=(',', ':'),
+        allow_nan=False).encode('utf-8')).hexdigest()
     key = {'format': 1, 'car': car_id, 'calibration': digest,
            'tracks': sorted(tracks), 'seeds': sorted(seeds), 'timeout': timeout,
            'raceline': rv.RACELINE_SOURCE, 'fidelity': rv.PROFILE.name}

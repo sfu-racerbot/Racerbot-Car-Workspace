@@ -121,7 +121,24 @@ Four changes work together. Selecting a different steering law alone did not sol
 3. **Leave room for tracking error near walls.** `race_line_body_floor` is 0.22 m and `race_line_body_floor_tight` is 0.30 m. `min_time_line.body_floor_at` raises the required room as curvature approaches the planning steering limit and holds that requirement for 0.6 m either side. A line that clears a wall exactly can still hit it when the car tracks slightly wide.
 4. **Separate planning grip from the tight-corner ceiling.** Car 2 plans with 3.2 m/s² lateral acceleration and `profile_speed_delay: 0.22` s, allowing for command transport and speed-loop response.
 
-   The controller's `max_lateral_accel: 2.7` m/s² slows full-lock turns; 2.9 m/s² wedged at the 06b hairpin. The planning value is a floor-model fit, not a claim that the car achieves 3.2 m/s² in every corner.
+   The controller's `max_lateral_accel` slows full-lock turns. It was 2.7 m/s² from 2026-11-07, because 2.9 m/s² wedged at the 06b hairpin on the old lines; it is 3.1 m/s² since 2026-11-09 (next section). The planning value is a floor-model fit, not a claim that the car achieves 3.2 m/s² in every corner.
+
+### Faster lines and an earlier throttle, 2026-11-09
+
+**Simulator only; not yet run on the floor.** Three changes made the map racer faster than car 2's best gap_follow on our courses:
+
+1. **Several starting lines for the lap-time optimizer.** The minimum-time optimizer used to start from the minimum-curvature line and stayed near it, which is wide and long on small courses. It now starts from the minimum-curvature, recorded and shortest lines and keeps the fastest result that passes the body checks (`race_line.py`, `RaceLineConfig.min_time_starts`). On 06a the planned lap fell from about 10.8 s to 10.2 s.
+2. **Accelerate a moment early.** Car 2's speed loop waits about 0.1 s and then trails a rising target, so it left every corner 0.4-0.6 m/s slow. `speed_lead_time` (car 2: 0.25 s, in its tuning overlay) commands the speed the profile asks for that far ahead whenever that is higher. It never brakes early: a lower speed ahead is ignored (`racing_math.lead_speed`).
+3. **A higher online cornering ceiling.** With the lines and the lead above, car 2's `max_lateral_accel` went from 2.7 to 3.1 m/s². 3.3 was 0.06 s faster on 06a but held the 06b safety stop for 239 ticks against 28.
+
+Shipped config, car 2's simulator floor, 6 seeds, flying-lap median:
+
+| Course | Map racer | Best gap_follow | Contact |
+|---|---|---|---|
+| 06a | 10.75 s | 11.33 s | none |
+| 06b | 8.63 s | 8.28-8.60 s | none |
+
+06b is too short for the map racer to pull ahead: even with zero safety margins its planned lap is 7.78 s. Across the 50-course suite (`tools/f1tenth_sim/course_suite/`), the 10 % target was met on average only with a 7 m/s top speed (24 courses, +6.1 % mean, no contact), which is **not shipped**: the simulator's acceleration above 5.4 m/s is an estimate. Raising the top speed needs `race_line_speed_floor_gain: 0.06` in `auto_map_race.yaml` (extra clearance per m/s of planned speed; three courses touched walls at 7 m/s without it) and a floor test first.
 
 ### Shipped-path verification, 2026-11-08
 
@@ -1814,6 +1831,7 @@ All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that fi
 | `nearest_search_window` | `40` | +/- waypoints searched around last tick's nearest point (`0` = search all) |
 | `max_speed` / `min_speed` | `4.0` / `0.5` | Hard safety ceiling/floor, independent of the `.csv` |
 | `max_lateral_accel` | `2.5` | m/s²; online cornering ceiling on the *commanded* curvature, see [Speed](#speed-the-profile-then-two-online-ceilings) |
+| `speed_lead_time` | `0.0` | s, 0-1; command the profile speed this far ahead when it is higher, so a lagging speed loop accelerates earlier. Never brakes early. Car 2: 0.25 |
 | `max_acceleration` | `6.0` | m/s²; cap on how fast a speed command may *rise*. Deliberately loose — too tight and the car cannot recover from a safety stop |
 | `max_braking_decel` | `8.0` | m/s²; cap on how fast a *normal* command may fall. Emergency stops are never rate-limited |
 | `max_steering_rate` | `1.0` | rad/s; steering slew limit between commands |

@@ -15,4 +15,10 @@ pure_pursuit_node:
     # full lock: at 2.9 the car reached the 06b hairpin at full lock with no
     # steering left to correct and wedged; 2.7 (2026-11-07) gave no contact and
     # no emergency stop on 06a/06b, 9 simulator seeds each.
-    max_lateral_accel: 2.7
+    # 3.1 (2026-11-09): with the multi-start lines and the speed lead, 3.1 had
+    # no contact on 06a/06b (6 seeds) or the course suite, and lapped 06a in
+    # 10.73 s against 11.42 s at 2.7. 3.3 was 0.06 s faster on 06a but held
+    # the 06b safety stop for 239 ticks against 28; 3.1 keeps the real car off
+    # its safety layer. Under the ~3.4 the floor achieves at hard asks
+    # (sfu_course_2026_11_06 grip curve).
+    max_lateral_accel: 3.1

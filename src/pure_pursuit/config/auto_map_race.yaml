@@ -206,6 +206,15 @@ auto_map_race_node:
     # contact and no emergency stop (9 seeds each).
     race_line_body_floor: 0.22  # m
     race_line_body_floor_tight: 0.30  # m
+    # Extra body clearance for planned speed, gain m per m/s above `from`
+    # (min_time_line.speed_floor_extra), on top of the floors above. Tracking
+    # error grows with speed. At the current 5 m/s VESC limit the 50-course
+    # suite had no contact without it, and it cost 06a ~0.5 s of plan, so it
+    # is off. RAISING THE TOP SPEED NEEDS IT: at 7 m/s three suite courses
+    # touched walls with gain 0 and none with 0.06 (2026-11-09,
+    # tools/f1tenth_sim/course_suite). Only ever adds room.
+    race_line_speed_floor_gain: 0.0  # m per m/s; 0.06 for a 7 m/s top speed
+    race_line_speed_floor_from: 3.0  # m/s
     floor_test_speed: 1.5  # m/s, cap of raceline_floor_test.csv only
     profile_max_accel: 6.0
     # SAFETY-CRITICAL, and NOT the same knob as pure_pursuit.yaml's
