@@ -413,6 +413,38 @@ tools/racerbot_sim/run_auto_map_validation.py --scenario all
 
 See [ros-simulator.md](ros-simulator.md). This is the fastest way to check a change to any part of the automatic path, and the only thing that exercises the launch *wiring* rather than the control math.
 
+### Race a mapping run's saved map
+
+With `bringup_launch.py` still running in **terminal 1**, use the directory printed by `map_course` as `RUN_DIR`. In **terminal 2**, replace `YOUR_SAVED_RUN_DIRECTORY` below with that directory's full path. Start with the capped floor-test profile:
+
+```bash
+RUN_DIR="YOUR_SAVED_RUN_DIRECTORY"
+ros2 launch racerbot_launch race_launch.py \
+    run_dir:="$RUN_DIR" profile:=raceline_floor_test.csv
+```
+
+**Keep the car still for about 3 s after launch**, with LB released, while the gyro estimates its bias (the small turn-rate offset it reports while stationary). The car already stands while the start pose is seeded. **Working when:** localization confirms the seed and starts `pure_pursuit_node`; the car stays stopped until LB is held.
+
+On both cars, `imu:=true` starts the IMU stack, and `pf_gyro_odom` follows `imu` when `run_dir` is given. The filter uses gyro [odometry](glossary.md#odometry--odom), an estimate of movement from wheel distance and gyro heading, on `/odom/imu`. It falls back exactly to `/odom` when the IMU is not OK.
+
+Steering-model `/odom` assumes no tyre slip; the gyro measures the car's actual turn. Vehicle state always has `publish_odom_tf:=false` here, so it cannot add a parent to the `odom` coordinate frame.
+
+In car 2's run `20261109-190202` on 2026-11-09 at 5 m/s, the filter lagged LiDAR [scan](glossary.md#scan)-to-map heading by 4–7° in a fast S-bend, while `/odom` was 17° off. Over the same 2 s, the integrated VESC gyro stayed within about 3° of that reference heading.
+
+Append an option to the race command in terminal 2 to change the odometry source:
+
+| Option | Effect |
+|---|---|
+| `pf_gyro_odom:=false` | Restore the particle filter's steering-model `/odom` input; keep the IMU stack running. |
+| `imu:=false` | Stop the IMU stack and default the filter back to `/odom`. An explicit `pf_gyro_odom:=true` with this option is refused. |
+| `imu_hardware:=auto` | Default: detect a running simulator and use its IMU topics; otherwise start real sensor readers. `true` or `false` explicitly selects real or simulated inputs. |
+
+Without `run_dir`, the launch uses the upstream localizer and defaults to `/odom`, even with the IMU running. An explicit `pf_gyro_odom:=true` is refused there; pass `run_dir` or `pf_gyro_odom:=false`.
+
+#### Limitations
+
+The gyro's improvement during real tyre slip is **simulator-unverifiable**. This wiring needs a physical floor test, first with `profile:=raceline_floor_test.csv`, after the static and wheels-off-the-ground checks. Keep LB released until the bias and localization are ready; hold it to drive and release it to stop.
+
 ### Manual/reusable saved-map workflow
 
 The map-based race controller, driven by hand through each stage. See [racing-autonomy.md](racing-autonomy.md) for how the algorithm works and how to tune it in depth.
@@ -518,7 +550,7 @@ It **refuses to write the file** if the resulting line needs more steering than 
        waypoints_file:=$HOME/racerbot-ws/src/pure_pursuit/waypoints/my_track_profiled.csv
    ```
 
-4. Give it a **2D Pose Estimate** seed in RViz, same as any other time you start localization.
+4. Keep the car still for about 3 s for gyro bias, then give it a **2D Pose Estimate** seed in RViz, same as any other time you start localization. This command has no `run_dir`, so its particle filter keeps using `/odom`; `imu:=false` also turns off the IMU stack.
 
 5. **Hold LB** — `pure_pursuit_node` won't drive without it.
 
