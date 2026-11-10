@@ -56,6 +56,59 @@ def recorder_node_names(prefix=''):
     return tuple(prefix + name for name in RECORDER_NODES)
 
 
+def may_join_graph(lb_held):
+    """Gate recorder and snapshot process creation, including cold starts."""
+    return not lb_held
+
+
+def deadman_held(now, buttons, received_at, button=4, timeout=0.5):
+    """Absent/stale joy cannot enable driving; only the exact value 1 holds LB."""
+    return (received_at is not None and now - received_at <= timeout
+            and 0 <= button < len(buttons) and buttons[button] == 1)
+
+
+def prepare_standby(state, has_standby, recorders, lb_held, free_gb, min_free_gb):
+    return (state in (IDLE, WAITING) and not has_standby and not recorders
+            and may_join_graph(lb_held) and free_gb > min_free_gb)
+
+
+def discard_standby(has_standby, started, recorders=(), shutdown=False):
+    return has_standby and not started and (bool(recorders) or shutdown)
+
+
+class PendingSnapshot:
+    """Release debounce and bounded post-stop wait, on a monotonic clock."""
+
+    def __init__(self, release_sec=1.0, wait_after_stop_sec=30.0):
+        self.release_sec = release_sec
+        self.wait_after_stop_sec = wait_after_stop_sec
+        self.released_since = None
+        self.stopped_at = None
+        self.done = False
+
+    def update(self, now, lb_held, *, stopped=False, shutdown=False):
+        if self.done:
+            return ''
+        if lb_held:
+            self.released_since = None
+        elif self.released_since is None:
+            self.released_since = now
+        if stopped and self.stopped_at is None:
+            self.stopped_at = now
+        if shutdown and lb_held:
+            action = 'skipped (LB held at shutdown)'
+        elif (may_join_graph(lb_held)
+              and now - self.released_since >= self.release_sec):
+            action = 'start'
+        elif (self.stopped_at is not None
+              and now - self.stopped_at >= self.wait_after_stop_sec):
+            action = 'skipped (LB held after stop)'
+        else:
+            return ''
+        self.done = True
+        return action
+
+
 @dataclass(frozen=True)
 class Settings:
     trigger_topics: tuple
@@ -163,7 +216,8 @@ class AutoRecorder:
         """When the algorithm being recorded first appeared, on update()'s clock."""
         return self._waiting_since
 
-    def update(self, now, publishers, nodes, recording_alive=True):
+    def update(self, now, publishers, nodes, recording_alive=True, *,
+               lb_held=False, standby_alive=False):
         s = self.settings
         found = algorithms(publishers, s)
         others = other_recorders(nodes, s)
@@ -204,6 +258,8 @@ class AutoRecorder:
             self.state = WAITING
             self._waiting_since = now
         if now - self._waiting_since >= s.start_delay_sec:
+            if not standby_alive and not may_join_graph(lb_held):
+                return decide('', 'waiting for LB release to start recording')
             self.state = RECORDING
             self._last_algorithm = now
             return decide('start', describe(found))
