@@ -3,6 +3,7 @@
 > **Who this is for:** anyone trying to work out why a run went wrong, after the fact.
 > **Read first:** [operations.md](operations.md) — record the run first, diagnose it second.
 > **You'll be able to:** find the run bringup recorded for you (or record one by hand), then analyze pipeline health, pose lag and watchdog stops.
+> **Time:** about 10 minutes to locate a run and generate its first report.
 
 How to capture everything needed to work out what a run did — and how to
 hand that to a person or an AI agent so they can act on it.
@@ -17,19 +18,21 @@ real collision that night. The postmortem is at the end.
 ## Automatic recording
 
 **Since 2026-10-26, every run of an algorithm is recorded for you.** Start
-bringup the usual way, start any algorithm on top, and a run directory
-appears under `~/racerbot-ws/data/<id>/racerbot_runs/` while it runs (`<id>` is `rb1` or `rb2`).
+bringup the usual way and leave LB released while the recorder prepares a paused
+**standby** under `~/racerbot-ws/data/<id>/racerbot_runs/` (`<id>` is `rb1` or `rb2`).
+Starting an algorithm resumes that recording in the same directory.
 
 Replace `<id>` in commands with the car ID, without angle brackets. You do not need the
 recorder terminal from the [TL;DR](#tldr) below any more, unless you want
 one for a run that is not an algorithm (manual driving, say).
 
-**Highlights**
+### Highlights
 
 - **On by default, in every bringup** (`bringup_launch.py` and its two
   alternates). Off with one flag: `record:=false`.
 - **Records only while an algorithm runs.** Bringup alone, the dashboard,
-  and manual driving with the gamepad record nothing.
+  and manual driving with the gamepad record no messages. The idle standby
+  already has its bag and diagnostic subscriptions ready.
 - **Any algorithm, anyone's.** It watches for any [node](glossary.md#node)
   publishing `/drive` (or `/auto_map/drive`, `/auto_race/drive`,
   `neural_racer`'s shadow output, or the motor command topics). Our
@@ -42,8 +45,61 @@ one for a run that is not an algorithm (manual driving, say).
 - **Same layout as a hand-started recording**, so `analyze_run.py` and
   `summarize_run` work on it unchanged. It adds which algorithm ran, team
   A's git commit when it was their code, and every ROS process's command line.
-- **Cannot move the car.** It creates no publisher and no subscription: it
-  only reads the list of nodes and topics, the way `ros2 node list` does.
+- **Cannot move the car.** It subscribes to `/joy` to read LB, queries the
+  graph (the list of ROS nodes and their connections), and publishes only
+  `/auto_record/start`, a directory-name signal for its diagnostic probe.
+
+**Why standby is prepared before driving:** on 2026-11-09, six of car 2's
+fourteen recorded runs had a roughly 0.35 s freeze of every ROS topic,
+each within seconds of a recorder joining the graph. Two of the four map-racer bags
+showed it, one right at the braking point before the corner where the car later
+hit the wall.
+
+The exact DDS mechanism is unknown, so automatic recording now
+prepares its ROS processes while LB is released and resumes them when an
+algorithm starts.
+
+A [topic](glossary.md#topic) is a named ROS message stream; the freezes
+affected all of these streams at once.
+
+**LB gates recorder startup.** The [deadman](glossary.md#deadman) is the LB
+button the driver must hold to enable movement. Standby preparation, a cold
+start without a ready standby, and parameter-snapshot startup all wait while
+fresh `/joy` messages say LB is held.
+
+A ready standby can resume while LB is held
+because its bag, probe subscriptions and resume client already exist.
+
+#### Limitations
+
+The parameter snapshot starts after **1.0 s of continuous LB release**.
+If the driver presses LB within the few seconds `snapshot_params` takes, its
+service clients may still join; it is started only after a full second of
+release to make that unlikely.
+
+If recording stops first, the snapshot waits up to **30.0 s after stop** for
+that release interval. Without it, `auto_record.yaml` and `auto_record.log`
+say `params_snapshot: skipped (LB held after stop)`.
+
+At bringup shutdown,
+a pending snapshot is skipped immediately if LB is held, with reason
+`LB held at shutdown`; if released, it may run within the 15 s stop timeout.
+
+Missing `/joy`, or no new message for more than **0.5 s**, counts as released
+because the driving nodes also refuse to drive without fresh gamepad input.
+
+The directory name is the time **standby was prepared**, which may be much
+earlier than the drive. In `auto_record.yaml`, `standby_prepared` records that
+time and `started` records the real recording start; an unused standby has no
+`started` field. The directory is never renamed when recording starts.
+
+At startup, `auto_record` stops orphaned `auto_` recorder processes left by
+an earlier bringup: it logs each PID, sends SIGINT and allows up to 10 s before
+SIGKILL. It excludes its own processes and descendants, and leaves unrelated
+recorders alone.
+
+An unused standby is stopped and its directory deleted on
+shutdown or when another recorder appears; started recordings are kept.
 
 **Why it exists:** on 2026-10-26 the races against team A (car 1) were run with
 plain `gap_follow_launch.py`, and nothing recorded them. All that was left
@@ -61,6 +117,8 @@ ros2 launch f1tenth_stack bringup_launch.py
 
 **Working when:** among bringup's startup lines you see
 `auto_record ready: records a run while any node publishes /drive, ...`.
+With LB released and enough disk space, `paused standby prepared -> ...`
+follows. This is preparation, not the start of a recorded run.
 
 **Terminal 2** — any algorithm, for example:
 
@@ -69,16 +127,18 @@ source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 ros2 launch gap_follow gap_follow_launch.py
 ```
 
-**Working when:** within about 2 seconds, Terminal 1 prints
+**Working when:** after the algorithm's start delay, Terminal 1 prints
 `recording /gap_follow_node on /drive -> /home/.../racerbot-ws/data/<id>/racerbot_runs/<time>`.
 
 **Then wait for the second line before you press LB:**
 `recording live: /drive /joy /odom /scan are in the bag, <n> s after the algorithm appeared`.
 From that line on, what the car does is in the recording.
 
-Expect it about 2.5 to 4 seconds after the algorithm appears (car 1, 2026-11-02, with
-bringup's own discovery settings). The measurements are under "How it decides, and every
-setting" below.
+With a ready standby, starting the recording resumes the existing bag and
+signals the existing probe. If there is no ready standby and LB is held,
+Terminal 1 says `waiting for LB release to start recording`; release LB and
+wait for `recording live` before driving. Historical cold-start measurements
+are under "How it decides, and every setting" below.
 
 The recorder never holds the car back: LB works before that line appears. The
 beginning of the run is just not recorded. If that happens the run says so
@@ -99,8 +159,9 @@ that is correct. Something else (a `record_run.py` you started, or the one
 **To turn it off** for a session: `ros2 launch f1tenth_stack bringup_launch.py record:=false`.
 
 **Disk use:** about 0.8 MB per second of driving (3 GB an hour), almost all
-of it [LiDAR](glossary.md#lidar) scans. Nothing deletes old runs. It refuses to start a recording
-with less than 2 GB free, and says so in Terminal 1 and in `auto_record.log`.
+of it [LiDAR](glossary.md#lidar) scans. Only unused standbys are deleted automatically.
+It refuses to prepare or start a recording
+with 2 GB free or less, and says so in Terminal 1 and in `auto_record.log`.
 
 **To see what it decided,** read `data/<id>/racerbot_runs/auto_record.log`. It keeps one
 line for every start, stop, refusal and late start, across sessions. This is the
@@ -133,6 +194,7 @@ fields to check. `summarize_run` prints a `Recording problems` section if any of
 | `activity.started_late` | `false` | The car was already moving at the bag's first `/odom`, so **the start of the run is not in the bag** |
 | `activity.moved` | `true` | The car never moved. `null` means the bag has no `/odom`, so it is unknown |
 | `superseded` | absent | Another recorder replaced this one within 10 s, so this run is only a stub |
+| `params_snapshot` | `started` or `started after stop` | `pending` means it is still waiting; `skipped (...)` gives the LB reason |
 
 `activity` also has `first_odom_speed_mps`, `max_speed_mps` and `lb_held_fraction`.
 It appears a few seconds after the run stops, because `run_activity` reads the closed bag at low priority.
@@ -143,8 +205,8 @@ committing. `tools/save_runs.sh --skip-idle` leaves those uncommitted. Nothing d
 <details>
 <summary><b>How it decides, and every setting</b> (click to expand). Skip unless you're changing it.</summary>
 
-Bringup starts `auto_record` (`race_diagnostics/auto_record_node.py`). Twice
-a second it lists every node on the graph, and the nodes that
+Bringup starts `auto_record` (`race_diagnostics/auto_record_node.py`). Every
+0.25 s it lists every node on the graph, and the nodes that
 [publish](glossary.md#publish--subscribe) on each trigger topic. It hands
 that list to a small state machine, `race_diagnostics/auto_record.py`. That
 file has no ROS in it and is tested in `test/test_auto_record.py`.
@@ -153,8 +215,13 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
    ignore list. `ackermann_mux` and `ackermann_to_vesc_node` are there
    because they publish the motor command topics all the time, as part of
    bringup. `rosbag2_player` is there because it is a bag being played back.
-2. An algorithm that has been up for `start_delay_sec` (1.5 s) starts a
-   recording, unless another recorder is on the graph. The delay gives a
+2. While idle and LB is released, it prepares exactly one paused bag and a
+   silent probe with all subscriptions created. The probe writes no events
+   until `/auto_record/start` names its directory.
+
+   An algorithm that has been
+   up for `start_delay_sec` (1.5 s) starts that recording, unless another
+   recorder is on the graph. The delay gives a
    launch with its own recorder (`map_course`) time to start it.
 
    In one measurement, the recorder appeared about 1 s after the algorithm
@@ -166,15 +233,16 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
    `auto_race_diag_node` and `auto_rosbag2_recorder` and are never mistaken
    for someone else's.
 4. With no algorithm for `stop_delay_sec` (3 s), it stops the recording:
-   `SIGINT` to `record_run.py`, which closes the bag the same way `Ctrl+C`
-   does.
+   `SIGINT` to the bag first, then to `record_run.py` once settled. The next
+   eligible poll prepares a new standby.
 5. If a recording dies on its own, it does not start another until the
    algorithm has gone and come back, so a broken recorder cannot restart in
    a loop.
 
-**Why the bag is started separately.** Starting a recording starts `ros2 bag record`
-first and on its own, and `record_run.py` with `record_bag:=false` only once the bag
-is live (or after 5 s). Measured on a Jetson on 2026-10-31 (car 2):
+**Historical cold-start measurements, before standby (2026-10-31).** The old
+automatic recorder started `ros2 bag record` first and on its own, and
+`record_run.py` with `record_bag:=false` only once the bag was live (or after
+5 s). Measured on a Jetson (car 2):
 
 | How the bag is started | Start of recording to topics subscribed |
 |---|---|
@@ -187,15 +255,15 @@ the bag began about 9 to 10 s after the launch command. Two runs
 (`20261030-183134`, `-184149`) were already moving at 2.3 and 3.5 m/s at
 their first `/odom`.
 
-**How much of a run's start the bag misses now.** This is from the algorithm's first
+**How much of a run's start cold startup missed.** This is from the algorithm's first
 message to the bag's first message, measured on a Jetson on 2026-10-31 with two small test topics (car 2):
 
 | Recorder | Missed | Median | Runs |
 |---|---|---|---|
-| Before this change | 5.45 to 7.0 s | about 6.6 s | 4 |
-| Now | 2.95 to 6.9 s | about 4 s | 8 |
+| Through the launch file | 5.45 to 7.0 s | about 6.6 s | 4 |
+| Separate bag startup | 2.95 to 6.9 s | about 4 s | 8 |
 
-The typical run improved by about 2.5 s, **but the worst case barely moved**. The cost is the
+The typical run improved by about 2.5 s, **but the worst case barely moved**. The cost was the
 1.5 s delay, about 1 s of `ros2 bag` startup, and 0.3 to 2.7 s for ROS discovery to
 find the topics. So **wait for the `recording live` line if the start matters**.
 
@@ -212,8 +280,9 @@ The same split shows on a development machine (2.3 to 3.1 s against 8 of 10 over
 
 So `test_the_bag_holds_the_run_from_soon_after_the_algorithm_appears` runs with `SUBNET` discovery. It first checks that a domain from 90 to 101 has no nodes on it, and uses that one; every other test stays on domain 79 with `LOCALHOST`. Its bound is unchanged: the fastest of four attempts must miss at most 5.0 s.
 
-Only an always-running recorder could remove that discovery wait. It was left out on purpose: it
-would keep a process subscribed to every topic all the time, including during manual driving.
+Standby now moves recorder discovery before the run. It keeps subscriptions
+present while idle, including during manual driving, but its bag stays paused
+and its probe writes nothing until an algorithm activates it.
 
 Stopping is designed not to lose the bag:
 
@@ -225,8 +294,9 @@ Stopping is designed not to lose the bag:
 - `ros2 launch` can also hang at exit with all its children gone. `record_run.py`
   therefore exits on its own 18 s after shutdown begins. A normal stop that hits this
   still reports `recorder_killed: true` after 15 s, though the bag is fine (`bag_exit_code: 0`).
-- If `auto_record` is killed outright, the recording still gets `SIGINT` from
-  the kernel (`setpriv --pdeathsig`) and closes its bag.
+- If `auto_record` is killed outright, `setpriv --pdeathsig` requests `SIGINT`
+  for its child processes. Descendants have survived that signal on car 2;
+  the next bringup's startup orphan cleanup stops any matching survivors.
 - The recording runs in its own process session, so killing it as a last
   resort cannot touch bringup.
 
@@ -236,12 +306,17 @@ commented there. They are `trigger_topics`, `ignore_publishers`,
 `record_bag`, `live_topics`, `topics` (empty means the same topic list as `record_run.py`),
 `min_free_gb` and `stop_timeout_sec`.
 
+The LB and snapshot settings are `deadman_button` (4), `joy_timeout_sec` (0.5 s),
+`snapshot_release_sec` (1.0 s) and `snapshot_wait_after_stop_sec` (30.0 s).
+
 Recordings go to `~/racerbot-ws/data/<id>/racerbot_runs`. Pass
 `record_output_directory:=<dir>` to bringup to send them elsewhere.
 
 **Tests.** These files cover it:
 
 - `test_auto_record.py`: the decisions, no ROS.
+- `test_auto_record_standby.py` and `test_orphans.py`: LB gates, deferred and
+  skipped snapshots, standby deletion eligibility and orphan detection, no ROS.
 - `test_run_activity.py`: what `activity` says about a run, no ROS.
 - `test_save_runs.py`: `tools/save_runs.sh` against a throwaway git repository, no ROS.
 - `test_bringup_auto_record.py`: every bringup includes the recorder, on by

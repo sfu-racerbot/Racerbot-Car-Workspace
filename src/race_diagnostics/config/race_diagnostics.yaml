@@ -1,5 +1,6 @@
 race_diag_node:
   ros__parameters:
+    standby: false  # auto_record overrides this; manual probes arm immediately.
     # --- Topics: every link of the driving pipeline ---
     scan_topic: /scan
     map_topic: /map

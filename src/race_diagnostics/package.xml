@@ -17,6 +17,8 @@
   <depend>python3-yaml</depend>
   <depend>ros2bag</depend>
   <exec_depend>ros2launch</exec_depend>
+  <exec_depend>rosbag2_interfaces</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
   <exec_depend>racerbot_car</exec_depend>
   <depend>rosbag2_storage_default_plugins</depend>
 
