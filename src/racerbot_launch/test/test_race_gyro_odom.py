@@ -133,3 +133,58 @@ def test_no_run_explicit_gyro_refuses_with_recovery_arguments(race):
     with pytest.raises(RuntimeError, match=r'pf_gyro_odom:=true needs run_dir:=.*'
                        r'Pass run_dir:=.*or pf_gyro_odom:=false'):
         _expand(module, pf_gyro_odom='true')
+
+
+@pytest.mark.parametrize('imu,gyro,run_dir,topic', [
+    ('true', '', '/saved', '/odom/imu'),
+    ('false', '', '/saved', '/odom'),
+    ('true', 'false', '/saved', '/odom'),
+    ('true', '', '', '/odom'),
+    (' 1 ', ' TRUE ', '/saved', '/odom/imu'),
+    ('0', '0', '', '/odom'),
+])
+def test_pure_odometry_decision(imu, gyro, run_dir, topic):
+    # oracle: spec docs/operations.md; pure helper needs no ROS context or node.
+    assert _load('race').pf_odometry_topic(imu, gyro, run_dir) == topic
+
+
+@pytest.mark.parametrize('flag,value', [
+    ('imu', ''), ('imu', 'yes'), ('imu', '2'),
+    ('pf_gyro_odom', 'yes'), ('pf_gyro_odom', 'NaN'), ('pf_gyro_odom', 'false!'),
+])
+def test_invalid_boolean_refuses_at_launch(race, flag, value):
+    module, run_dir, _ = race
+    with pytest.raises(RuntimeError, match=rf"{flag}:=.*expected 'true' or 'false'"):
+        _expand(module, run_dir=str(run_dir), **{flag: value})
+
+
+@pytest.mark.parametrize('simulated', [True, False])
+def test_auto_hardware_selection_reaches_vehicle_state(race, monkeypatch, simulated):
+    import subprocess
+    from types import SimpleNamespace
+
+    def probe(command, **kwargs):
+        # Process boundary only: exercise the real select_imu_hardware logic.
+        assert command[:2] == ['pgrep', '-f']
+        return SimpleNamespace(returncode=0 if simulated else 1)
+
+    monkeypatch.setattr(subprocess, 'run', probe)
+    module, run_dir, _ = race
+    actions, context = _expand(module, run_dir=str(run_dir))
+    includes = _includes(actions, context)
+    assert includes['vehicle_state_launch.py'] == {
+        'hardware': 'false' if simulated else 'true', 'publish_odom_tf': 'false'}
+    assert _pf_topic(race, includes) == '/odom/imu'
+
+
+def test_localize_run_defaults_to_steering_odom_for_mid_run_localization(race):
+    _, run_dir, pf_share = race
+    actions, context = _expand(
+        _load('localize_run'), map_yaml=str(run_dir / 'map.yaml'),
+        localize_config=str(pf_share / 'config/localize.yaml'))
+    node, = [a for a in actions if isinstance(a, Node) and a.node_package == 'particle_filter']
+    _, override = node._Node__parameters
+    key, value = next(iter(override.items()))
+    # oracle: spec -- auto_map_race's mid-run localizer retains /odom by default.
+    assert perform_substitutions(context, key) == 'odometry_topic'
+    assert yaml.safe_load(perform_substitutions(context, value)) == '/odom'
