@@ -435,16 +435,86 @@ TEST(Control, LookaheadGrowsWithSpeedInsideItsClamp)
     EXPECT_DOUBLE_EQ(lookahead(40.0, 1.0, 0.1, 0.8, 3.0), 3.0);
 }
 
-TEST(Control, GoalIsTheFirstWaypointAheadAndAtLeastLAway)
+TEST(Control, GoalIsWhereThePathCrossesTheLookaheadCircle)
 {
     const Path p(straight(201, 0.1, 0.2), 0.5);
     const auto g = find_goal(p, 0, {0.0, 0.0, 0.0}, 1.0);
     ASSERT_TRUE(g.has_value());
-    // closed form: first x on the 0.1 m grid with x^2 + 0.2^2 >= 1 is x = 1.0
+    // closed form: waypoint 10 (x = 1.0) is the first outside L = 1; the goal
+    // is y = 0.2 crossing the circle, x = sqrt(1 - 0.2^2)
+    EXPECT_EQ(g->index, 10u);
+    EXPECT_NEAR(g->local_x, std::sqrt(1.0 - 0.04), 1e-9);
+    EXPECT_NEAR(g->local_y, 0.2, 1e-12);
+    EXPECT_NEAR(std::hypot(g->local_x, g->local_y), 1.0, 1e-9);   // exactly L away
+    EXPECT_FALSE(g->past_end);
+}
+
+TEST(Control, AWaypointExactlyLAwayIsItselfTheGoal)
+{
+    // boundary: waypoint exactly L away, crossing at t = 1
+    const Path p(straight(201, 0.1, 0.0), 0.5);
+    const auto g = find_goal(p, 0, {0.0, 0.0, 0.0}, 1.0);
+    ASSERT_TRUE(g.has_value());
     EXPECT_EQ(g->index, 10u);
     EXPECT_NEAR(g->local_x, 1.0, 1e-9);
-    EXPECT_NEAR(g->local_y, 0.2, 1e-12);
-    EXPECT_FALSE(g->past_end);
+    EXPECT_NEAR(g->local_y, 0.0, 1e-12);
+}
+
+TEST(Control, WithNoWaypointInsideTheCircleTheGoalIsTheWaypoint)
+{
+    // nothing inside the circle to interpolate from: the waypoint itself
+    std::vector<Waypoint> w;
+    for (int i = 0; i < 50; ++i) {
+        w.push_back({2.0 + 0.1 * i, 0.0});
+    }
+    const Path p(w, 0.5);
+    const auto g = find_goal(p, 0, {0.0, 0.0, 0.0}, 1.0);
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->index, 0u);
+    EXPECT_NEAR(g->local_x, 2.0, 1e-12);
+    EXPECT_NEAR(g->local_y, 0.0, 1e-12);
+}
+
+TEST(Control, ACrossingBehindTheCarFallsBackToTheWaypointAhead)
+{
+    // closed form: |(-0.5 + 0.51 t, 5 t)| = 1 at x = -0.41, behind the car
+    const Path p(std::vector<Waypoint>{{-0.5, 0.0}, {0.01, 5.0}, {0.02, 6.0}}, 0.5);
+    const auto g = find_goal(p, 0, {0.0, 0.0, 0.0}, 1.0);
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->index, 1u);
+    EXPECT_NEAR(g->local_x, 0.01, 1e-12);
+    EXPECT_NEAR(g->local_y, 5.0, 1e-12);
+}
+
+TEST(Control, GoalStaysLAwayAndSteeringContinuousAsTheCarCrossesWaypoints)
+{
+    // invariant: driving y = 0.5 sin(x) in 2 mm steps, waypoints 0.15 m apart,
+    // the goal stays exactly L away and steering never steps
+    std::vector<Waypoint> w;
+    for (int i = 0; i < 200; ++i) {
+        const double x = 0.15 * i;
+        w.push_back({x, 0.5 * std::sin(x)});
+    }
+    const Path p(w, 0.05);
+    const double L = 1.0;
+    double previous = std::numeric_limits<double>::quiet_NaN();
+    double worst_jump = 0.0;
+    int checked = 0;
+    for (double x = 1.0; x < 20.0; x += 0.002) {
+        const Pose car{x, 0.5 * std::sin(x), std::atan(0.5 * std::cos(x))};
+        const auto g = find_goal(p, static_cast<size_t>(x / 0.15), car, L);
+        ASSERT_TRUE(g.has_value());
+        ASSERT_FALSE(g->past_end);
+        EXPECT_NEAR(std::hypot(g->local_x, g->local_y), L, 1e-9) << "at x = " << x;
+        const double steering = steering_for(g->local_x, g->local_y, 0.36, 0.33);
+        if (std::isfinite(previous)) {
+            worst_jump = std::max(worst_jump, std::abs(steering - previous));
+        }
+        previous = steering;
+        ++checked;
+    }
+    EXPECT_GT(checked, 9000);
+    EXPECT_LT(worst_jump, 0.01);
 }
 
 TEST(Control, NearAnOpenPathsEndTheGoalIsPastItAlongTheLastSegment)

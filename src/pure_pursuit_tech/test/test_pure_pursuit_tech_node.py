@@ -54,24 +54,39 @@ def line_waypoints(y, n=201, step=0.1):
 
 
 def expected_command(waypoints, car=(0.0, 0.0), yaw=0.0, speed=0.0):
-    """Oracle: pure_pursuit_a's control law recomputed from its definition
-    (racerbot_a src/pure_pursuit_a/src/pure_pursuit_a_node.cpp, the law this
-    package copies): first waypoint from the nearest one onward that is ahead
-    and at least L away; k = 2y/d^2; steering = atan(wheelbase * k) clamped;
+    """Oracle: pure_pursuit_a's control law (racerbot_a
+    src/pure_pursuit_a/src/pure_pursuit_a_node.cpp), except the goal: the first
+    waypoint from the nearest one onward that is ahead and at least L away, moved
+    to where the segment from the waypoint before it (if inside L) crosses the
+    circle of radius L. k = 2y/d^2; steering = atan(wheelbase * k) clamped;
     speed linear from MAX_SPEED (straight) to MIN_SPEED (full lock).
     """
     L = min(max(LOOKAHEAD_BASE + LOOKAHEAD_GAIN * abs(speed), LOOKAHEAD_MIN), LOOKAHEAD_MAX)
     start = min(range(len(waypoints)),
                 key=lambda i: math.hypot(waypoints[i][0] - car[0], waypoints[i][1] - car[1]))
+    prev = None
     for step in range(len(waypoints)):
         wx, wy = waypoints[(start + step) % len(waypoints)]
         dx, dy = wx - car[0], wy - car[1]
         lx = math.cos(yaw) * dx + math.sin(yaw) * dy
         ly = -math.sin(yaw) * dx + math.cos(yaw) * dy
         if lx > 0.0 and math.hypot(dx, dy) >= L:
+            if prev is not None and math.hypot(*prev) < L:
+                # bisect |prev + t (this - prev)| = L on t in [0, 1]
+                lo, hi = 0.0, 1.0
+                for _ in range(60):
+                    t = (lo + hi) / 2.0
+                    if math.hypot(prev[0] + t * (lx - prev[0]), prev[1] + t * (ly - prev[1])) < L:
+                        lo = t
+                    else:
+                        hi = t
+                gx, gy = prev[0] + lo * (lx - prev[0]), prev[1] + lo * (ly - prev[1])
+                if gx > 0.0:
+                    lx, ly = gx, gy
             steer = math.atan(WHEELBASE * 2.0 * ly / (lx * lx + ly * ly))
             steer = max(-MAX_STEERING, min(MAX_STEERING, steer))
             return steer, MAX_SPEED - (MAX_SPEED - MIN_SPEED) * abs(steer) / MAX_STEERING
+        prev = (lx, ly)
     raise AssertionError('oracle found no goal')
 
 
@@ -353,11 +368,13 @@ def test_laser_offset_moves_the_pose_back_to_the_rear_axle(harness):
     # The PF pose is the LiDAR's, 0.26 m ahead of the rear axle. A LiDAR at
     # (0.26, 0) means a rear axle at the origin: the command must be the one
     # for a car at the origin (oracle: expected_command, the closed-form law).
-    h = harness(line_waypoints(0.2), use_pf=True, laser_offset_x=0.26)
+    # A slanted line: on a parallel one the interpolated goal is the same from both.
+    path = [(0.1 * k, 0.2 + 0.01 * k) for k in range(201)]
+    h = harness(path, use_pf=True, laser_offset_x=0.26)
     t = h.play(0.5, joy=HELD, safety=False, pose=(0.26, 0.0, 0.0))
     h.play(1.0, joy=HELD, safety=False, pose=(0.26, 0.0, 0.0))
-    steer, speed = expected_command(line_waypoints(0.2), car=(0.0, 0.0))
-    unshifted, _ = expected_command(line_waypoints(0.2), car=(0.26, 0.0))
+    steer, speed = expected_command(path, car=(0.0, 0.0))
+    unshifted, _ = expected_command(path, car=(0.26, 0.0))
     assert abs(steer - unshifted) > 5e-3   # the oracle itself: the two cases differ
     commands = h.since(t)
     assert len(commands) >= 10
