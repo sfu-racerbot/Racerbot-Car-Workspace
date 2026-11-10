@@ -16,6 +16,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# Below the driving stack: a dashboard being watched must never take CPU from the
+# LiDAR driver, localization or the controller (car 2, 2026-11-09: CPU 80-94% busy
+# on all six cores during map-racer runs, the dashboard alone 41%).
+Nice=10
+CPUWeight=20
 Type=simple
 # The same user every other ROS node on the car runs as, so discovery and
 # the stop panel's signals work exactly as between terminals.

@@ -159,3 +159,20 @@ def test_dashboard_test_launch_starts_no_second_dashboard_by_default(override, e
     started = [e for e in dashboards
                if e.condition is None or e.condition.evaluate(ctx)]
     assert len(started) == expected
+
+
+# Both cars' boot-time dashboard units run below the driving stack. Oracle: the
+# scheduler's own semantics -- systemd's default Nice is 0 and default CPUWeight
+# 100 (systemd.exec(5), systemd.resource-control(5)), the values the driving
+# nodes, started from a terminal, run with. A dashboard must be strictly below both.
+_CAR1_UNIT = os.path.join(_SRC, os.pardir, 'tools', 'systemd', 'web-dashboard.service')
+
+
+@pytest.mark.parametrize('unit', [_UNIT, _CAR1_UNIT], ids=['car2', 'car1'])
+def test_dashboard_unit_runs_below_the_driving_stack(unit):
+    text = _read(unit)
+    nice = _values(text, 'Nice')
+    weight = _values(text, 'CPUWeight')
+    assert len(nice) == 1 and len(weight) == 1, f'{unit}: exactly one Nice= and one CPUWeight='
+    assert 0 < int(nice[0]) <= 19, f'{unit}: Nice={nice[0]} must be above the default 0'
+    assert 1 <= int(weight[0]) < 100, f'{unit}: CPUWeight={weight[0]} must be below the default 100'
