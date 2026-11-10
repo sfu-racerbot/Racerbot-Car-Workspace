@@ -979,23 +979,45 @@ Without a map there is nothing to localize against, and the racing line is just 
 
 ## Phase 2: Localize against the map (Monte Carlo Localization)
 
-Also unchanged — this is `particle_filter`, already in this workspace, using `range_libc` for fast ray casting.
+Localization uses `particle_filter`, already in this workspace, with `range_libc` for fast ray casting.
 
 That ray casting runs on the Jetson's GPU. It is 4.8× faster than the CPU, and it is what lets the filter keep up with the LiDAR at all.
 
 Two things have to be right for it to work: `range_libc` must have been built with CUDA, and `max_particles` must stay under a limit. [gpu-acceleration.md](gpu-acceleration.md) covers both, including what happens if you get either wrong.
 
-See [operations.md](operations.md#localizing-against-a-saved-map) for the exact launch procedure, **including seeding it with RViz's "2D Pose Estimate"**. Pure pursuit will not drive correctly without that seed, and may drive confidently in the wrong direction.
+For a mapping run's saved map, use [the saved-run race command](operations.md#race-a-mapping-runs-saved-map): `race_launch.py run_dir:=...` seeds the filter automatically. The [manual localization procedure](operations.md#localizing-against-a-saved-map) instead requires RViz's **2D Pose Estimate**. Pure pursuit needs a confirmed starting pose to drive in the correct place and direction.
 
 Phase 5 depends entirely on trusting this output, so here's the concept in one paragraph.
 
 Monte Carlo Localization tracks a cloud of thousands of weighted **particles** — candidate guesses at where the car might be.
 
-Every timestep, each particle is nudged forward by the motion model: `/odom`, the car's own wheel-and-motor estimate of how far it moved.
+Every timestep, each particle is nudged forward by the motion model using [odometry](glossary.md#odometry--odom), the car's estimate of its movement between readings. Saved-run racing defaults to `/odom/imu`, which combines wheel distance with gyro heading; steering-model `/odom` estimates heading from the steering angle instead.
 
 Each particle is then re-weighted by how well a *simulated* LiDAR scan taken from that particle's position matches the **actual** `/scan` against the known map.
 
 Particles that don't match reality die off. Particles near the true position multiply. The weighted average of the surviving cloud is published as `/pf/viz/inferred_pose` — the single best-guess position and heading that `pure_pursuit_node` subscribes to.
+
+### Gyro odometry for saved-map racing
+
+On both cars, `race_launch.py run_dir:=...` starts the IMU stack (`imu:=true`) and defaults `pf_gyro_odom` to the same value. It passes `odometry_topic:=/odom/imu` to `localize_run_launch.py`, which overrides the particle filter's parameter file. Vehicle state falls back exactly to `/odom` when the IMU is not OK.
+
+Steering-model odometry assumes no tyre slip, whereas the gyro measures the actual turn.
+
+In car 2's run `20261109-190202` on 2026-11-09 at 5 m/s, the filter lagged scan-to-map heading by 4–7° in a fast S-bend, while steering-model `/odom` was 17° off. The [VESC](glossary.md#vesc) gyro integrated over the same 2 s stayed within about 3° of that reference heading.
+
+`pf_gyro_odom:=false` restores `/odom` while retaining the IMU stack; `imu:=false` stops the stack and defaults the filter to `/odom`. Explicitly combining `pf_gyro_odom:=true` with `imu:=false` is refused because nothing would [publish](glossary.md#publish--subscribe) the requested gyro odometry.
+
+Without `run_dir`, the upstream `localize_launch.py` cannot accept an odometry override, so racing defaults to `/odom`. Explicit gyro selection is refused with instructions to pass `run_dir` or `pf_gyro_odom:=false`. The mid-run localizer used by `auto_map_race` also retains `/odom`.
+
+`imu_hardware:=auto` selects simulated IMU topics when the simulator is running and real sensor readers otherwise, using the same selector as `map_course`. Explicit `true` or `false` selects real or simulated inputs. The BNO option keeps its own default.
+
+When the IMU stack is enabled, racing includes vehicle state with `publish_odom_tf:=false`. The particle filter owns `map -> laser`; vehicle state must not parent `odom` in this workflow. Selecting the gyro changes the filter's odometry input, without adding a coordinate transform.
+
+#### Limitations
+
+Keep the car stationary for about 3 s at launch so the gyro can estimate its bias, the small turn-rate offset measured while still. The car already stands while the start pose is seeded; leave LB released until bias estimation and localization are ready.
+
+The improvement under real tyre slip is **simulator-unverifiable** and needs a floor test. Follow static checks and wheels-off-the-ground testing first, then use `profile:=raceline_floor_test.csv` for the first floor run. Hold LB to drive; releasing it stops the car.
 
 ## Phase 3: Record a racing line
 

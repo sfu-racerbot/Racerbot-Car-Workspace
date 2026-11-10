@@ -129,7 +129,8 @@ def _nodes(context):
         package='particle_filter',
         executable='particle_filter',
         name='particle_filter',
-        parameters=[config],
+        parameters=[config, {
+            'odometry_topic': LaunchConfiguration('odometry_topic').perform(context)}],
         # Only /tf is remapped. The particle filter reaches the map through
         # the `/map_server/map` *service*, not the topic, and that service
         # name is left alone so the pairing with map_server above still
@@ -163,6 +164,9 @@ def generate_launch_description():
                 get_package_share_directory('particle_filter'),
                 'config', 'localize.yaml'),
             description='particle_filter parameter file.'),
+        DeclareLaunchArgument(
+            'odometry_topic', default_value='/odom',
+            description='Odometry pose deltas for the particle filter; racing can use /odom/imu.'),
         DeclareLaunchArgument(
             'standalone', default_value='false',
             description='true when no SLAM is running (racing on a saved '
