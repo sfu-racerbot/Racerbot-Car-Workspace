@@ -98,7 +98,10 @@ class PendingSnapshot:
         if shutdown and lb_held:
             action = 'skipped (LB held at shutdown)'
         elif (may_join_graph(lb_held)
-              and now - self.released_since >= self.release_sec):
+              and now - self.released_since >= self.release_sec
+              and (self.stopped_at is None
+                   or self.released_since + self.release_sec
+                   <= self.stopped_at + self.wait_after_stop_sec)):
             action = 'start'
         elif (self.stopped_at is not None
               and now - self.stopped_at >= self.wait_after_stop_sec):

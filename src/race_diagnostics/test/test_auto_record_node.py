@@ -109,6 +109,16 @@ class Graph:
     def add_recorder(self, name='race_diag_node'):
         self._add(name, Node(name, context=self.context))
 
+    def add_joy(self, held=True):
+        from sensor_msgs.msg import Joy
+        node = Node('test_joy', context=self.context)
+        node.held = held
+        pub = node.create_publisher(Joy, '/joy', 10)
+        node.create_timer(0.02, lambda: pub.publish(
+            Joy(buttons=[0, 0, 0, 0, int(node.held)])))
+        self._add('test_joy', node)
+        return node
+
     def _add(self, name, node):
         self.nodes[name] = node
         self.executor.add_node(node)
@@ -282,7 +292,15 @@ def leftovers(run, group):
 
 
 def runs(out):
+    return [p for p in run_directories(out) if 'started' in info(p)]
+
+
+def run_directories(out):
     return sorted(p for p in out.glob('2*') if p.is_dir()) if out.exists() else []
+
+
+def standbys(out):
+    return [p for p in run_directories(out) if 'started' not in info(p)]
 
 
 def info(run):
@@ -353,11 +371,15 @@ def decisions(watcher):
 
 
 def test_records_while_an_algorithm_runs_and_closes_the_bag_when_it_goes(graph, watcher):
-    assert runs(watcher.out) == [], 'recorded with no algorithm running'
+    assert wait_for(lambda: len(standbys(watcher.out)) == 1, 10), watcher.log.read_text()
+    standby = standbys(watcher.out)[0]
+    assert runs(watcher.out) == [], 'activated with no algorithm running'
+    assert not (standby / 'events.jsonl').exists()
     algo = graph.add_algorithm()
     assert wait_for(lambda: len(runs(watcher.out)) == 1, timeout=10.0), \
         watcher.log.read_text()
     run = runs(watcher.out)[0]
+    assert run == standby, 'created a new recorder instead of activating standby'
     assert info(run)['algorithms'] == {TOPIC: ['/fake_algorithm']}
     wait_until_recording(watcher, run)
     time.sleep(3.0)    # 60 messages at 20 Hz
@@ -382,6 +404,8 @@ def test_records_while_an_algorithm_runs_and_closes_the_bag_when_it_goes(graph, 
     assert (run / 'events.jsonl').exists()
     assert leftovers(run, group) == [], 'recorder processes left running'
     assert len(runs(watcher.out)) == 1
+    assert wait_for(lambda: len(standbys(watcher.out)) == 1, 15)
+    assert standbys(watcher.out)[0] != run
     # No /odom in this bag: unknown, not "never moved".
     assert wait_for_activity(run)['moved'] is None
     text = decisions(watcher)
@@ -687,3 +711,164 @@ def test_record_run_arms_the_exit_timer_on_shutdown():
     handlers = [action.event_handler for action in module.generate_launch_description().entities
                 if isinstance(action, RegisterEventHandler)]
     assert [type(handler) for handler in handlers] == [OnShutdown]
+
+
+def test_idle_bag_is_paused_then_resumes_same_run_and_signals_probe(tmp_path, graph):
+    # Rule 1/3 oracle: real Resume/IsPaused services and the closed bag's timestamps.
+    from rosbag2_interfaces.srv import IsPaused
+    graph.add_algorithm('ackermann_mux')  # ignored publisher, supplying pre-start data
+    watcher = _run_watcher(tmp_path, 'start_delay_sec:=0.0', 'poll_period_sec:=0.2')
+    try:
+        assert wait_for(lambda: len(standbys(watcher.out)) == 1, 10)
+        run = standbys(watcher.out)[0]
+        probe = Node('paused_bag_test', context=graph.context)
+        executor = SingleThreadedExecutor(context=graph.context)
+        executor.add_node(probe)
+        client = probe.create_client(IsPaused, '/auto_rosbag2_recorder/is_paused')
+        try:
+            assert client.wait_for_service(timeout_sec=10)
+            future = client.call_async(IsPaused.Request())
+            executor.spin_until_future_complete(future, timeout_sec=5)
+            assert future.result().paused is True
+            assert not (run / 'events.jsonl').exists()
+            # The bag has received data while paused; none may be retained.
+            time.sleep(1)
+            activation_after = time.time()
+            graph.add_algorithm()
+            assert wait_for(lambda: runs(watcher.out) == [run], 10)
+            wait_until_recording(watcher, run)
+            future = client.call_async(IsPaused.Request())
+            executor.spin_until_future_complete(future, timeout_sec=5)
+            assert future.result().paused is False
+            import json
+            events = [json.loads(s) for s in (run / 'events.jsonl').read_text().splitlines()]
+            assert events[0]['category'] == 'armed'
+            assert 'standby_prepared' in info(run) and 'started' in info(run)
+        finally:
+            executor.shutdown()
+            probe.destroy_node()
+        os.killpg(watcher.pid, signal.SIGINT)
+        watcher.wait(timeout=25)
+        assert bag_count(run, TOPIC) > 0
+        assert first_stamp_in_bag(run, TOPIC) >= activation_after
+    finally:
+        _stop_watcher(watcher)
+
+
+def test_held_lb_denies_standby_and_cold_start_on_real_joy(tmp_path, graph):
+    # Rule 6 deny path: receive Joy through DDS before polling the real graph.
+    from race_diagnostics.auto_record_node import AutoRecordNode
+    graph.add_joy(True)
+    graph.add_algorithm()
+    rclpy.init(args=['--ros-args', '-p', f'output_directory:={tmp_path / "runs"}',
+                     '-p', f"trigger_topics:=['{TOPIC}']", '-p', 'start_delay_sec:=0.0'])
+    node = AutoRecordNode()
+    for timer in node.timers:
+        timer.cancel()
+    try:
+        deadline = time.monotonic() + 10
+        while (not node._lb_held() or not node._graph()[0][TOPIC]) and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.05)
+        assert node._lb_held() and node._graph()[0][TOPIC]
+        before_clients = list(node.clients)
+        for _ in range(5):
+            node._tick()
+            rclpy.spin_once(node, timeout_sec=0.02)
+        assert run_directories(node.output_directory) == []
+        assert node._processes() == []
+        assert list(node.clients) == before_clients
+        assert (node.output_directory / 'auto_record.log').read_text().count(
+            'waiting for LB release to start recording') == 1
+    finally:
+        node.shutdown('test complete')
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_snapshot_waits_for_continuous_lb_release(tmp_path, graph):
+    watcher = _run_watcher(tmp_path, 'start_delay_sec:=0.0', 'poll_period_sec:=0.1',
+                           'snapshot_release_sec:=1.0')
+    try:
+        assert wait_for(lambda: len(standbys(watcher.out)) == 1, 10)
+        run = standbys(watcher.out)[0]
+        joy = graph.add_joy(True)
+        time.sleep(3.5)  # discovered and delivering fresh LB before activation
+        graph.add_algorithm()
+        assert wait_for(lambda: runs(watcher.out) == [run], 10)
+        wait_until_recording(watcher, run)
+        assert info(run)['params_snapshot'] == 'pending'
+        assert not (run / 'metadata' / 'params').exists()
+        joy.held = False
+        time.sleep(0.4)
+        assert info(run)['params_snapshot'] == 'pending'
+        joy.held = True
+        time.sleep(0.4)
+        assert info(run)['params_snapshot'] == 'pending'
+        joy.held = False
+        assert wait_for(lambda: info(run)['params_snapshot'] == 'started', 5)
+        assert wait_for(lambda: (run / 'metadata' / 'params' / 'auto_record.yaml').exists(), 10)
+    finally:
+        _stop_watcher(watcher)
+
+
+def test_unused_standby_is_removed_on_shutdown(tmp_path):
+    watcher = _run_watcher(tmp_path, 'poll_period_sec:=0.1')
+    try:
+        assert wait_for(lambda: len(standbys(watcher.out)) == 1, 10)
+        run = standbys(watcher.out)[0]
+        os.killpg(watcher.pid, signal.SIGINT)
+        watcher.wait(timeout=25)
+        assert not run.exists()
+        assert run_directories(watcher.out) == []
+        assert _processes_mentioning(run) == []
+    finally:
+        _stop_watcher(watcher)
+
+
+@pytest.mark.parametrize('shutdown', [False, True])
+def test_pending_snapshot_records_held_skip_reason(tmp_path, graph, shutdown):
+    watcher = _run_watcher(tmp_path, 'start_delay_sec:=0.0', 'stop_delay_sec:=0.1',
+                           'poll_period_sec:=0.1', 'snapshot_wait_after_stop_sec:=0.5')
+    try:
+        assert wait_for(lambda: len(standbys(watcher.out)) == 1, 10)
+        run = standbys(watcher.out)[0]
+        graph.add_joy(True)
+        time.sleep(3.5)
+        graph.add_algorithm()
+        assert wait_for(lambda: runs(watcher.out) == [run], 10)
+        wait_until_recording(watcher, run)
+        assert info(run)['params_snapshot'] == 'pending'
+        if shutdown:
+            os.killpg(watcher.pid, signal.SIGINT)
+            watcher.wait(timeout=25)
+            reason = 'skipped (LB held at shutdown)'
+        else:
+            graph.remove('fake_algorithm')
+            reason = 'skipped (LB held after stop)'
+        assert wait_for(lambda: info(run).get('params_snapshot') == reason, 10)
+        assert reason in decisions(watcher)
+        assert not (run / 'metadata' / 'params').exists()
+    finally:
+        _stop_watcher(watcher)
+
+
+def test_startup_stops_orphan_auto_process_but_leaves_unrelated(tmp_path):
+    orphan = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)',
+                               '__node:=auto_snapshot_params'],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    unrelated = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)',
+                                  '__node:=race_diag_node'])
+    watcher = None
+    try:
+        watcher = _run_watcher(tmp_path, 'poll_period_sec:=0.1')
+        assert wait_for(lambda: orphan.poll() is not None, 15)
+        assert unrelated.poll() is None
+        assert f'stopping orphan auto recorder pid {orphan.pid}' in decisions(watcher)
+        assert wait_for(lambda: len(standbys(watcher.out)) == 1, 10)
+    finally:
+        if watcher is not None:
+            _stop_watcher(watcher)
+        for proc in (orphan, unrelated):
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)

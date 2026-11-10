@@ -69,6 +69,10 @@ def test_snapshot_stop_wait_expires_without_bypassing_release():
     assert released.update(10, True, stopped=True) == ''
     assert released.update(11, False, stopped=True) == ''
     assert released.update(12, False, stopped=True) == 'start'
+    late = ar.PendingSnapshot(1.0, 30.0)
+    assert late.update(10, True, stopped=True) == ''
+    assert late.update(39.5, False, stopped=True) == ''
+    assert late.update(40.5, False, stopped=True) == 'skipped (LB held after stop)'
 
 
 def test_snapshot_shutdown_held_skips_and_released_still_debounces():
