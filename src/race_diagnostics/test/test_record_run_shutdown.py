@@ -109,3 +109,71 @@ def test_system_log_is_launched_without_the_ros2_run_wrapper(tmp_path):
     assert os.path.basename(cmd[0]) == 'system_log', cmd
     assert Path(cmd[0]).parent.name == 'race_diagnostics', cmd
     assert cmd[1:] == ['--output', str(tmp_path / 'run' / 'system')], cmd
+
+
+def test_snapshot_launch_is_optional_and_standby_reaches_probe(tmp_path):
+    # Oracle: warm-recorder rule 1, evaluated as real launch actions.
+    import importlib.util
+    from launch import LaunchContext
+    from launch_ros.actions import Node
+    launch_file = Path(__file__).resolve().parents[1] / 'launch' / 'record_run.py'
+    spec = importlib.util.spec_from_file_location('record_run_standby', launch_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    context = LaunchContext()
+    context.launch_configurations.update({
+        'run_directory': str(tmp_path / 'run'), 'record_bag': 'false',
+        'name_prefix': 'p_', 'system_log': 'false', 'topics': '/scan',
+        'snapshot': 'false', 'standby': 'true'})
+    nodes = [a for a in module._setup(context) if isinstance(a, Node)]
+    assert [a.node_executable for a in nodes] == ['race_diag_node']
+    # The real node constructed with the launch parameters must stay silent.
+    from launch_ros.utilities import evaluate_parameters
+    params = evaluate_parameters(context, nodes[0]._Node__parameters)
+    assert params[-1]['standby'] is True
+    context.launch_configurations['snapshot'] = 'true'
+    nodes = [a for a in module._setup(context) if isinstance(a, Node)]
+    assert [a.node_executable for a in nodes] == ['race_diag_node', 'snapshot_params']
+
+
+def test_standby_probe_ignores_other_directory_then_arms_first(tmp_path):
+    # Oracle: rule 2. Real QoS/ROS messages, never any driving publisher.
+    import json
+    import rclpy
+    from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+    from std_msgs.msg import String
+    from sensor_msgs.msg import Joy
+    from race_diagnostics.race_diag_node import RaceDiagNode
+    run = tmp_path / 'run'
+    rclpy.init(args=['--ros-args', '-p', f'output_directory:={run}',
+                     '-p', 'standby:=true'])
+    node = RaceDiagNode()
+    sender = rclpy.create_node('standby_signal_test')
+    pub = sender.create_publisher(String, '/auto_record/start', QoSProfile(
+        depth=1, reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    def spin_for(seconds):
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            rclpy.spin_once(node, timeout_sec=0.05)
+    try:
+        node._joy(Joy(buttons=[0, 0, 0, 0, 1]))
+        spin_for(1.1)
+        assert not run.exists()
+        pub.publish(String(data=str(tmp_path / 'other')))
+        spin_for(1.1)
+        assert not run.exists()
+        pub.publish(String(data=str(run / '..' / 'run')))
+        assert wait_for(lambda: (spin_for(0.1) or (run / 'events.jsonl').exists()), 5)
+        records = [json.loads(line) for line in (run / 'events.jsonl').read_text().splitlines()]
+        assert records[0]['category'] == 'armed'
+        assert [r['category'] for r in records].count('armed') == 1
+        assert node.counts['joy'] == 0  # standby data must not leak into the run
+        pub.publish(String(data=str(run)))
+        spin_for(0.2)
+        assert (run / 'events.jsonl').read_text().count('"category": "armed"') == 1
+    finally:
+        node.close()
+        node.destroy_node()
+        sender.destroy_node()
+        rclpy.shutdown()

@@ -2,8 +2,8 @@
 # Started by every f1tenth_stack bringup unless `record:=false` is passed.
 # It records only while an algorithm is running, into the same
 # ~/racerbot-ws/data/<car>/racerbot_runs/<time>/ layout record_run.py writes, so analyze_run.py
-# and summarize_run work on its runs unchanged. It subscribes to nothing
-# and publishes nothing itself: it only reads the ROS graph.
+# and summarize_run work on its runs unchanged. It subscribes to /joy and
+# publishes only /auto_record/start, never a drive topic.
 # docs/run-diagnostics.md#automatic-recording
 auto_record:
   ros__parameters:
@@ -48,6 +48,12 @@ auto_record:
     # Recording stops once no algorithm has published for this long.
     stop_delay_sec: 3.0
     poll_period_sec: 0.25
+
+    # Prepare recorders and start parameter snapshots only with LB released.
+    deadman_button: 4
+    joy_timeout_sec: 0.5  # Missing/stale joy counts as released, as for driving nodes.
+    snapshot_release_sec: 1.0  # Continuous release before starting snapshot_params.
+    snapshot_wait_after_stop_sec: 30.0  # Then skip if no full release interval fits.
 
     record_bag: true
     # Once the bag has subscribed to all of these that anyone publishes, the
