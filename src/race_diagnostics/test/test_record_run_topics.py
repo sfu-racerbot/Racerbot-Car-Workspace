@@ -82,3 +82,13 @@ def test_topic_names_are_absolute_and_unique():
     topics = _default_topics()
     assert all(t.startswith('/') and ' ' not in t for t in topics)
     assert len(topics) == len(set(topics))
+
+
+def test_start_paused_is_opt_in():
+    # Oracle: warm-recorder rule 1; manual record_run keeps recording immediately.
+    from race_diagnostics.recording import bag_record_command
+    normal = bag_record_command('/tmp/bag', 'recorder', ['/scan'])
+    paused = bag_record_command('/tmp/bag', 'recorder', ['/scan'], start_paused=True)
+    assert '--start-paused' not in normal
+    assert paused.count('--start-paused') == 1
+    assert [arg for arg in paused if arg != '--start-paused'] == normal

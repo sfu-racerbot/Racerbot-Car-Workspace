@@ -50,6 +50,7 @@ from rclpy.node import Node
 from rclpy.qos import (QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy,
                        qos_profile_sensor_data)
 from sensor_msgs.msg import Joy, LaserScan
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
@@ -73,6 +74,7 @@ class RaceDiagNode(Node):
         self.declare_parameter('pose_lag_alert_sec', 0.30)
         self.declare_parameter('pose_still_travel_m', 0.02)
         self.declare_parameter('output_directory', '')
+        self.declare_parameter('standby', False)
 
         def value(name):
             return self.get_parameter(name).value
@@ -102,13 +104,8 @@ class RaceDiagNode(Node):
         self._last_signature = None
 
         self._events_file = None
-        directory = str(value('output_directory'))
-        if directory:
-            path = Path(os.path.expanduser(directory))
-            path.mkdir(parents=True, exist_ok=True)
-            # Line-buffered so a hard kill (or a car that has to be
-            # switched off in a hurry) still leaves a complete file.
-            self._events_file = open(path / 'events.jsonl', 'a', buffering=1)
+        self.output_directory = str(value('output_directory'))
+        self.standby = bool(value('standby'))
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -129,12 +126,30 @@ class RaceDiagNode(Node):
         self.create_subscription(Joy, str(value('joy_topic')), self._joy, 10)
         self.create_timer(1.0, self._tick)
 
+        if self.standby:
+            self.create_subscription(String, '/auto_record/start', self._start_signal, latched)
+        else:
+            self._arm()
+
+    def _start_signal(self, msg):
+        if (self.standby and os.path.realpath(msg.data)
+                == os.path.realpath(self.output_directory)):
+            self.standby = False
+            self._arm()
+
+    def _arm(self):
+        if self.output_directory:
+            path = Path(os.path.expanduser(self.output_directory))
+            path.mkdir(parents=True, exist_ok=True)
+            self._events_file = open(path / 'events.jsonl', 'a', buffering=1)
         self._emit('armed', 'probe armed (subscribe-only); waiting for the stack')
 
     # ------------------------------------------------------------------
     # Output
     # ------------------------------------------------------------------
     def _emit(self, category: str, message: str, **fields):
+        if self.standby:
+            return
         stamp = time.time()
         print(f'[{time.strftime("%H:%M:%S")}] {category.upper()}: {message}', flush=True)
         if self._events_file is not None:
@@ -157,9 +172,13 @@ class RaceDiagNode(Node):
     # Subscriptions
     # ------------------------------------------------------------------
     def _scan(self, msg):
+        if self.standby:
+            return
         self._mark('scan', f'{len(msg.ranges)} beams, frame_id={msg.header.frame_id}')
 
     def _map(self, msg):
+        if self.standby:
+            return
         info = msg.info
         total = info.width * info.height
         known = occupied = 0
@@ -177,6 +196,8 @@ class RaceDiagNode(Node):
                        occupied=occupied)
 
     def _pose(self, msg):
+        if self.standby:
+            return
         previous = self.pose_xy
         self.pose_xy = (msg.pose.position.x, msg.pose.position.y)
 
@@ -206,14 +227,20 @@ class RaceDiagNode(Node):
         self._mark('pose', f'map-frame ({self.pose_xy[0]:+.2f}, {self.pose_xy[1]:+.2f})')
 
     def _odom(self, msg):
+        if self.standby:
+            return
         self.speed = msg.twist.twist.linear.x
         self._mark('odom', f'linear.x={self.speed:+.2f}m/s')
 
     def _drive(self, msg):
+        if self.standby:
+            return
         self.cmd_speed = msg.drive.speed
         self._mark('drive', f'speed={self.cmd_speed:.2f}m/s')
 
     def _joy(self, msg):
+        if self.standby:
+            return
         held = len(msg.buttons) > 4 and bool(msg.buttons[4])
         if held != self.deadman_held:
             self.deadman_held = held
@@ -224,6 +251,8 @@ class RaceDiagNode(Node):
     # Periodic
     # ------------------------------------------------------------------
     def _tick(self):
+        if self.standby:
+            return
         now = time.monotonic()
         try:
             self.tf_buffer.lookup_transform(

@@ -142,16 +142,20 @@ def _setup(context, *args, **kwargs):
             executable='race_diag_node',
             name=diag_name,
             output='screen',
-            parameters=[diag_params, {'output_directory': run_dir}],
+            parameters=[diag_params, {'output_directory': run_dir,
+                                     'standby': LaunchConfiguration(
+                                         'standby', default='false').perform(context).lower()
+                                     in ('true', '1')}],
         ),
-        Node(
+    ]
+    if LaunchConfiguration('snapshot', default='true').perform(context).lower() in ('true', '1'):
+        actions.append(Node(
             package='race_diagnostics',
             executable='snapshot_params',
             name=snapshot_name,
             output='screen',
             arguments=['--output', os.path.join(str(meta), 'params')],
-        ),
-    ]
+        ))
 
     if LaunchConfiguration('record_bag').perform(context).lower() in ('true', '1'):
         actions.append(ExecuteProcess(
@@ -196,6 +200,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'system_log', default_value='true',
             description='Record per-process system resource usage.'),
+        DeclareLaunchArgument(
+            'snapshot', default_value='true',
+            description='Start the parameter snapshot process.'),
+        DeclareLaunchArgument(
+            'standby', default_value='false',
+            description='Arm the probe only after a matching /auto_record/start signal.'),
         DeclareLaunchArgument(
             'topics', default_value=' '.join(DEFAULT_TOPICS),
             description='Space-separated topics to bag. Drop /scan to shrink ~10x.'),

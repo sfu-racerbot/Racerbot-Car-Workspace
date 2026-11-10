@@ -69,8 +69,9 @@ DEFAULT_TOPICS = [
 MAX_BAG_FILE_BYTES = 50 * 1000 * 1000
 
 
-def bag_record_command(bag_dir, node_name, topics):
+def bag_record_command(bag_dir, node_name, topics, *, start_paused=False):
     """The `ros2 bag record` command line for one run's bag."""
     return ['ros2', 'bag', 'record', '--node-name', node_name,
             '-o', str(bag_dir),
-            '--max-bag-size', str(MAX_BAG_FILE_BYTES)] + list(topics)
+            '--max-bag-size', str(MAX_BAG_FILE_BYTES)] + (
+                ['--start-paused'] if start_paused else []) + list(topics)
