@@ -6,7 +6,7 @@ The controller uses the same steering equations but improves how the target poin
 
 The controller then calculates the path curvature using (k = 2y/d^2) and converts it into a steering angle using (\delta = \arctan(Lk)), where (L) is the wheelbase.
 
-Speed depends on speed_mode. In steering mode (default), speed follows a piecewise-linear function of the steering angle: max_speed when straight, medium_angle_speed at half of max_steering, and min_speed at full lock (linear end to end when medium_angle_speed is left at its default). In profile mode, speed follows a profile planned along the whole line from cornering, braking and acceleration limits, with the steering rule kept as a cap. In both modes the command is acceleration-limited and ramps down near the goal. The controller publishes steering and speed as an AckermannDriveStamped message on /drive.
+Speed depends on speed_mode. In steering mode (default), speed follows a piecewise-linear function of the steering angle: max_speed when straight, medium_angle_speed at half of max_steering, and min_speed at full lock (linear end to end when medium_angle_speed is left at its default). In profile mode, speed follows a profile planned along the whole line from cornering, braking and acceleration limits, with the steering rule kept as a cap. Profile mode also limits acceleration. Both modes ramp down near the goal. The controller publishes steering and speed as an AckermannDriveStamped message on /drive.
 
 It only drives while **both** of these are true; otherwise it publishes speed 0:
 
@@ -92,7 +92,16 @@ for all options.
   `min_speed` and `max_speed`.
 - `lookahead_base`, `lookahead_min`, `lookahead_max` (m) and
   `lookahead_speed_gain` (extra metres of lookahead per m/s).
+- `lookahead_gain_straight`, `lookahead_gain_corner` (m per m/s): blend the
+  speed gain from straight to corner. Each defaults to -1, using
+  `lookahead_speed_gain` for unchanged behavior.
+- `lookahead_corner_curvature` (1/m, default 0.67): curvature at which the
+  blend reaches the corner gain; must be positive.
+- `lookahead_preview` (m, default 2.0): distance along the path over which to
+  take the maximum curvature for the blend; 0 uses the nearest point.
 - `max_steering` (rad).
+- `max_steering_rate` (rad/s, default 1.0): limits steering changes while
+  driving. Stops send zero immediately and reset the ramp.
 - `speed_mode`: `steering` (default) uses `pure_pursuit_a`'s rule, `max_speed`
   when straight, `medium_angle_speed` at half lock and `min_speed` at full
   steering lock. `profile` plans the
@@ -120,6 +129,15 @@ for all options.
   release LB and press it again.
 - `max_path_error` (m, default 1.5): stop if the car is further than this from
   the line. Usually localization is lost, or the line was saved on another map.
+- `max_pose_age` (s, default 0.25): stop on a pose older than this, unstamped,
+  or stamped in the future.
+- `compensate_latency` (default false) and `actuation_delay` (s, default 0,
+  at most 0.5): aim from where the car will be when the command acts, the
+  pose's stamp plus its age plus `actuation_delay`, replaying the steering
+  already sent. Only the goal search uses it; tracking and the off-path stop
+  use the measured pose. The particle filter stamps its pose when it
+  publishes, so `actuation_delay` must also cover its processing time. Raise
+  it in 20 ms steps; too much cuts corners.
 - `loop_closure_distance` (m, default 0.5, node parameter): a path whose last
   point is this close to its first is a loop; otherwise it is open. An open
   path never wraps back to its start. Near its end, the car aims along the
@@ -145,11 +163,11 @@ Only the node uses ROS, so the other three are tested on their own.
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source install/setup.bash
-export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+export ROS_DOMAIN_ID=80 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 colcon test --packages-select pure_pursuit_tech && colcon test-result --verbose
 ```
 
-- `test/test_core.cpp` (gtest, 31 tests): the ROS-free core.
+- `test/test_core.cpp` (gtest): the ROS-free core.
 - `test/test_pure_pursuit_tech_node.py` (pytest): the built node on
   `/test_only/*` topics. It covers the four LB deny paths, the safety brake,
   the control law, the laser offset, profile mode's ramp, the goal and lap

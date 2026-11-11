@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 #include "path.hpp"
 
@@ -24,6 +25,14 @@ void to_car_frame(const Pose& car, double wx, double wy, double& local_x, double
 /// Lookahead distance (m): base + gain * |speed|, clamped to [min, max].
 double lookahead(double speed, double base, double gain, double min, double max);
 
+/// Sharpest curvature from waypoint `from` to `distance` m ahead (a loop wraps,
+/// an open path stops at its end). `curvature` is Path::curvature().
+double max_curvature_ahead(const Path& path, const std::vector<double>& curvature, size_t from, double distance);
+
+/// Lookahead speed gain: gain_straight at curvature 0, gain_corner at or above
+/// corner_curvature, linear between. Non-finite curvature reads as a corner.
+double blended_gain(double curvature, double gain_straight, double gain_corner, double corner_curvature);
+
 struct Goal
 {
     double local_x;   // ahead of the car (m)
@@ -40,6 +49,22 @@ struct Goal
 /// point L ahead along the last segment, so steering stays calm instead of
 /// swinging at the final waypoint. None when nothing is ahead of the car.
 std::optional<Goal> find_goal(const Path& path, size_t from, const Pose& car, double L);
+
+/// The pose `dt` seconds on, at constant speed `v` and `steering` (kinematic
+/// bicycle, exact arc). Unchanged for dt <= 0.
+Pose predict(const Pose& p, double v, double steering, double wheelbase, double dt);
+
+struct SteerCommand
+{
+    double time;       // s, when it was sent
+    double steering;   // rad
+};
+
+/// The pose at t1 from a pose measured at t0, at speed v, steering as commanded:
+/// each command (sorted by time) acts `delay` s after it was sent; 0 before the
+/// first. Unchanged when t1 <= t0.
+Pose predict_through(const Pose& p, double t0, double t1, double v, double wheelbase,
+                     const std::vector<SteerCommand>& history, double delay);
 
 /// Pure pursuit steering (rad) for a goal in the car frame: the arc through
 /// it has curvature 2y/d^2; the bicycle model turns that into atan(wheelbase * k),
@@ -58,3 +83,6 @@ double goal_ramp(double remaining, double tolerance, double brake);
 /// Speed after an acceleration limit: at most `from + accel * dt` (dt clamped
 /// to [0, 0.2] s). Slowing down is never limited.
 double limit_acceleration(double target, double from, double accel, double dt);
+
+/// `target` within +-rate*dt of `previous` (dt clamped to [0, max_dt]; non-finite = 0).
+double limit_rate(double target, double previous, double rate, double dt, double max_dt = 0.1);

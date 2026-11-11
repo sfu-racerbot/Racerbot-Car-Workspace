@@ -112,6 +112,26 @@ def test_speed_and_goal_arguments_reach_the_node(launch_module, monkeypatch):
             params['goal_tolerance'], params['max_path_error']) == (3.5, 2.0, 2.5, 0.4, 1.2)
 
 
+def test_latency_arguments_reach_the_node(launch_module, monkeypatch):
+    params = tech_node_parameters(launch_module, monkeypatch, compensate_latency='true',
+                                  actuation_delay='0.08', max_pose_age='0.3', max_steering_rate='2.0')
+    assert params['compensate_latency'] is True
+    assert (params['actuation_delay'], params['max_pose_age'], params['max_steering_rate']) == (0.08, 0.3, 2.0)
+    defaults = tech_node_parameters(launch_module, monkeypatch)
+    assert defaults['compensate_latency'] is False and defaults['actuation_delay'] == 0.0
+    assert defaults['max_steering_rate'] == 1.0   # the Python pure_pursuit's default
+
+
+def test_lookahead_blend_arguments_reach_the_node(launch_module, monkeypatch):
+    params = tech_node_parameters(launch_module, monkeypatch, lookahead_gain_straight='0.12',
+                                  lookahead_gain_corner='0.05', lookahead_corner_curvature='0.5',
+                                  lookahead_preview='3.0')
+    assert (params['lookahead_gain_straight'], params['lookahead_gain_corner'],
+            params['lookahead_corner_curvature'], params['lookahead_preview']) == (0.12, 0.05, 0.5, 3.0)
+    defaults = tech_node_parameters(launch_module, monkeypatch)
+    assert (defaults['lookahead_gain_straight'], defaults['lookahead_gain_corner']) == (-1.0, -1.0)
+
+
 def test_speed_mode_defaults_to_pure_pursuit_a_rule(launch_module, monkeypatch):
     params = tech_node_parameters(launch_module, monkeypatch)
     assert params['speed_mode'] == 'steering'

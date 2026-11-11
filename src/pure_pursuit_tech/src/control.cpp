@@ -26,6 +26,29 @@ double lookahead(double speed, double base, double gain, double min, double max)
     return std::clamp(base + gain * std::abs(speed), min, max);
 }
 
+double max_curvature_ahead(const Path& path, const std::vector<double>& curvature, size_t from, double distance)
+{
+    const size_t n = path.size();
+    double k = curvature[from];
+    double travelled = 0.0;
+    for (size_t step = 0, i = from; step + 1 < n && travelled < distance; ++step) {
+        if (!path.closed() && i + 1 >= n) {
+            break;
+        }
+        travelled += path.segment(i);
+        i = (i + 1) % n;
+        k = std::max(k, curvature[i]);
+    }
+    return k;
+}
+
+double blended_gain(double curvature, double gain_straight, double gain_corner, double corner_curvature)
+{
+    // unknown curvature counts as a corner: the shorter lookahead
+    const double blend = std::isfinite(curvature) ? std::clamp(curvature / corner_curvature, 0.0, 1.0) : 1.0;
+    return gain_straight + (gain_corner - gain_straight) * blend;
+}
+
 std::optional<Goal> find_goal(const Path& path, size_t from, const Pose& car, double L)
 {
     const size_t n = path.size();
@@ -75,6 +98,45 @@ std::optional<Goal> find_goal(const Path& path, size_t from, const Pose& car, do
     return std::nullopt;
 }
 
+
+// Constant-steering bicycle prediction.
+Pose predict(const Pose& p, double v, double steering, double wheelbase, double dt)
+{
+    if (!(dt > 0.0)) {
+        return p;
+    }
+    const double w = v / wheelbase * std::tan(steering);   // yaw rate
+    const double yaw = p.yaw + w * dt;
+    if (std::abs(w * dt) < 1e-9) {
+        return {p.x + v * dt * std::cos(p.yaw), p.y + v * dt * std::sin(p.yaw), yaw};
+    }
+    // exact arc for constant speed and steering
+    return {p.x + v / w * (std::sin(yaw) - std::sin(p.yaw)),
+            p.y - v / w * (std::cos(yaw) - std::cos(p.yaw)), yaw};
+}
+
+// Replay commands through the delay window.
+Pose predict_through(const Pose& p, double t0, double t1, double v, double wheelbase,
+                     const std::vector<SteerCommand>& history, double delay)
+{
+    Pose q = p;
+    double t = t0;
+    double steering = 0.0;
+    size_t k = 0;
+    while (k < history.size() && history[k].time + delay <= t) {
+        steering = history[k++].steering;
+    }
+    while (t < t1) {
+        const double next = k < history.size() ? std::min(t1, history[k].time + delay) : t1;
+        q = predict(q, v, steering, wheelbase, next - t);
+        t = next;
+        while (k < history.size() && history[k].time + delay <= t) {
+            steering = history[k++].steering;
+        }
+    }
+    return q;
+}
+
 double steering_for(double local_x, double local_y, double wheelbase, double max_steering)
 {
     // local_x^2 + local_y^2 is the squared distance to the goal, so this uses
@@ -99,6 +161,12 @@ double goal_ramp(double remaining, double tolerance, double brake)
         return std::numeric_limits<double>::infinity();
     }
     return std::sqrt(2.0 * brake * std::max(0.0, remaining - tolerance));
+}
+
+double limit_rate(double target, double previous, double rate, double dt, double max_dt)
+{
+    const double step = rate * (std::isfinite(dt) ? std::clamp(dt, 0.0, max_dt) : 0.0);
+    return std::clamp(target, previous - step, previous + step);
 }
 
 double limit_acceleration(double target, double from, double accel, double dt)

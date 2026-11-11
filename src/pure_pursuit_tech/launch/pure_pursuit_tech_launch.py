@@ -197,6 +197,22 @@ def generate_launch_description():
                               description="stop this close to the goal: the end of an open path, or the last lap's end (m)"),
         DeclareLaunchArgument("max_path_error", default_value="1.5",
                               description="stop if the car is further than this from the line (m)"),
+        DeclareLaunchArgument("max_pose_age", default_value="0.25",
+                              description="stop on a pose older than this (s), or unstamped"),
+        DeclareLaunchArgument("compensate_latency", default_value="false",
+                              description="aim from the pose predicted at now + actuation_delay"),
+        DeclareLaunchArgument("actuation_delay", default_value="0.0",
+                              description="command-to-wheels delay (s), 0 to 0.5"),
+        DeclareLaunchArgument("max_steering_rate", default_value="1.0",
+                              description="steering slew limit (rad/s), both directions"),
+        DeclareLaunchArgument("lookahead_gain_straight", default_value="-1.0",
+                              description="lookahead speed gain on straights (m per m/s); -1 = lookahead_speed_gain"),
+        DeclareLaunchArgument("lookahead_gain_corner", default_value="-1.0",
+                              description="lookahead speed gain in corners (m per m/s); -1 = lookahead_speed_gain"),
+        DeclareLaunchArgument("lookahead_corner_curvature", default_value="0.67",
+                              description="curvature (1/m) that counts as a full corner"),
+        DeclareLaunchArgument("lookahead_preview", default_value="2.0",
+                              description="how far ahead (m) to look for a corner"),
     ]
 
     min_speed_arg = DeclareLaunchArgument(
@@ -261,7 +277,12 @@ def generate_launch_description():
                         "laps": ParameterValue(LaunchConfiguration("laps"), value_type=int),
                         **{name: ParameterValue(LaunchConfiguration(name), value_type=float)
                            for name in ("medium_angle_speed", "max_lateral_accel", "max_accel", "max_brake",
-                                        "goal_tolerance", "max_path_error")},
+                                        "goal_tolerance", "max_path_error", "max_pose_age",
+                                        "actuation_delay", "max_steering_rate", "lookahead_gain_straight",
+                                        "lookahead_gain_corner", "lookahead_corner_curvature", "lookahead_preview")},
+                        "compensate_latency": ParameterValue(
+                            LaunchConfiguration("compensate_latency"), value_type=bool
+                        ),
                         "max_steering": max_steering,
                         "max_speed": ParameterValue(
                             LaunchConfiguration("max_speed"), value_type=float
