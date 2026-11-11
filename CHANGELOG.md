@@ -11,7 +11,34 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-09 (latest): map racer, faster lines and an earlier throttle
+## 2026-11-11 (latest): the first neural racer model, and a braking cap it can drive with
+
+`src/neural_racer/models/a0eef2af0a3757b6/` is the best neural racer so far (FIR league-v1-smoke, main0 update 1200), with its results and run commands in `models/README.md`.
+- **It reads the car's current inputs (observation spec v1).** The cornering cap it was trained to read is built in at the shipped 2.0 m/s².
+- **It's approved for shadow mode only** and has never been driven on a car.
+
+In simulation at the 2.0 cap it finished 15 of 18 time trials (`gap_follow` 17), about level with `gap_follow` except slower on car 1's course. It rarely overtakes.
+
+### neural_racer (driving code)
+
+- **Safety wrapper, braking cap:** clearance is now `gap_follow`'s swept path. That is how far the body can drive along the arc asked for and along the slew-limited arc, whichever is shorter, over the forward window's beams.
+  - It replaces the nearest return in any direction, which read a course's side walls. On our 1.0–1.5 m courses that held the car to about 0.7 m/s, and the model finished 0 of 18 time trials.
+  - New parameters, `gap_follow.yaml`'s names: `forward_fov_deg` 180, `swept_clearance_margin` 0.05 and `swept_clearance_max_length` 3.0 (`gap_follow` uses 5.0; the model was trained with 3.0).
+  - It can still only lower the speed.
+  - About 0.1–0.25 ms more per tick on the pit PC: re-run `test_latency.py` on car 1's Jetson.
+
+### tools/neural_racer
+
+- The training sim's wrapper (`gpu_sim/safety_torch.py`) reads the same swept-path clearance, batched, so training and the car keep the same braking cap. `apply()` is unchanged. New `test_swept_clearance_matches_gap_logic` checks it against `gap_logic` over 300 corridors.
+
+### Tests
+
+- `test_safety_wrapper.py`: corridor side walls don't brake; turning into a wall, the arc asked for before the slew reaches it, or a wall alongside the body does; returns behind the forward window are ignored.
+- `check_mutations.py`: three new breaks (the asked arc dropped, the forward window ignored, the training sim's swept margin dropped), each caught; the torch curvature break follows the code to `curvature_speed`. 46 of 57 breaks caught on the pit PC; the 11 missed need ROS or the gym, as on `main` (43 of 54).
+- `test_config.py`: the swept-path pairs are checked against `gap_follow`. The wrapper values that deliberately differ are pinned to their own values: `reserve_distance` 0.20 (`gap_follow` 0.12), `swept_clearance_max_length` 3.0 (`gap_follow` 5.0), and car 2's `max_steering_angle` 0.349 (`gap_follow` 0.42). The first and last failed on `main`.
+- `test_latency.py::test_half_width_is_faster` times the forward pass alone. The swept path traces one arc or two depending on the network's output, so whole ticks compared two random networks' outputs rather than their widths.
+
+## 2026-11-09: map racer, faster lines and an earlier throttle
 
 The map racer (`auto_map_race` line + `pure_pursuit`) now beats car 2's best gap_follow configuration on our own courses at the current 5 m/s VESC limit, in simulation only: 06a 10.75 s against 11.33 s (about 5 % faster), 06b 8.63 s against 8.28-8.60 s across gap_follow configurations (up to 4 % slower; its zero-margin plan bound is 7.78 s), no contact on 6 seeds each. Never run on the floor yet. The 10 % target across the course suite was met only with a 7 m/s top speed (24 courses, +6.1 % mean, 0 contact), which is not shipped: the acceleration model above 5.4 m/s is estimated, not measured.
 

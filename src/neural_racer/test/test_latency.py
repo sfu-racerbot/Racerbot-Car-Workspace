@@ -50,7 +50,27 @@ def test_full_width_tick_within_budget():
     assert p99 <= BUDGET_P99_MS, f'p99 {p99:.2f} ms over the {BUDGET_P99_MS} ms budget'
 
 
+def _forward_times(width, n=400):
+    policy = PolicyNumpy(nr_testutil.random_weights(0, width=width))
+    history = obs.History()
+    rng = np.random.default_rng(0)
+    times = []
+    for i in range(n + 50):
+        enc, valid = obs.pool_scan(rng.uniform(0.3, 12.0, 1081), 0.02, 30.0)
+        history.push_tick(enc, valid, 1.0, (0.1, 0.0, 0.2))
+        o = obs.build_observation(history, imu_present=True, mode=0, v_cap=1.0)
+        t0 = time.perf_counter()
+        out = policy.step(o)
+        if i >= 50:
+            times.append(time.perf_counter() - t0)
+        history.push_command(out.steering, out.speed)
+    return np.array(times) * 1e3
+
+
 def test_half_width_is_faster():
-    full = np.median(_tick_times(nr_testutil.FULL, 400))
-    half = np.median(_tick_times(nr_testutil.HALF, 400))
+    # The forward pass alone: the wrapper's swept-path clearance traces one arc or two
+    # depending on what the network asks for, so whole ticks of two random networks
+    # differ by their outputs (0.22 against 0.36 ms on the pit PC), not by their widths.
+    full = np.median(_forward_times(nr_testutil.FULL))
+    half = np.median(_forward_times(nr_testutil.HALF))
     assert half < full

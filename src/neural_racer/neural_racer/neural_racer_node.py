@@ -86,7 +86,8 @@ class NeuralRacerNode(Node):
         for name in ('max_steering_angle', 'car_width', 'car_length', 'wheelbase',
                      'laser_offset_x', 'reserve_distance', 'max_braking_decel',
                      'braking_latency_sec', 'max_lateral_accel', 'max_steering_rate',
-                     'command_slew_max_dt', 'max_invalid_fraction'):
+                     'command_slew_max_dt', 'max_invalid_fraction', 'forward_fov_deg',
+                     'swept_clearance_margin', 'swept_clearance_max_length'):
             p(name, getattr(defaults, name))
 
         v = lambda name: self.get_parameter(name).value   # noqa: E731
@@ -112,7 +113,8 @@ class NeuralRacerNode(Node):
                 'max_steering_angle', 'car_width', 'car_length', 'wheelbase',
                 'laser_offset_x', 'reserve_distance', 'max_braking_decel',
                 'braking_latency_sec', 'max_lateral_accel', 'max_steering_rate',
-                'command_slew_max_dt', 'max_invalid_fraction')}))
+                'command_slew_max_dt', 'max_invalid_fraction', 'forward_fov_deg',
+                'swept_clearance_margin', 'swept_clearance_max_length')}))
 
         # --- refusals: the node then publishes only zero commands ------------
         self.refusal = None

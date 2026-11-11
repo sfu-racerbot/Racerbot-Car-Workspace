@@ -477,9 +477,9 @@ That leaves only one sim-to-real gap, the segmentation network's quality, and th
 3. **Output checks.** A `NaN` or `inf` from the network means a zero command and a logged fault.
 4. **Clip** steering to ±`max_steering_angle` (0.33) and speed to [0, `max_speed`]. This is redundant with the network's own bounds, on purpose.
 5. **LiDAR brake.** These are `gap_follow`'s ROS-free functions, imported from `gap_logic`, never copied, with `gap_follow.yaml`'s values:
-   - `boundary = vehicle_boundary_distances(angles, car_width=0.31, car_length=0.58, wheelbase=0.36, laser_offset_x=0.26)`
-   - `clearance = minimum_footprint_clearance(clean, valid, boundary)`
+   - `clearance = swept_path_clearance(...)` over the beams in `gap_follow`'s forward window (`forward_fov_deg` 180): how far the body (half width 0.31 / 2 + `swept_clearance_margin` 0.05) can drive along the arc the network asked for, and along the slew-limited arc, whichever is shorter, up to `swept_clearance_max_length` 3.0 m (`gap_follow` reads 5.0).
    - `speed ≤ braking_speed_limit(clearance, reserve_distance=0.20, max_braking_decel=3.0, max_speed, latency=0.25)`
+   - **Dated note (2026-11-11):** the clearance was `minimum_footprint_clearance`, the nearest return in any direction. On our 1.0–1.5 m courses that read the side walls and held the car to about 0.7 m/s, and the best model finished 0 of 18 simulated time trials. The training sim's wrapper (`gpu_sim/safety_torch.py`) reads the same swept path.
 6. **Curvature cap.** `speed ≤ sqrt(max_lateral_accel / |κ|)` with `κ = tan(δ) / wheelbase` and `max_lateral_accel: 2.0`, as in `gap_follow`.
    - **Dated note:** `gap_follow` moved to 2.5 (decided 2026-10-26, committed 2026-10-27 as `9fa9642`). neural_racer deliberately keeps 2.0 (training cap unchanged).
    - This is a **hard cap on lap time**, so the network can't use more lateral grip than `gap_follow` assumes. That's correct for v1. Raising it is a measured decision for after Phase 10, never a training-time tweak.

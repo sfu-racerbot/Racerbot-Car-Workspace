@@ -41,6 +41,11 @@ neural_racer_node:
     reserve_distance: 0.20
     max_braking_decel: 3.0
     braking_latency_sec: 0.25
+    # The braking cap's clearance is gap_follow's swept path: how far the body
+    # can drive along the arc it is steering, over the forward window's beams.
+    forward_fov_deg: 180.0
+    swept_clearance_margin: 0.05
+    swept_clearance_max_length: 3.0
     max_lateral_accel: 2.0       # the cornering cap; raising it is a Phase 10+ decision
     max_steering_rate: 2.0
     command_slew_max_dt: 0.10

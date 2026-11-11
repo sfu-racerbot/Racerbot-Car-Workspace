@@ -50,15 +50,34 @@ def test_wrapper_values_match_gap_follow(car):
     # data, while neural_racer keeps 2.0 in training and deployment. The cap
     # is never a training-time change (see the 2026-10-23 neural-racer plan,
     # docs/superpowers/specs/2026-10-23-neural-racer-plan.md). Every other
-    # pair below is still checked exactly.
+    # pair below is checked exactly, except the DELIBERATE ones, each pinned
+    # to the value the policy was trained with.
     pairs = {'max_steering_angle': 'max_steering_angle', 'car_width': 'car_width',
              'car_length': 'car_length', 'max_braking_decel': 'max_braking_decel',
              'braking_latency_sec': 'braking_latency_sec',
              'max_steering_rate': 'max_steering_rate', 'command_slew_max_dt': 'command_slew_max_dt',
              'reserve_distance': 'forward_stop_clearance', 'wheelbase': 'wheelbase',
-             'laser_offset_x': 'laser_offset_x'}
-    mismatched = {k: (p[k], g[v]) for k, v in pairs.items() if p[k] != g[v]}
+             'laser_offset_x': 'laser_offset_x', 'forward_fov_deg': 'forward_fov_deg',
+             'swept_clearance_margin': 'swept_clearance_margin',
+             'swept_clearance_max_length': 'swept_clearance_max_length'}
+    pinned = {k: DELIBERATE[k](car) for k in DELIBERATE if DELIBERATE[k](car) is not None}
+    mismatched = {k: (p[k], g[v]) for k, v in pairs.items() if k not in pinned and p[k] != g[v]}
     assert mismatched == {}
+    assert {k: p[k] for k in pinned} == pinned
+
+
+# Wrapper values that deliberately differ from gap_follow's, each pinned to its own value
+# (None: paired with gap_follow on that car as usual).
+DELIBERATE = {
+    # gap_follow's forward_stop_clearance went 0.20 -> 0.12 (2026-11-07). The policies were
+    # trained with 0.20, and a sim what-if (2026-11-08: two policies, 0.20 vs 0.12) changed nothing.
+    'reserve_distance': lambda car: 0.20,
+    # gap_follow reads 5.0 m of swept path; the training sim's wrapper reads 3.0.
+    'swept_clearance_max_length': lambda car: 3.0,
+    # Car 2's gap_follow went to 0.42 rad (2026-11-07); its neural_racer overlay keeps 0.349,
+    # since the policy never asks for more than observation.STEER_LIMIT (0.33).
+    'max_steering_angle': lambda car: 0.349 if car == 'rb2' else None,
+}
 
 
 @pytest.mark.parametrize('car', CARS)

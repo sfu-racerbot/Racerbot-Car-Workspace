@@ -2,7 +2,7 @@
 
 Runner: python3 -m pytest src/neural_racer/test/test_safety_wrapper.py -v   (unsourced)
 
-Oracles: gap_logic's own closed forms (braking_speed_limit), the curvature
+Oracles: gap_logic's own functions (swept_path_clearance, braking_speed_limit), the curvature
 cap's closed form v = sqrt(a_lat * L / tan(delta)), the steering-rate step
 max_rate * dt, and the invariant that the wrapper never raises speed.
 """
@@ -76,11 +76,61 @@ def test_braking_cap_matches_gap_logic(w):
     res = _apply(w, speed=4.0, ranges=r)
     c = w.cfg
     valid = np.isfinite(r) & (r > RMIN) & (r < RMAX)
-    clearance = gap_logic.minimum_footprint_clearance(r, valid, w.boundary(ANGLES))
+    ahead = np.abs(ANGLES) <= math.pi / 2.0 + 1e-9
+    clearance = gap_logic.swept_path_clearance(r[ahead], valid[ahead], ANGLES[ahead], 0.0, c.car_width / 2.0 + 0.05,
+                                               c.car_length, c.wheelbase, c.laser_offset_x, 0.0, 3.0)
+    # the patch spans +/-2.5 deg: its nearest point is 1.2 cos(2.5 deg) ahead of the LiDAR
+    assert clearance == pytest.approx(1.2 * math.cos(math.radians(2.5)) + c.laser_offset_x
+                                      - (c.wheelbase + c.car_length) / 2.0, abs=1e-6)
     expected = gap_logic.braking_speed_limit(clearance, c.reserve_distance, c.max_braking_decel,
                                              c.max_speed, c.braking_latency_sec)
     assert res.binding == 'braking' and res.speed == pytest.approx(expected, abs=1e-12)
-    assert res.speed < 4.0 and res.intervened
+    assert res.speed < 4.0 and res.intervened and res.clearance == pytest.approx(clearance, abs=1e-12)
+
+
+def _corridor(half_width):
+    """A straight corridor along the car's axis, its walls half_width either side of the LiDAR."""
+    with np.errstate(divide='ignore'):
+        r = half_width / np.abs(np.sin(ANGLES))
+    return np.minimum(r, 8.0)
+
+
+@pytest.mark.parametrize('half_width', [0.30, 0.45, 0.75])
+def test_corridor_side_walls_do_not_brake(w, half_width):
+    """Driving straight down a corridor never reaches its side walls: the
+    nearest return in any direction once held the student to ~0.3 m/s here."""
+    res = _apply(w, steer=0.0, speed=4.0, ranges=_corridor(half_width))
+    assert res.binding == 'network' and res.speed == 4.0 and not res.intervened
+
+
+def test_turning_into_a_corridor_wall_brakes(w):
+    """The same corridor, steering hard left: the arc runs into the left wall."""
+    res = _apply(w, steer=0.33, speed=4.0, prev=0.33, ranges=_corridor(0.45))
+    assert res.binding == 'braking' and res.speed < 1.5
+
+
+def test_the_arc_asked_for_brakes_before_the_slew_reaches_it(w):
+    """Straight ahead, the network asks for hard left into the wall: the slew lets only
+    0.05 rad through this tick, and that arc is clear, but the arc asked for is not."""
+    res = _apply(w, steer=0.33, speed=4.0, prev=0.0, ranges=_corridor(0.45))
+    assert res.binding == 'braking' and res.speed < 1.5
+
+
+def test_wall_alongside_the_body_stops(w):
+    """A return inside the swept margin beside the body: no room at all."""
+    r = nr_testutil.clear_scan()
+    r[(ANGLES > math.radians(80)) & (ANGLES < math.radians(100))] = 0.18   # 2.5 cm off the left flank
+    res = _apply(w, speed=2.0, ranges=r)
+    assert res.speed == 0.0 and res.binding == 'braking' and res.clearance == 0.0
+
+
+def test_returns_behind_the_forward_window_are_ignored(w):
+    """gap_follow's 180 deg window: beams looking back (the car's own rear, a
+    car behind) do not brake it."""
+    r = nr_testutil.clear_scan()
+    r[np.abs(ANGLES) > math.radians(95)] = 0.10
+    res = _apply(w, speed=3.0, ranges=r)
+    assert res.binding == 'network' and res.speed == 3.0
 
 
 def test_obstacle_inside_reserve_gives_zero_speed(w):

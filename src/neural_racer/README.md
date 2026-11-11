@@ -32,6 +32,8 @@
 
 ## Approving a model
 
+**The current model is in this repo:** [models/](models/README.md) has its folder, its results and the commands to approve and run it. For any other model:
+
 **On the car**, after copying an exported model folder from FIR (plan, B0 "Getting a model from FIR to the car"):
 
 ```bash

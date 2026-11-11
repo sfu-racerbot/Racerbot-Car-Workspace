@@ -85,6 +85,46 @@ def test_reset_only_resets_masked_cars():
     assert hist.scans[1].abs().sum() > 0
 
 
+def test_swept_clearance_matches_gap_logic():
+    """The batched swept-path clearance against gap_logic's own, over corridors
+    of several widths with a box ahead, at every steering from hard right to
+    hard left (both arc directions, and straight)."""
+    from gap_follow import gap_logic
+    cfg = WrapperConfig(max_speed=4.0)
+    angles = nominal_angles()
+    st = SafetyTorch(cfg, angles)
+    rng = np.random.default_rng(3)
+    n = 300
+    half = rng.uniform(0.25, 1.2, n)
+    with np.errstate(divide='ignore'):
+        r = np.minimum(half[:, None] / np.abs(np.sin(angles))[None], 10.0)
+    box = rng.random(n) < 0.5                       # half the scans: a box somewhere ahead
+    for i in np.flatnonzero(box):
+        c0 = int(rng.integers(300, 760))
+        r[i, c0:c0 + 40] = np.minimum(r[i, c0:c0 + 40], rng.uniform(0.3, 3.5))
+    r[rng.random(r.shape) < 0.03] = math.nan
+    steer = rng.uniform(-0.33, 0.33, n)
+    steer[:20] = 0.0
+    valid = np.isfinite(r) & (r > 0.02) & (r < 30.0)
+    got = st.swept_clearance(torch.tensor(r, dtype=torch.float32).view(n, 1, -1),
+                             torch.tensor(valid).view(n, 1, -1), torch.tensor(steer, dtype=torch.float32).view(n, 1))
+    ahead = np.abs(angles) <= math.radians(cfg.forward_fov_deg) / 2.0 + 1e-9
+    finite = 0
+    for i in range(n):
+        ref = gap_logic.swept_path_clearance(
+            r[i, ahead], valid[i, ahead], angles[ahead], math.tan(steer[i]) / cfg.wheelbase,
+            cfg.car_width / 2.0 + cfg.swept_clearance_margin, cfg.car_length, cfg.wheelbase, cfg.laser_offset_x,
+            0.0, cfg.swept_clearance_max_length)
+        g = float(got[i, 0])
+        if math.isinf(ref):
+            assert math.isinf(g), (i, steer[i], half[i], g)
+        else:
+            finite += 1
+            assert g == pytest.approx(ref, abs=2e-3), (i, steer[i], half[i])     # m, float32 vs float64
+    assert 50 < finite < n                          # both blocked and clear arcs were compared
+
+
+
 def test_safety_matches_numpy_wrapper():
     cfg = WrapperConfig(max_speed=4.0)
     angles = nominal_angles()
