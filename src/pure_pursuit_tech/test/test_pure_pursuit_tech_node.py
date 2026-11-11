@@ -1,10 +1,10 @@
 """Node tests for pure_pursuit_tech_node: the built C++ binary, on /test_only/* topics.
 
 Run (ROS sourced, workspace built):
-    export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+    export ROS_DOMAIN_ID=80 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
     python3 -m pytest src/pure_pursuit_tech/test/ -v
 or `colcon test --packages-select pure_pursuit_tech`. Every topic the node
-touches is remapped under /test_only/, and this module forces domain 79,
+touches is remapped under /test_only/, and this module defaults to domain 80,
 localhost only, so nothing here can reach a car's /drive or /joy.
 
 What is asserted is always the published AckermannDriveStamped, never an
@@ -16,11 +16,12 @@ import os
 import subprocess
 import time
 
-os.environ['ROS_DOMAIN_ID'] = '79'
+os.environ.setdefault('ROS_DOMAIN_ID', '80')
 os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
 
 import pytest  # noqa: E402
 import rclpy  # noqa: E402
+from rclpy.duration import Duration  # noqa: E402
 from ackermann_msgs.msg import AckermannDriveStamped  # noqa: E402
 from ament_index_python.packages import get_package_prefix  # noqa: E402
 from nav_msgs.msg import Odometry  # noqa: E402
@@ -53,7 +54,7 @@ def line_waypoints(y, n=201, step=0.1):
     return [(step * k, y) for k in range(n)]
 
 
-def expected_command(waypoints, car=(0.0, 0.0), yaw=0.0, speed=0.0):
+def expected_command(waypoints, car=(0.0, 0.0), yaw=0.0, speed=0.0, gain=None):
     """Oracle: pure_pursuit_a's control law (racerbot_a
     src/pure_pursuit_a/src/pure_pursuit_a_node.cpp), except the goal: the first
     waypoint from the nearest one onward that is ahead and at least L away, moved
@@ -61,7 +62,8 @@ def expected_command(waypoints, car=(0.0, 0.0), yaw=0.0, speed=0.0):
     circle of radius L. k = 2y/d^2; steering = atan(wheelbase * k) clamped;
     speed linear from MAX_SPEED (straight) to MIN_SPEED (full lock).
     """
-    L = min(max(LOOKAHEAD_BASE + LOOKAHEAD_GAIN * abs(speed), LOOKAHEAD_MIN), LOOKAHEAD_MAX)
+    gain = LOOKAHEAD_GAIN if gain is None else gain
+    L = min(max(LOOKAHEAD_BASE + gain * abs(speed), LOOKAHEAD_MIN), LOOKAHEAD_MAX)
     start = min(range(len(waypoints)),
                 key=lambda i: math.hypot(waypoints[i][0] - car[0], waypoints[i][1] - car[1]))
     prev = None
@@ -132,10 +134,9 @@ class Harness:
         self.pose_pub = self.node.create_publisher(Odometry, '/test_only/pose', 10)
         self.step = 0   # play() ticks so far, for a moving pose
         self.commands = []   # (receive time, speed, steering)
+        self.stamped = []    # (receive time, the node's own stamp in s, speed)
         self.node.create_subscription(
-            AckermannDriveStamped, '/test_only/drive',
-            lambda m: self.commands.append(
-                (time.monotonic(), m.drive.speed, m.drive.steering_angle)), 10)
+            AckermannDriveStamped, '/test_only/drive', self._on_drive, 10)
         deadline = time.monotonic() + 15.0
         pubs = (self.joy_pub, self.safety_pub, self.odom_pub) + (
             (self.pose_pub,) if settings['use_pf'] else ())
@@ -144,12 +145,13 @@ class Harness:
             assert time.monotonic() < deadline, 'node never subscribed'
             rclpy.spin_once(self.node, timeout_sec=0.05)
 
-    def play(self, seconds, joy=None, safety=None, speed=0.0, pose=(0.0, 0.0, 0.0)):
+    def play(self, seconds, joy=None, safety=None, speed=0.0, pose=(0.0, 0.0, 0.0), pose_age=0.0):
         """Publish at 20 Hz for `seconds`. joy/safety None = don't publish it.
 
         `pose` is (x, y, yaw), or a function of the tick count giving one, to
         move the car. It goes out on odom_topic and on pose_topic, so it is
         the pose whether use_pf is false or true.
+        `pose_age`: the pose is stamped this many seconds ago (None: unstamped).
         """
         end = time.monotonic() + seconds
         while time.monotonic() < end:
@@ -165,6 +167,9 @@ class Harness:
             self.step += 1
             odom = Odometry()
             odom.header.frame_id = 'map'
+            if pose_age is not None:
+                odom.header.stamp = (self.node.get_clock().now()
+                                     - Duration(seconds=pose_age)).to_msg()
             odom.pose.pose.position.x, odom.pose.pose.position.y = float(x), float(y)
             odom.pose.pose.orientation.z = math.sin(yaw / 2.0)
             odom.pose.pose.orientation.w = math.cos(yaw / 2.0)
@@ -175,6 +180,12 @@ class Harness:
             while time.monotonic() < stop:
                 rclpy.spin_once(self.node, timeout_sec=0.01)
         return time.monotonic()
+
+    def _on_drive(self, m):
+        when = time.monotonic()
+        self.commands.append((when, m.drive.speed, m.drive.steering_angle))
+        stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        self.stamped.append((when, stamp, m.drive.speed))
 
     def since(self, t):
         return [(s, a) for when, s, a in self.commands if when >= t]
@@ -315,6 +326,119 @@ def test_right_offset_path_steers_right(harness):
     assert all(a == pytest.approx(steer, abs=1e-4) for _, a in commands)
 
 
+# --- curvature-blended lookahead gain -------------------------------------------
+
+def test_straight_uses_the_straight_gain(harness):
+    # oracle: closed form: a straight line (curvature 0): L = base + gain_straight * v
+    v = 2.0
+    steer, _ = expected_command(line_waypoints(0.2), speed=v, gain=0.5)
+    assert abs(steer - expected_command(line_waypoints(0.2), speed=v, gain=0.0)[0]) > 0.02   # gains differ here
+    h = harness(line_waypoints(0.2), lookahead_gain_straight=0.5, lookahead_gain_corner=0.0)
+    t = h.play(0.5, joy=HELD, safety=False, speed=v)
+    h.play(1.0, joy=HELD, safety=False, speed=v)
+    commands = h.since(t)
+    assert len(commands) >= 10 and all(a == pytest.approx(steer, abs=1e-4) for _, a in commands)
+
+
+def test_corner_uses_the_corner_gain(harness):
+    # oracle: closed form: 2 m circle (curvature 0.5 = lookahead_corner_curvature): the corner gain,
+    # from 0.2 m inside it facing along it
+    v, car, yaw = 2.0, (1.8, 0.0), math.pi / 2
+    steer, _ = expected_command(circle_path(), car=car, yaw=yaw, speed=v, gain=0.0)
+    assert abs(steer - expected_command(circle_path(), car=car, yaw=yaw, speed=v, gain=0.5)[0]) > 0.02
+    h = harness(circle_path(), lookahead_gain_straight=0.5, lookahead_gain_corner=0.0,
+                lookahead_corner_curvature=0.5)
+    t = h.play(0.5, joy=HELD, safety=False, speed=v, pose=(*car, yaw))
+    h.play(1.0, joy=HELD, safety=False, speed=v, pose=(*car, yaw))
+    commands = h.since(t)
+    assert len(commands) >= 10 and all(a == pytest.approx(steer, abs=1e-4) for _, a in commands)
+
+
+# --- steering rate limit -------------------------------------------------------
+
+def test_steering_ramps_at_max_steering_rate(harness):
+    # oracle: invariant: 0.2 rad/s from 0 to the oracle's 0.157 rad: at most 0.2 * dt per command
+    # (dt capped at 0.1 s), then settles on it. Speed follows the wanted
+    # steering at once, not the ramp.
+    rate = 0.2
+    h = harness(line_waypoints(0.2), max_steering_rate=rate)
+    t = h.play(0.05, joy=HELD, safety=False)
+    h.play(1.5, joy=HELD, safety=False)
+    steer, speed = expected_command(line_waypoints(0.2))
+    ramp = [(w, a) for w, s, a in h.commands if w >= t and s > 0.0]
+    assert len(ramp) >= 20 and ramp[0][1] < steer / 2   # it really ramped
+    for (_, a0), (_, a1) in zip(ramp, ramp[1:]):
+        assert abs(a1 - a0) <= rate * 0.1 + 1e-6
+    assert ramp[-1][1] == pytest.approx(steer, abs=1e-4)
+    assert all(s == pytest.approx(speed, abs=1e-4) for w, s, _ in h.commands if w >= t and s > 0.0)
+
+
+def test_release_zeroes_steering_at_once_and_resumes_from_zero(harness):
+    # oracle: invariant: a stop is never rate limited, and the ramp after it starts from the 0 it sent
+    h = harness(line_waypoints(0.2), max_steering_rate=0.2)
+    h.play(0.5, joy=HELD, safety=False)
+    t = h.play(1.5, joy=HELD, safety=False)
+    assert any(a > 0.1 for _, a in h.since(t - 0.5)), 'never steered first'
+    t_off = h.play(1.0, joy=RELEASED, safety=False)
+    assert_all_zero([c for c in h.since(t + 0.2) if c not in h.since(t_off)])
+    h.play(0.5, joy=HELD, safety=False)
+    resumed = [a for s, a in h.since(t_off) if s > 0.0]
+    assert resumed and resumed[0] < 0.05
+
+
+# --- pose age and latency compensation ---------------------------------------
+
+@pytest.mark.parametrize('age', [1.0, None, -0.5])   # stale, unstamped, from the future
+def test_untrustworthy_pose_publishes_zero(harness, age):
+    h = harness()
+    t = h.play(0.5, joy=HELD, safety=False)
+    t_bad = h.play(1.0, joy=HELD, safety=False)
+    assert any(s > 0.0 for s, _ in h.since(t)), 'a fresh pose never drove first'
+    h.play(1.0, joy=HELD, safety=False, pose_age=age)
+    assert_all_zero(h.since(t_bad + 0.2))   # after commands already in flight
+
+
+def arc(v, steering, dt):
+    """Closed form: the kinematic bicycle from the origin, heading +x."""
+    w = v / WHEELBASE * math.tan(steering)
+    if abs(w * dt) < 1e-9:
+        return v * dt, 0.0, 0.0
+    return v / w * math.sin(w * dt), v / w * (1.0 - math.cos(w * dt)), w * dt
+
+
+def test_latency_compensation_aims_from_the_predicted_pose(harness):
+    # Parked at the origin but reporting 2 m/s: with actuation_delay 0.3 the
+    # node aims from where the car would be 0.3 s on, steering as it steers.
+    # oracle: closed form: the fixed point s = expected_command(arc(v, s, 0.3)) (closed form),
+    # 0.084 rad; uncompensated it is 0.157. 0.01 rad covers the pose's age (ms).
+    path = [(0.1 * k, 0.2 + 0.01 * k) for k in range(201)]
+    v, delay = 2.0, 0.3
+    s = 0.0
+    for _ in range(60):
+        x, y, yaw = arc(v, s, delay)
+        s = 0.5 * s + 0.5 * expected_command(path, car=(x, y), yaw=yaw, speed=v)[0]
+    plain, _ = expected_command(path, speed=v)
+    assert plain - s > 0.05   # the oracle itself: compensation matters here
+    h = harness(path, compensate_latency=True, actuation_delay=delay)
+    t = h.play(1.5, joy=HELD, safety=False, speed=v)
+    h.play(1.0, joy=HELD, safety=False, speed=v)
+    commands = h.since(t)
+    assert len(commands) >= 10
+    for _, a in commands:
+        assert a == pytest.approx(s, abs=0.01)   # 10 mrad
+
+
+def test_latency_compensation_off_aims_from_the_pose(harness):
+    path = [(0.1 * k, 0.2 + 0.01 * k) for k in range(201)]
+    h = harness(path, actuation_delay=0.3)   # compensate_latency defaults to false
+    t = h.play(0.5, joy=HELD, safety=False, speed=2.0)
+    h.play(1.0, joy=HELD, safety=False, speed=2.0)
+    steer, _ = expected_command(path, speed=2.0)
+    commands = h.since(t)
+    assert len(commands) >= 10
+    assert all(a == pytest.approx(steer, abs=1e-4) for _, a in commands)
+
+
 @pytest.mark.parametrize('params, message', [
     ({'min_speed': 2.0}, 'need 0 <= min_speed <= max_speed'),
     ({'medium_angle_speed': 5.0}, 'need min_speed <= medium_angle_speed <= max_speed'),
@@ -333,6 +457,13 @@ def test_right_offset_path_steers_right(harness):
     ({'goal_tolerance': 0.0}, 'need laps >= 0, goal_tolerance > 0 and max_path_error > 0'),
     ({'max_path_error': 0.0}, 'need laps >= 0, goal_tolerance > 0 and max_path_error > 0'),
     ({'loop_closure_distance': -1.0}, 'loop_closure_distance must be >= 0'),
+    ({'max_pose_age': 0.0}, 'need max_pose_age > 0 and 0 <= actuation_delay <= 0.5'),
+    ({'max_steering_rate': 0.0}, 'max_steering_rate must be > 0'),
+    ({'lookahead_gain_corner': -0.5}, 'lookahead_gain_straight and lookahead_gain_corner must be >= 0 (or -1)'),
+    ({'lookahead_corner_curvature': 0.0}, 'need lookahead_corner_curvature > 0 and lookahead_preview >= 0'),
+    ({'lookahead_preview': -1.0}, 'need lookahead_corner_curvature > 0 and lookahead_preview >= 0'),
+    ({'actuation_delay': -0.1}, 'need max_pose_age > 0 and 0 <= actuation_delay <= 0.5'),
+    ({'actuation_delay': 0.6}, 'need max_pose_age > 0 and 0 <= actuation_delay <= 0.5'),
 ])
 def test_bad_settings_refuse_to_start(tmp_path, params, message):
     settings = {'drive_topic': '/test_only/drive', 'joy_topic': '/test_only/joy',
@@ -390,11 +521,17 @@ def test_profile_mode_ramps_up_to_the_cornering_speed(harness):
     # command may rise at most 3 * dt per tick: a ramp, not a step.
     h = harness(circle_path(), speed_mode='profile', max_speed=4.0, min_speed=1.5,
                 max_lateral_accel=2.5, max_accel=3.0)
-    t = h.play(0.3, joy=HELD, safety=False, pose=on_circle(0))
-    h.play(2.2, joy=HELD, safety=False, pose=on_circle(0))
+    t = time.monotonic()   # before LB: the ramp's first step is in view
+    h.play(2.5, joy=HELD, safety=False, pose=on_circle(0))
     speeds = [s for s, _ in h.since(t) if s > 0.0]
     assert len(speeds) >= 30
     assert speeds[0] <= 3.0 * 0.2 + 1e-6                        # first step: at most a * 0.2 s
+    # every later step: at most a * the gap between the node's own stamps
+    ramp = [(stamp, s) for when, stamp, s in h.stamped if when >= t and s > 0.0]
+    steps = list(zip(ramp, ramp[1:]))
+    assert len(steps) >= 29
+    for (t0, s0), (t1, s1) in steps:
+        assert s1 - s0 <= 3.0 * (t1 - t0) + 1e-3                # 1 mm/s
     assert all(b >= a - 1e-6 for a, b in zip(speeds, speeds[1:]))   # never falls while ramping
     assert any(0.8 < s < 2.0 for s in speeds)                  # passes through the middle
     assert speeds[-1] == pytest.approx(math.sqrt(2.5 * 2.0), abs=1e-3)   # 1 mm/s

@@ -85,6 +85,10 @@ PurePursuit::Settings PurePursuit::read_settings()
     c.lookahead_min = declare_parameter("lookahead_min", 0.8);
     c.lookahead_max = declare_parameter("lookahead_max", 3.0);
     c.lookahead_speed_gain = declare_parameter("lookahead_speed_gain", 0.1);
+    c.lookahead_gain_straight = declare_parameter("lookahead_gain_straight", -1.0);
+    c.lookahead_gain_corner = declare_parameter("lookahead_gain_corner", -1.0);
+    c.lookahead_corner_curvature = declare_parameter("lookahead_corner_curvature", 0.67);
+    c.lookahead_preview = declare_parameter("lookahead_preview", 2.0);
     c.wheelbase = declare_parameter("wheelbase", 0.36);
     c.max_steering = declare_parameter("max_steering", 0.30);
     c.max_speed = declare_parameter("max_speed", 1.0);
@@ -97,6 +101,10 @@ PurePursuit::Settings PurePursuit::read_settings()
     c.laps = static_cast<int>(declare_parameter("laps", 0));
     c.goal_tolerance = declare_parameter("goal_tolerance", 0.3);
     c.max_path_error = declare_parameter("max_path_error", 1.5);
+    c.max_pose_age = declare_parameter("max_pose_age", 0.25);
+    c.compensate_latency = declare_parameter("compensate_latency", false);
+    c.actuation_delay = declare_parameter("actuation_delay", 0.0);
+    c.max_steering_rate = declare_parameter("max_steering_rate", 1.0);
 
     // Refuse settings that would make the control law divide by zero or
     // command something nobody asked for.
@@ -108,6 +116,16 @@ PurePursuit::Settings PurePursuit::read_settings()
     }
     if (!(c.lookahead_min > 0.0) || !(c.lookahead_min <= c.lookahead_max)) {
         throw std::invalid_argument("need 0 < lookahead_min <= lookahead_max");
+    }
+    for (double* g : {&c.lookahead_gain_straight, &c.lookahead_gain_corner}) {
+        if (*g == -1.0) {
+            *g = c.lookahead_speed_gain;
+        } else if (!(*g >= 0.0)) {
+            throw std::invalid_argument("lookahead_gain_straight and lookahead_gain_corner must be >= 0 (or -1)");
+        }
+    }
+    if (!(c.lookahead_corner_curvature > 0.0) || !(c.lookahead_preview >= 0.0)) {
+        throw std::invalid_argument("need lookahead_corner_curvature > 0 and lookahead_preview >= 0");
     }
     if (!(c.wheelbase > 0.0) || !(c.max_steering > 0.0)) {
         throw std::invalid_argument("wheelbase and max_steering must be > 0");
@@ -130,6 +148,12 @@ PurePursuit::Settings PurePursuit::read_settings()
     if (c.laps < 0 || !(c.goal_tolerance > 0.0) || !(c.max_path_error > 0.0)) {
         throw std::invalid_argument("need laps >= 0, goal_tolerance > 0 and max_path_error > 0");
     }
+    if (!(c.max_steering_rate > 0.0)) {
+        throw std::invalid_argument("max_steering_rate must be > 0");
+    }
+    if (!(c.max_pose_age > 0.0) || !(c.actuation_delay >= 0.0) || !(c.actuation_delay <= 0.5)) {
+        throw std::invalid_argument("need max_pose_age > 0 and 0 <= actuation_delay <= 0.5");
+    }
     if (!std::isfinite(c.laser_offset_x) || !std::isfinite(c.laser_offset_y)) {
         throw std::invalid_argument("laser_offset_x and laser_offset_y must be finite");
     }
@@ -148,6 +172,7 @@ void PurePursuit::load_path(const std::string& file, double closure_distance)
     }
     path_ = std::make_unique<Path>(std::move(points), closure_distance);
     tracker_ = std::make_unique<Tracker>(*path_, cfg_.laps, cfg_.max_path_error);
+    curvature_ = path_->curvature();
     if (cfg_.laps > 0 && !path_->closed()) {
         RCLCPP_WARN(get_logger(), "laps is set but the path is open: it stops at the end instead");
     }
@@ -236,15 +261,32 @@ void PurePursuit::stop(const std::string& reason)
     drive_pub_->publish(msg);
     last_cmd_speed_ = 0.0;
     last_cmd_time_ = now();
+    last_steering_ = 0.0;   // stops are never rate limited
+    last_steer_time_.reset();
+    remember_steering(0.0);
+}
+
+void PurePursuit::remember_steering(double steering)
+{
+    const double t = now().seconds();
+    steer_history_.push_back({t, steering});
+    while (!steer_history_.empty() && steer_history_.front().time < t - 2.0) {
+        steer_history_.pop_front();
+    }
 }
 
 void PurePursuit::drive_to_goal(const Goal& goal, double speed, double remaining)
 {
-    const double steering = steering_for(goal.local_x, goal.local_y, cfg_.wheelbase, cfg_.max_steering);
+    const double desired = steering_for(goal.local_x, goal.local_y, cfg_.wheelbase, cfg_.max_steering);
+    const rclcpp::Time now_t = now();
+    const double steer_dt = last_steer_time_ ? (now_t - *last_steer_time_).seconds() : 0.0;
+    const double steering = limit_rate(desired, last_steering_, cfg_.max_steering_rate, steer_dt);
+    last_steering_ = steering;
+    last_steer_time_ = now_t;
     // pure_pursuit_a's rule: slow down with steering. In profile mode it is a
     // cap on top of the plan, for when the car is off the line and steering
-    // harder than planned.
-    double target = steering_speed(steering, cfg_.max_steering, cfg_.max_speed,
+    // harder than planned. From `desired`: slows as soon as it wants to turn.
+    double target = steering_speed(desired, cfg_.max_steering, cfg_.max_speed,
                                    cfg_.medium_angle_speed, cfg_.min_speed);
     if (cfg_.profile_mode) {
         target = std::min(target, profile_[tracker_->closest()]);   // corners, braking zones
@@ -265,6 +307,7 @@ void PurePursuit::drive_to_goal(const Goal& goal, double speed, double remaining
     msg.drive.steering_angle = steering;
     msg.drive.speed = target;
     drive_pub_->publish(msg);
+    remember_steering(steering);
 }
 
 void PurePursuit::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
@@ -298,6 +341,13 @@ void PurePursuit::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
                       std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))};
     if (!std::isfinite(sensor.x) || !std::isfinite(sensor.y) || !std::isfinite(sensor.yaw)) {
         stop("the pose is not finite");
+        return;
+    }
+    const rclcpp::Time stamp(msg->header.stamp, get_clock()->get_clock_type());
+    const double age = (now() - stamp).seconds();
+    if (stamp.nanoseconds() == 0 || !(age >= 0.0) || age > cfg_.max_pose_age) {
+        stop(stamp.nanoseconds() == 0 ? std::string("the pose has no timestamp")
+                                       : "the pose is " + std::to_string(age).substr(0, 5) + " s old");
         return;
     }
 
@@ -336,9 +386,16 @@ void PurePursuit::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
 
     const double speed = cfg_.use_pf ? current_speed_ : msg->twist.twist.linear.x;
     //choose steering target
-    const double L = lookahead(speed, cfg_.lookahead_base, cfg_.lookahead_speed_gain,
-                               cfg_.lookahead_min, cfg_.lookahead_max);
-    const std::optional<Goal> goal = find_goal(*path_, where.closest, car, L);
+    const double gain = blended_gain(max_curvature_ahead(*path_, curvature_, where.closest, cfg_.lookahead_preview),
+                                     cfg_.lookahead_gain_straight, cfg_.lookahead_gain_corner,
+                                     cfg_.lookahead_corner_curvature);
+    const double L = lookahead(speed, cfg_.lookahead_base, gain, cfg_.lookahead_min, cfg_.lookahead_max);
+    // latency: aim from where the car will be when this command acts
+    const Pose aim = cfg_.compensate_latency
+        ? predict_through(car, stamp.seconds(), now().seconds() + cfg_.actuation_delay, speed, cfg_.wheelbase,
+                          {steer_history_.begin(), steer_history_.end()}, cfg_.actuation_delay)
+        : car;
+    const std::optional<Goal> goal = find_goal(*path_, where.closest, aim, L);
     if (!goal) {
         // e.g. the car faces away from the path: stop rather than leave the
         // last command standing until ackermann_mux times it out

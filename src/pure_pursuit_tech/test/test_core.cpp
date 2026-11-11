@@ -547,6 +547,111 @@ TEST(Control, ALoopWrapsPastItsLastWaypoint)
     EXPECT_LT(g->index, 98u);                         // wrapped round to the start
 }
 
+TEST(Control, PredictGoesStraightWithoutSteering)
+{
+    // oracle: closed form: v * dt along the heading, yaw unchanged
+    const Pose q = predict({1.0, 2.0, M_PI / 6}, 3.0, 0.0, 0.36, 0.1);
+    EXPECT_NEAR(q.x, 1.0 + 0.3 * std::cos(M_PI / 6), 1e-12);
+    EXPECT_NEAR(q.y, 2.0 + 0.3 * std::sin(M_PI / 6), 1e-12);
+    EXPECT_NEAR(q.yaw, M_PI / 6, 1e-12);
+}
+
+TEST(Control, PredictFollowsTheTurningCircle)
+{
+    // oracle: closed form: radius R = wheelbase / tan(steering), turned w * dt, w = v / R
+    const double v = 2.0, d = 0.25, dt = 0.3, R = 0.36 / std::tan(d), a = v / R * dt;
+    const Pose q = predict({0.0, 0.0, 0.0}, v, d, 0.36, dt);
+    EXPECT_NEAR(q.x, R * std::sin(a), 1e-12);
+    EXPECT_NEAR(q.y, R * (1.0 - std::cos(a)), 1e-12);
+    EXPECT_NEAR(q.yaw, a, 1e-12);
+    const Pose r = predict({0.0, 0.0, 0.0}, v, -d, 0.36, dt);   // mirror
+    EXPECT_NEAR(r.y, -q.y, 1e-12);
+}
+
+TEST(Control, PredictWithNoTimeLeavesThePose)
+{
+    for (double dt : {0.0, -0.1, std::nan("")}) {
+        const Pose q = predict({1.0, 2.0, 0.5}, 3.0, 0.2, 0.36, dt);
+        EXPECT_EQ(q.x, 1.0);
+        EXPECT_EQ(q.y, 2.0);
+        EXPECT_EQ(q.yaw, 0.5);
+    }
+}
+
+TEST(Control, PredictThroughReplaysEachCommandAfterTheDelay)
+{
+    // straight until 0.10 + 0.05 s (the command acts after the delay), then
+    // the steering circle for the last 0.10 s; closed form for both pieces
+    const double v = 2.0, d = 0.25, R = 0.36 / std::tan(d), a = v / R * 0.10;
+    const std::vector<SteerCommand> h{{0.0, 0.0}, {0.10, d}, {0.30, -d}};   // the last acts after t1
+    const Pose q = predict_through({0.0, 0.0, 0.0}, 0.0, 0.25, v, 0.36, h, 0.05);
+    EXPECT_NEAR(q.x, v * 0.15 + R * std::sin(a), 1e-12);
+    EXPECT_NEAR(q.y, R * (1.0 - std::cos(a)), 1e-12);
+    EXPECT_NEAR(q.yaw, a, 1e-12);
+}
+
+TEST(Control, PredictThroughStartsFromTheCommandAlreadyActing)
+{
+    // a command sent before t0 is already steering: the whole window is the circle
+    const double v = 2.0, d = 0.25, R = 0.36 / std::tan(d), a = v / R * 0.2;
+    const std::vector<SteerCommand> h{{-1.0, d}};
+    const Pose q = predict_through({0.0, 0.0, 0.0}, 0.0, 0.2, v, 0.36, h, 0.05);
+    EXPECT_NEAR(q.x, R * std::sin(a), 1e-12);
+    EXPECT_NEAR(q.y, R * (1.0 - std::cos(a)), 1e-12);
+    // no history: straight; an empty window: unchanged
+    EXPECT_NEAR(predict_through({0.0, 0.0, 0.0}, 0.0, 0.2, v, 0.36, {}, 0.05).x, 0.4, 1e-12);
+    EXPECT_EQ(predict_through({1.0, 0.0, 0.0}, 0.2, 0.1, v, 0.36, h, 0.05).x, 1.0);
+}
+
+TEST(Control, LookaheadGainBlendsFromStraightToCorner)
+{
+    // oracle: closed form: linear in curvature / corner_curvature, clamped to [0, 1]
+    EXPECT_DOUBLE_EQ(blended_gain(0.0, 0.2, 0.05, 0.5), 0.2);
+    EXPECT_DOUBLE_EQ(blended_gain(0.5, 0.2, 0.05, 0.5), 0.05);
+    EXPECT_DOUBLE_EQ(blended_gain(1.0, 0.2, 0.05, 0.5), 0.05);
+    EXPECT_NEAR(blended_gain(0.25, 0.2, 0.05, 0.5), 0.125, 1e-12);
+    EXPECT_DOUBLE_EQ(blended_gain(-0.1, 0.2, 0.05, 0.5), 0.2);
+    EXPECT_DOUBLE_EQ(blended_gain(std::nan(""), 0.2, 0.05, 0.5), 0.05);   // unknown: corner
+}
+
+TEST(Control, CurvatureAheadSeesTheCornerWithinThePreview)
+{
+    // oracle: closed form: straight x = 0..10 then a 2 m half circle, 5 cm apart: on the circle
+    // every chord's circumcircle is the circle itself, curvature 1/2 exactly
+    std::vector<Waypoint> w;
+    for (int i = 0; i < 200; ++i) w.push_back({0.05 * i, 0.0});
+    for (int i = 0; i <= 125; ++i) {
+        const double a = -M_PI / 2 + M_PI * i / 125.0;
+        w.push_back({10.0 + 2.0 * std::cos(a), 2.0 + 2.0 * std::sin(a)});
+    }
+    const Path p(w, 0.5);
+    const auto k = p.curvature();
+    EXPECT_NEAR(max_curvature_ahead(p, k, 100, 2.0), 0.0, 1e-9);    // x = 5: the corner is 5 m off
+    EXPECT_NEAR(max_curvature_ahead(p, k, 180, 2.0), 0.5, 1e-9);    // x = 9: 1 m into the circle
+    EXPECT_NEAR(max_curvature_ahead(p, k, 180, 0.0), k[180], 1e-12);
+    EXPECT_NEAR(max_curvature_ahead(p, k, 300, 100.0), 0.5, 1e-9);  // runs out at an open path's end
+    const Path loop(circle(2.0, 200), 0.5);
+    EXPECT_NEAR(max_curvature_ahead(loop, loop.curvature(), 199, 3.0), 0.5, 1e-9);   // wraps
+}
+
+TEST(Control, SteeringRateIsLimitedBothWays)
+{
+    // oracle: closed form: at most rate * dt from the previous command
+    EXPECT_NEAR(limit_rate(0.3, 0.0, 1.0, 0.05), 0.05, 1e-12);     // capped rising
+    EXPECT_NEAR(limit_rate(-0.3, 0.0, 1.0, 0.05), -0.05, 1e-12);   // capped falling
+    EXPECT_NEAR(limit_rate(0.01, 0.0, 1.0, 0.05), 0.01, 1e-12);    // small change passes
+    EXPECT_NEAR(limit_rate(0.05, 0.0, 1.0, 0.05), 0.05, 1e-12);    // exactly the step
+    EXPECT_NEAR(limit_rate(0.3, 0.2, 1.0, 0.05), 0.25, 1e-12);     // from a non-zero previous
+    EXPECT_NEAR(limit_rate(0.3, 0.0, 1.0, 5.0), 0.1, 1e-12);       // long gap: dt clamped to 0.1
+}
+
+TEST(Control, SteeringRateWithNoTimeHoldsThePreviousCommand)
+{
+    for (double dt : {0.0, -0.1, std::nan(""), kInf}) {
+        EXPECT_EQ(limit_rate(0.3, 0.12, 1.0, dt), 0.12) << dt;
+    }
+}
+
 TEST(Control, SteeringIsTheBicycleModelOfThePursuitArc)
 {
     // closed form: atan(wheelbase * 2y/d^2)

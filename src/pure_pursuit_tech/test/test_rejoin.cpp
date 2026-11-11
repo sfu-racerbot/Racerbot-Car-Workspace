@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <optional>
 #include <vector>
 
@@ -83,7 +84,66 @@ Trace drive(const std::vector<Waypoint>& points, Pose start, double speed, doubl
     return run;
 }
 
-std::vector<Waypoint> straight(double length = 80.0, double step = 0.1)
+std::vector<Waypoint> straight(double length = 80.0, double step = 0.1);
+
+// Overshoot to the far side of y = 0 and sign changes, starting from y > 0.
+struct Weave
+{
+    double overshoot = 0.0;   // m
+    int crossings = 0;
+    bool lost = false;
+};
+
+// The straight y = 0 at `speed` from y = e0, the controller seeing the pose
+// `sense` s late (stamped when measured) and its steering acting `act` s
+// late. compensate: the node's latency compensation (predict_through).
+Weave drive_delayed(double e0, double speed, double sense, double act, bool compensate)
+{
+    const auto points = straight(120.0);
+    const Path path(points, 0.5);
+    Tracker tracker(path, 0, 1e9);
+    const double dt = 1.0 / 400.0;
+    Pose car{1.0, e0, 0.0};
+    std::deque<std::pair<double, Pose>> measured;   // (time, pose)
+    std::deque<std::pair<double, double>> pending;  // (acts at, steering)
+    std::vector<SteerCommand> sent;
+    double steering = 0.0, side = 1.0;
+    Weave w;
+    for (int tick = 0; car.x < 80.0; ++tick) {
+        const double t = tick * dt;
+        measured.push_back({t, car});
+        while (measured.size() > 1 && measured[1].first <= t - sense) measured.pop_front();
+        if (tick % 10 == 0) {
+            const auto& [t_seen, seen] = measured.front();
+            const auto where = tracker.update(seen.x, seen.y);
+            const Pose aim = compensate ? predict_through(seen, t_seen, t + act, speed, kWheelbase, sent, act) : seen;
+            const double L = lookahead(speed, kBase, kGain, kMinL, kMaxL);
+            const auto goal = find_goal(path, where.closest, aim, L);
+            if (!goal) {
+                w.lost = true;
+                return w;
+            }
+            const double cmd = steering_for(goal->local_x, goal->local_y, kWheelbase, kMaxSteering);
+            sent.push_back({t, cmd});
+            pending.push_back({t + act, cmd});
+        }
+        while (!pending.empty() && pending.front().first <= t) {
+            steering = pending.front().second;
+            pending.pop_front();
+        }
+        car.x += speed * std::cos(car.yaw) * dt;
+        car.y += speed * std::sin(car.yaw) * dt;
+        car.yaw += speed / kWheelbase * std::tan(steering) * dt;
+        if (car.y < 0.0) w.overshoot = std::max(w.overshoot, -car.y);
+        if (std::abs(car.y) > 0.01 && (car.y > 0.0 ? 1.0 : -1.0) != side) {
+            side = -side;
+            ++w.crossings;
+        }
+    }
+    return w;
+}
+
+std::vector<Waypoint> straight(double length, double step)
 {
     std::vector<Waypoint> w;
     for (int i = 0; i * step <= length; ++i) {
@@ -203,6 +263,24 @@ TEST(Rejoin, OffsetsOnACircleRejoinFromInsideAndOutside)
         std::printf("circle r=3 e0=%+.1f m: within 5 cm after %.1f m, peak %.2f m\n",
                     e0, first_below(r, 0.05), peak);
     }
+}
+
+TEST(Rejoin, LatencyCompensationRemovesTheWeaveFromDelay)
+{
+    // 50 ms pose age + 50 ms actuation at 6 m/s, from 0.5 m off the line.
+    // Measured here, not by the controller: overshoot past the line and crossings.
+    const Weave none = drive_delayed(0.5, 6.0, 0.0, 0.0, false);
+    const Weave late = drive_delayed(0.5, 6.0, 0.05, 0.05, false);
+    const Weave comp = drive_delayed(0.5, 6.0, 0.05, 0.05, true);
+    ASSERT_FALSE(none.lost || late.lost || comp.lost);
+    std::printf("delay 0.1 s at 6 m/s: overshoot %.3f / %.3f / %.3f m, crossings %d / %d / %d (none/late/compensated)\n",
+                none.overshoot, late.overshoot, comp.overshoot, none.crossings, late.crossings, comp.crossings);
+    // the delay makes it weave: this scenario can tell the two apart
+    EXPECT_GT(late.overshoot, 3.0 * none.overshoot);
+    EXPECT_GE(late.crossings, 3);
+    // compensated: as if there were no delay (the prediction is the plant's own model)
+    EXPECT_NEAR(comp.overshoot, none.overshoot, 0.005);   // 5 mm
+    EXPECT_EQ(comp.crossings, none.crossings);
 }
 
 TEST(Rejoin, FacingAwayFindsNoGoal)

@@ -3,6 +3,7 @@
 // logic lives in path.hpp, tracker.hpp and control.hpp (no ROS).
 
 #include <memory>
+#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
@@ -35,6 +36,10 @@ private:
         double lookahead_min;        // m
         double lookahead_max;        // m
         double lookahead_speed_gain; // m per m/s
+        double lookahead_gain_straight;    // m per m/s on straights (-1: lookahead_speed_gain)
+        double lookahead_gain_corner;      // m per m/s in corners (-1: lookahead_speed_gain)
+        double lookahead_corner_curvature; // 1/m: a full corner
+        double lookahead_preview;          // m ahead to look for a corner
         double wheelbase;            // m
         double max_steering;         // rad
         double max_speed;            // m/s
@@ -47,6 +52,10 @@ private:
         int laps;                    // loop: stop after this many laps (0 = never)
         double goal_tolerance;       // m
         double max_path_error;       // m
+        double max_pose_age;         // s: older (or unstamped) poses stop the car
+        bool compensate_latency;     // aim from the pose predicted at now + actuation_delay
+        double actuation_delay;      // s: command to wheels
+        double max_steering_rate;    // rad/s, both directions
     };
     Settings cfg_;
 
@@ -71,12 +80,16 @@ private:
     std::unique_ptr<Path> path_;
     std::unique_ptr<Tracker> tracker_;
     std::vector<double> profile_;       // planned speed per waypoint (profile mode)
+    std::vector<double> curvature_;     // per waypoint, for the lookahead gain
     int laps_logged_ = 0;
     bool finished_ = false;             // reached the goal: stopped until LB is pressed again
 
     double current_speed_ = 0.0;        // from odom_topic when use_pf
     double last_cmd_speed_ = 0.0;       // for the acceleration limit
     std::optional<rclcpp::Time> last_cmd_time_;
+    std::deque<SteerCommand> steer_history_;   // recent commands, for latency compensation
+    double last_steering_ = 0.0;        // for the steering rate limit
+    std::optional<rclcpp::Time> last_steer_time_;
 
     Settings read_settings();
     void load_path(const std::string& file, double closure_distance);
@@ -91,6 +104,7 @@ private:
     /// True while racerbot_a's safety_node is braking, silent, or stale.
     bool safety_braking(std::string& reason) const;
 
+    void remember_steering(double steering);
     /// Publishes speed 0, steering 0, and says why (throttled).
     void stop(const std::string& reason);
     /// Steering and speed for a goal point, then publishes the command.
