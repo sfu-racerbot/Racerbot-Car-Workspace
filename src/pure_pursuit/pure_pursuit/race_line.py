@@ -190,22 +190,63 @@ def _min_time_starts(mc, prepared, field_at, cfg):
     the recorded lap (the mapping laps' own path) and from the shortest line the steering allows, found by
     the same optimizer with grip that never binds, and keeps whichever finishes fastest.
     """
+    for name in _start_names(prepared, cfg):
+        yield name, _start_offsets(name, mc, prepared, field_at, cfg)
+
+
+def _start_names(prepared, cfg):
+    return [name for name in cfg.min_time_starts
+            if name in ('min_curvature', 'shortest') or (name == 'recorded' and prepared is not None)]
+
+
+def _start_offsets(name, mc, prepared, field_at, cfg):
     from dataclasses import replace
     from pure_pursuit.min_time_line import offsets_of
     center = np.asarray(mc['line'], dtype=float)
-    for name in cfg.min_time_starts:
-        if name == 'min_curvature':
-            yield name, np.zeros(len(center))
-        elif name == 'recorded' and prepared is not None:
-            yield name, offsets_of(center, prepared.xy)
-        elif name == 'shortest':
-            loose = replace(cfg.physics, a_lat_left=SHORTEST_GRIP, a_lat_right=SHORTEST_GRIP)
-            short = optimize_min_time(
-                center, mc['remaining_left'], mc['remaining_right'], loose, field_at,
-                half_width=cfg.half_width, wall_margin=cfg.wall_margin,
-                emergency_stop_distance=cfg.emergency_stop_distance, cone_margin=cfg.cone_margin,
-                body_floor=cfg.body_floor, body_floor_tight=cfg.body_floor_tight, laser_x=cfg.laser_x)
-            yield name, offsets_of(center, short.xy)
+    if name == 'min_curvature':
+        return np.zeros(len(center))
+    if name == 'recorded':
+        return offsets_of(center, prepared.xy)
+    loose = replace(cfg.physics, a_lat_left=SHORTEST_GRIP, a_lat_right=SHORTEST_GRIP)
+    short = optimize_min_time(
+        center, mc['remaining_left'], mc['remaining_right'], loose, field_at,
+        half_width=cfg.half_width, wall_margin=cfg.wall_margin,
+        emergency_stop_distance=cfg.emergency_stop_distance, cone_margin=cfg.cone_margin,
+        body_floor=cfg.body_floor, body_floor_tight=cfg.body_floor_tight, laser_x=cfg.laser_x)
+    return offsets_of(center, short.xy)
+
+
+# What each forked start worker reads: the corridor, field and config are closures and arrays that need not
+# be pickled when the worker is a fork of this process (_start_results).
+_FORK_INPUTS = None
+
+
+def _start_in_worker(name):
+    mc, prepared, field_at, cfg = _FORK_INPUTS
+    return _min_time_from(_start_offsets(name, mc, prepared, field_at, cfg), mc, field_at, cfg)
+
+
+def _start_results(names, mc, prepared, field_at, cfg):
+    """[(name, candidate)] in `names` order. The starts are independent, so each runs in its own forked
+    process when there is more than one and the platform can fork (the builder always runs as its own
+    CLI process, never inside a ROS node, so there are no DDS threads to fork). Each start computes
+    exactly what it would in turn; anything going wrong with the workers falls back to running them here.
+    """
+    import multiprocessing
+    import os
+    global _FORK_INPUTS
+    workers = min(len(names), os.cpu_count() or 1)
+    if workers > 1 and 'fork' in multiprocessing.get_all_start_methods():
+        _FORK_INPUTS = (mc, prepared, field_at, cfg)
+        try:
+            with multiprocessing.get_context('fork').Pool(workers) as pool:
+                return list(zip(names, pool.map(_start_in_worker, names)))
+        except (OSError, multiprocessing.ProcessError):
+            pass
+        finally:
+            _FORK_INPUTS = None
+    return [(name, _min_time_from(_start_offsets(name, mc, prepared, field_at, cfg), mc, field_at, cfg))
+            for name in names]
 
 
 # Lateral grip for the 'shortest' start, m/s^2: far above any car's, so only length, the steering
@@ -217,8 +258,7 @@ def _best_min_time(mc, prepared, field_at, cfg):
     """The fastest minimum-time line over every start that passes the final checks; else the first tried."""
     best, best_name = None, None
     tried = []
-    for name, start in _min_time_starts(mc, prepared, field_at, cfg):
-        candidate = _min_time_from(start, mc, field_at, cfg)
+    for name, candidate in _start_results(_start_names(prepared, cfg), mc, prepared, field_at, cfg):
         tried.append(f'{name} {candidate.est_lap_s:.3f} s{"" if candidate.ok else " (failed)"}')
         if best is None or (candidate.ok and (not best.ok or candidate.est_lap_s < best.est_lap_s)):
             best, best_name = candidate, name
