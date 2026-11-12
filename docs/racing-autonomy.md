@@ -96,6 +96,13 @@ python3 -m pure_pursuit.race_line --run-dir "$RUN_DIR"
 
 **Working when:** the last result line starts `choice:` and names the selected source, and both CSV files exist.
 
+**How long it takes.** The build runs on the CPU and does not use the GPU. Its cost is the minimum-time optimizer, which can make hundreds of solver runs over the three starting lines and their repair rounds. Two changes on 2026-11-10 made it about 10× faster without changing what it computes:
+
+- **Batched gradient.** The solver's gradient is now worked out in one pass over every control point (`min_time_line.forward_difference_gradient`). It takes the same steps SciPy took when it called the cost once per point.
+- **Parallel starts.** The three starts run in parallel processes (`race_line._start_results`). They give exactly the lines they give when run one after another.
+
+Car 2's 2026-10-30 course took 1238 s on one core before these changes, and 118 s after them, on the dev box. The optimizer is sensitive to rounding: moving its start by 1e-12 m moved its result by up to 3% on a test course, before and after this change. So the check is the course suite, not line-for-line equality. A control whose bounds have closed onto it during a repair now gets a zero gradient; SciPy gave it NaN, which ended those repair solves early.
+
 `--car rb1` or `--car rb2` selects a car explicitly when working offline; otherwise the tool uses the current car. `race_line_mode` can also require `recorded`, `min_curvature` or `min_time`; a required mode refuses a failed candidate instead of choosing another source.
 
 ### Limitations
