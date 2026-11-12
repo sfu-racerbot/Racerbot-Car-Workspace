@@ -124,6 +124,8 @@ REQUIRED_PARAMS = frozenset((
     "enable_swept_clearance",
     "enable_ttc",
     "escape_creep_speed",
+    "flank_creep_length",
+    "flank_creep_margin",
     "aim_depth_bias",
     "aim_depth_bias_fallback",
     "fallback_min_gap_distance",
@@ -693,6 +695,23 @@ class GapController:
                 gap_logic.braking_speed_limit(
                     forward_clearance, creep_reserve,
                     p["max_braking_decel"], p["max_speed"]))
+
+        # Flank creep, as in gap_follow_node: crawl away from a wall alongside
+        # when the body's own arc is clear; never on an emergency/TTC tick,
+        # and not a launch.
+        if (p["flank_creep_length"] > 0.0 and clearance_speed <= 0.0
+                and not creeping and not (emergency_tripped or ttc_tripped)
+                and gap_logic.body_arc_free_distance(
+                    window, window_valid, beam_angles,
+                    math.tan(steering) / p["wheelbase"],
+                    p["car_width"] / 2.0 + p["flank_creep_margin"],
+                    p["car_length"], p["wheelbase"], p["laser_offset_x"],
+                    p["laser_offset_y"],
+                    max_length=p["flank_creep_length"]) == math.inf):
+            clearance_speed = p["escape_creep_speed"]
+            creeping = True
+            launching = False
+            self.launch_boost.end("flank_creep")
 
         desired_speed = min(normal_speed, clearance_speed)
         binding = 'curve' if normal_speed <= clearance_speed else 'clearance'
