@@ -59,7 +59,7 @@ class Truth:
         return (b[2] - a[2]) / (2 * h), math.hypot(b[0] - a[0], b[1] - a[1]) / (2 * h)
 
 
-def run_variant(name, run, params, gyro, truth, loc):
+def run_variant(name, run, params, gyro, truth, loc, extra=None):
     ctx = {}
     original = opponent_tracking.EgoPose.advance
 
@@ -91,6 +91,8 @@ def run_variant(name, run, params, gyro, truth, loc):
             tracks.append((bx, by, tr.speed, bool(tr.moving), key in fed, key in moving, tr.track_id, bool(tr.confirmed_car),
                            float(tr.stopped_sec), int(tr.streak)))
         row["tracks"] = tracks
+        if extra is not None:
+            extra(ctrl, row)
 
     opponent_tracking.EgoPose.advance = advance
     rows = []
