@@ -169,54 +169,80 @@ def _accel_brake_box(cap, seg, physics):
     return np.sqrt(np.minimum(accel, brake)[n:2 * n])
 
 
-def _accel_brake(cap, seg, physics, kappa=None, grip=None):
+# Rounds of the combined-grip fixed point in _accel_brake_coupled. MUST be odd: see that function.
+_COUPLING_ITERATIONS = 3
+assert _COUPLING_ITERATIONS % 2 == 1
+
+
+def _envelope_forward(cap2, a2ds):
+    """w[j] = A[j] + min_{k<=j}(cap2[k] - A[k]), A[j] = sum_{i<j} a2ds[i]: the acceleration envelope of the
+    caps for a station-dependent limit (a2ds[i] = 2 a ds of segment i to i+1), a running minimum on the last axis."""
+    A = np.concatenate([np.zeros(a2ds.shape[:-1] + (1,)), np.cumsum(a2ds, axis=-1)[..., :-1]], axis=-1)
+    return A + np.minimum.accumulate(cap2 - A, axis=-1)
+
+
+def _envelope_backward(cap2, b2ds):
+    """The mirror: w[j] = B[j] + min_{k>=j}(cap2[k] - ... ), B[j] = sum_{i>=j} b2ds[i] (the braking envelope)."""
+    B = np.cumsum(b2ds[..., ::-1], axis=-1)[..., ::-1]
+    return B + np.minimum.accumulate((cap2 - B)[..., ::-1], axis=-1)[..., ::-1]
+
+
+def _accel_brake_coupled(cap, seg, physics, kappa, grip, iterations=None):
     """Acceleration and braking limits round a closed loop, sharing the tyres with the cornering.
 
-    With ``physics.grip_coupling`` 0 this is exactly _accel_brake_box: acceleration and braking bounded
-    independently of the corners (a box), which plans full braking and full cornering at the same station:
-    3.0 and 3.2 m/s^2 together is 4.4 m/s^2 on tyres that deliver about 3 (2026-11-12, the car running wide
-    into the corner on the 2026-11-11 launch). Otherwise the longitudinal authority at a station of speed v,
-    curvature k and lateral grip g shrinks with the cornering already using it,
+    Works on one path (n,) or a batch (B, n). At a station of speed v, curvature k and lateral grip g the
+    longitudinal authority shrinks with the cornering already using it,
 
         use = min(1, (v^2 |k| / g)^2),     a_eff = a * sqrt(max(0, 1 - coupling * use)),
 
-    an ellipse at coupling 1. The limits depend on the speed itself, so there is no closed form: forward
-    w[j] = min(w[j], w[j-1] + 2 a_accel_eff(w[j-1]) ds) and backward w[j] = min(w[j], w[j+1] +
-    2 a_brake_eff(w[j+1]) ds) over three laps of stations (w = v^2; the middle lap is the answer), forward
-    again, and the three repeated until nothing moves by more than 1e-9 (at most 6 rounds): state-dependent
-    limits do not commute, so one backward pass can break what the forward pass guaranteed.
+    an ellipse at coupling 1 (a box, _accel_brake_box, at 0: that planned full braking and full cornering at
+    one station, 3.0 and 3.2 m/s^2 together being 4.4 m/s^2 on tyres that deliver about 3, 2026-11-12).
+    The limit depends on the speed it limits, so there is no closed form; but for a FIXED station-dependent
+    limit there is one, the running-minimum form of _accel_brake_box with A[j] = sum_{i<j} 2 a_acc[i] ds[i]
+    in place of 2 a S[j] (and B[j] likewise for braking), so the speed is found by iterating it:
+
+        w = (box solution)^2                                   # an upper bound
+        repeat _COUPLING_ITERATIONS times:
+            f = sqrt(max(0, 1 - c * min(1, (w |k| / g)^2)))    # from the previous iterate
+            a_acc[i] = a_accel * f[i]       # segment i to i+1, the limit read at the station being left
+            a_brk[i] = a_brake * f[i+1]     # the limit read at the station being entered
+            w = min(forward(cap2, a_acc), backward(cap2, a_brk))   # three laps tiled, the middle one kept
+
+    Why the count must be odd. A limit shrinks as the speed it is read from grows (f falls with w), and a
+    faster plan is a plan with smaller limits. The box solution w0 is an upper bound on the true speed, so
+    limits computed from it are too small: iterate 1 is feasible (it respects the ellipse) but slow, and at
+    or below the truth. Limits computed from iterate 1, a lower bound, are too big: iterate 2 is fast but
+    may violate the ellipse, at or above the truth. Iterate 3 takes its limits from iterate 2, which is
+    pointwise at or below the box w0, so they are at least iterate 1's and at most the truth's: iterate 3 is
+    feasible again and at or above iterate 1. Odd iterates are feasible and non-decreasing; even ones are
+    neither guaranteed.
     """
+    if _COUPLING_ITERATIONS % 2 != 1:
+        raise ValueError(f'_COUPLING_ITERATIONS must be odd, got {_COUPLING_ITERATIONS}')
+    rounds = _COUPLING_ITERATIONS if iterations is None else iterations     # ``iterations``: a test hook
+    c = physics.grip_coupling
+    cap = np.asarray(cap, dtype=float)
+    n = cap.shape[-1]
+    reps = [1] * (cap.ndim - 1) + [3]
+    box = _accel_brake_box(cap, seg, physics) if cap.ndim == 1 else _batch_accel_brake_box(cap, seg, physics)
+    w = box ** 2
+    cap2, ds = np.tile(cap ** 2, reps), np.tile(seg, reps)
+    k, g = np.abs(kappa), np.asarray(grip, dtype=float)
+    for _ in range(rounds):
+        f = np.sqrt(np.maximum(0.0, 1.0 - c * np.minimum(1.0, (w * k / g) ** 2)))
+        f3 = np.tile(f, reps)
+        f_next = np.concatenate([f3[..., 1:], f3[..., -1:]], axis=-1)
+        w3 = np.minimum(_envelope_forward(cap2, 2.0 * physics.a_accel * f3 * ds),
+                        _envelope_backward(cap2, 2.0 * physics.a_brake * f_next * ds))
+        w = w3[..., n:2 * n]
+    return np.sqrt(w)
+
+
+def _accel_brake(cap, seg, physics, kappa=None, grip=None):
+    """The box at coupling 0 (exactly _accel_brake_box), else _accel_brake_coupled."""
     if physics.grip_coupling == 0.0 or kappa is None:
         return _accel_brake_box(cap, seg, physics)
-    n = len(cap)
-    c = physics.grip_coupling
-    a_acc, a_brk = physics.a_accel, physics.a_brake
-    w = np.tile(np.asarray(cap, dtype=float) ** 2, 3).tolist()
-    ds = np.tile(seg, 3).tolist()
-    k = np.tile(np.abs(kappa), 3).tolist()
-    g = np.tile(grip, 3).tolist()
-    last = 3 * n - 1
-
-    def eff(a, wj, j):
-        use = min(1.0, (wj * k[j] / g[j]) ** 2)
-        return a * math.sqrt(max(0.0, 1.0 - c * use))
-
-    def forward():
-        for j in range(1, last + 1):
-            w[j] = min(w[j], w[j - 1] + 2.0 * eff(a_acc, w[j - 1], j - 1) * ds[j - 1])
-
-    def backward():
-        for j in range(last - 1, -1, -1):
-            w[j] = min(w[j], w[j + 1] + 2.0 * eff(a_brk, w[j + 1], j + 1) * ds[j])
-
-    for _ in range(6):
-        before = list(w)
-        forward()
-        backward()
-        forward()
-        if max(abs(x - y) for x, y in zip(w, before)) < 1e-9:
-            break
-    return np.sqrt(np.array(w[n:2 * n]))
+    return _accel_brake_coupled(cap, seg, physics, kappa, grip)
 
 
 def lap_time(xy, physics: CarPhysics) -> float:
@@ -281,39 +307,10 @@ def _batch_accel_brake_box(cap, seg, physics):
 
 
 def _batch_accel_brake(cap, seg, physics, kappa=None, grip=None):
-    """_accel_brake for every row (B, n): the box closed form at coupling 0, else the same sequential
-    passes with each station's step taken for all rows at once."""
+    """_accel_brake for every row (B, n): the box closed form at coupling 0, else _accel_brake_coupled."""
     if physics.grip_coupling == 0.0 or kappa is None:
         return _batch_accel_brake_box(cap, seg, physics)
-    rows, n = cap.shape
-    c = physics.grip_coupling
-    a_acc, a_brk = physics.a_accel, physics.a_brake
-    w = np.tile(cap ** 2, (1, 3))
-    ds = np.tile(seg, (1, 3))
-    k = np.tile(np.abs(kappa), (1, 3))
-    g = np.tile(grip, (1, 3))
-    last = 3 * n - 1
-
-    def eff(a, wj, j):
-        use = np.minimum(1.0, (wj * k[:, j] / g[:, j]) ** 2)
-        return a * np.sqrt(np.maximum(0.0, 1.0 - c * use))
-
-    def forward():
-        for j in range(1, last + 1):
-            w[:, j] = np.minimum(w[:, j], w[:, j - 1] + 2.0 * eff(a_acc, w[:, j - 1], j - 1) * ds[:, j - 1])
-
-    def backward():
-        for j in range(last - 1, -1, -1):
-            w[:, j] = np.minimum(w[:, j], w[:, j + 1] + 2.0 * eff(a_brk, w[:, j + 1], j + 1) * ds[:, j])
-
-    for _ in range(6):
-        before = w.copy()
-        forward()
-        backward()
-        forward()
-        if np.max(np.abs(w - before)) < 1e-9:
-            break
-    return np.sqrt(w[:, n:2 * n])
+    return _accel_brake_coupled(cap, seg, physics, kappa, grip)
 
 
 def _batch_respond_early(speed, s, delay):

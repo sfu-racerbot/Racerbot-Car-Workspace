@@ -475,3 +475,73 @@ def test_grip_coupling_is_validated():
         with pytest.raises(ValueError, match='grip_coupling'):
             CarPhysics(grip_coupling=bad)
     assert CarPhysics(grip_coupling=1.0).grip_coupling == 1.0 and CarPhysics().grip_coupling == 0.0
+
+
+# --- the fixed-point iteration (2026-11-13) --------------------------------------------------
+
+def _sequential_reference(cap, seg, physics, kappa, grip):
+    """The original sequential solution of the same problem, kept as the reference for the fixed point:
+    forward / backward / forward passes over three laps with state-dependent limits (slow: pure python)."""
+    n = len(cap)
+    c = physics.grip_coupling
+    a_acc, a_brk = physics.a_accel, physics.a_brake
+    w = np.tile(np.asarray(cap, dtype=float) ** 2, 3).tolist()
+    ds = np.tile(seg, 3).tolist()
+    k = np.tile(np.abs(kappa), 3).tolist()
+    g = np.tile(grip, 3).tolist()
+    last = 3 * n - 1
+
+    def eff(a, wj, j):
+        use = min(1.0, (wj * k[j] / g[j]) ** 2)
+        return a * math.sqrt(max(0.0, 1.0 - c * use))
+
+    for _ in range(6):
+        before = list(w)
+        for j in range(1, last + 1):
+            w[j] = min(w[j], w[j - 1] + 2.0 * eff(a_acc, w[j - 1], j - 1) * ds[j - 1])
+        for j in range(last - 1, -1, -1):
+            w[j] = min(w[j], w[j + 1] + 2.0 * eff(a_brk, w[j + 1], j + 1) * ds[j])
+        for j in range(1, last + 1):
+            w[j] = min(w[j], w[j - 1] + 2.0 * eff(a_acc, w[j - 1], j - 1) * ds[j - 1])
+        if max(abs(x - y) for x, y in zip(w, before)) < 1e-9:
+            break
+    return np.sqrt(np.array(w[n:2 * n]))
+
+
+@pytest.mark.parametrize('iterations', [1, 3, 5])
+def test_odd_iterations_are_feasible_and_improve(monkeypatch, iterations):
+    xy, physics = race_day_line(), race_physics(1.0)
+    monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', iterations)
+    use, free = ellipse_use(xy, physics)
+    assert use[free].max() <= 1.0 + ELLIPSE_SLACK, (iterations, float(use[free].max()))
+
+
+def test_more_odd_iterations_never_slow_the_lap(monkeypatch):
+    xy, physics = race_day_line(), race_physics(1.0)
+    laps = []
+    for iterations in (1, 3, 5):
+        monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', iterations)
+        laps.append(lap_time(xy, physics))
+    assert laps[0] >= laps[1] - 1e-9 and laps[1] >= laps[2] - 1e-9, laps       # s
+
+
+def test_an_even_iteration_count_is_refused(monkeypatch):
+    monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', 2)
+    with pytest.raises(ValueError, match='odd'):
+        speed_profile(stadium(), CarPhysics(v_max=8.0, grip_coupling=1.0))
+    monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', 3)
+    speed_profile(stadium(), CarPhysics(v_max=8.0, grip_coupling=1.0))       # odd: fine
+
+
+@pytest.mark.parametrize('name,xy,make', [('stadium', stadium(), stadium_physics), ('race-day', race_day_line(), race_physics)])
+def test_fixed_point_is_close_to_the_sequential_solution(monkeypatch, name, xy, make):
+    physics = make(1.0)
+    fixed = lap_time(xy, physics)
+    monkeypatch.setattr(min_time_line, '_accel_brake_coupled', _sequential_reference)
+    sequential = lap_time(xy, physics)
+    # oracle: the sequential reference (the problem's own definition); the fixed point is feasible, so it is
+    # not faster than the exact solution beyond the 0.1% of iteration error, and within 1.0% of it.
+    assert fixed >= sequential * (1.0 - 0.001), (name, fixed, sequential)
+    assert abs(fixed - sequential) <= 0.01 * sequential, (name, fixed, sequential)
+    # measured 2026-11-13: within 0.01% on both; a profile without the sqrt in the limit is 0.12-0.22% off
+    assert abs(fixed - sequential) <= 0.0005 * sequential, (name, fixed, sequential)
