@@ -38,3 +38,12 @@ def test_line_calibration_allows_physics_but_not_safety_or_mode(tmp_path):
         path.write_text(f'auto_map_race_node:\n  ros__parameters:\n    {key}: 1\n')
         problems = check_calibration_overlay(path, path.name)
         assert len(problems) == 1 and key in problems[0]
+
+
+@pytest.mark.parametrize('car,expected', [('rb1', 1.0), ('rb2', 0.88)])
+def test_launch_speed_scale_effective_per_car(car, expected):
+    # oracle: spec (2026-11-13 brief): rb2's tuning overlay sets 0.88 (run 20261111-152132), rb1 keeps the shared
+    # 1.0 (off); launch_scale_distance stays the shared 0.0 (one lap) on both.
+    config = effective_config('pure_pursuit.yaml', 'pure_pursuit_node', car)
+    assert config['launch_speed_scale'] == expected
+    assert config['launch_scale_distance'] == 0.0
