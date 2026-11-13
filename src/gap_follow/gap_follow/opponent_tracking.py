@@ -77,6 +77,10 @@ class OpponentParams:
     prediction_step: float = 0.1     # s
     follow_min_gap: float = 0.5      # m, bumper-to-car gap at zero speed
     follow_floor: float = 0.5        # m/s, the follow law never asks for less (0: off)
+    # Static confirmation (docs/gap-follow.md#static-confirmation): a track whose radial
+    # residual median is below this is a wall or a parked object, not a car to follow.
+    # 0 = off, nothing is ever confirmed.
+    follow_static_radial_speed: float = 0.0  # m/s
     follow_time_gap: float = 1.0     # s
     abort_speed_margin: float = 0.5  # m/s, drop behind an alongside car on refusal
     follow_lateral: float = 0.45     # m, |y| within which a car is "in path"
@@ -118,6 +122,10 @@ class OpponentParams:
             value = getattr(self, name)
             if not (math.isfinite(value) and value >= 0.0):
                 raise ValueError(f'opponent_{name} must be >= 0 and finite, got {value!r}')
+        value = self.follow_static_radial_speed
+        if not (math.isfinite(value) and 0.0 <= value <= 1.0):
+            raise ValueError(
+                f'opponent_follow_static_radial_speed must be finite and in [0, 1] m/s, got {value!r}')
         if self.min_width >= self.max_width:
             raise ValueError(
                 f'opponent_min_width ({self.min_width}) must be below '
@@ -142,6 +150,7 @@ class Detection:
     lo: int           # first and last beam index in the scan
     hi: int
     near_range: float  # minimum beam range, measured from the LiDAR
+    near_bearing: float = math.nan  # bearing (rad, LiDAR frame) of that nearest beam
 
 
 def segment_objects(ranges, valid, angles, laser_x, laser_y,
@@ -193,7 +202,8 @@ def segment_objects(ranges, valid, angles, laser_x, laser_y,
         if not (params.min_width <= width <= params.max_width):
             continue
         out.append(Detection(float(np.mean(xs)), float(np.mean(ys)), width,
-                             float(np.min(xs)), lo, hi, float(np.min(seg))))
+                             float(np.min(xs)), lo, hi, float(np.min(seg)),
+                             float(a[lo + int(np.argmin(seg))])))
     return out
 
 
@@ -284,10 +294,26 @@ class Track:
     confirmed_car: bool = False  # only latched by the existing moving rule
     stopped_sec: float = 0.0     # time since moving was last true
     near_range: float = math.nan  # last observed minimum LiDAR range
+    prev_range: float = math.nan  # near_range at the previous consecutive sighting (nan after a miss)
+    prev_clock: float = math.nan  # tracker clock of that sighting
+    samples: list = field(default_factory=list)   # (clock, radial residual m/s), newest last
+    _confirmed: bool = False
+    static_residual: float = math.nan  # median |residual| of the window when it was last evaluated
 
     @property
     def speed(self) -> float:
         return math.hypot(self.vx, self.vy)
+
+    @property
+    def static_confirmed(self) -> bool:
+        """True when the radial residual says this object does not move (read-only; set by the tracker)."""
+        return self._confirmed
+
+
+STATIC_EXPIRY_SEC = 0.6    # s, a residual sample older than this is not used
+STATIC_NEWEST = 8          # samples at most
+STATIC_MIN_SAMPLES = 4     # fewer than this: not confirmed (a missing sample never confirms)
+STATIC_MAX_DT = 0.25       # s, between two sightings of a track; longer or not positive gives no sample
 
 
 @dataclass
@@ -307,17 +333,61 @@ class OpponentTracker:
     params: OpponentParams
     tracks: list = field(default_factory=list)
     _next_id: int = 1
+    clock: float = 0.0
 
     def reset(self):
         self.tracks = []
 
-    def update(self, detections_world, dt: float):
-        """Detections: (world x, world y, body near_dx, LiDAR near_range).
+    def _radial_sample(self, t: Track, near_range, bearing, dt, radial):
+        """Append this sighting's radial residual to the track's window, or nothing.
+
+        residual = d(range)/dt + v cos(b) + omega * laser_x * sin(b), b the bearing of the nearest beam,
+        v the wheel speed, omega the steering-model yaw rate. For a fixed surface the range changes only
+        because the LiDAR moves, so it is 0 whatever the ego does; for a car we follow at matched speed the
+        range rate is about 0 and the residual is about its own speed along the line of sight. Measured
+        2026-11-13 (tools/run_analysis/results/2026-11-13-static-confirmation-gate.md).
+        """
+        prev_range, prev_clock = t.prev_range, t.prev_clock
+        t.prev_range, t.prev_clock = near_range, self.clock
+        if radial is None or self.params.follow_static_radial_speed <= 0.0:
+            return
+        gap = self.clock - prev_clock
+        v, omega, laser_x = radial
+        if not (math.isfinite(prev_range) and math.isfinite(near_range) and math.isfinite(bearing)
+                and math.isfinite(v) and math.isfinite(omega) and math.isfinite(laser_x)
+                and math.isfinite(gap) and 0.0 < gap <= STATIC_MAX_DT):
+            return
+        residual = ((near_range - prev_range) / gap + v * math.cos(bearing)
+                    + omega * laser_x * math.sin(bearing))
+        t.samples.append((self.clock, residual))
+        del t.samples[:-STATIC_NEWEST]
+
+    def _confirm_static(self, t: Track):
+        """static_confirmed = at least 4 samples no older than 0.6 s (the newest 8) and their median |residual|
+        strictly below ``follow_static_radial_speed``. Anything else is not confirmed: today's behaviour."""
+        limit = self.params.follow_static_radial_speed
+        t._confirmed = False
+        t.static_residual = math.nan
+        if limit <= 0.0:
+            return
+        window = [r for c, r in t.samples if self.clock - c <= STATIC_EXPIRY_SEC + 1e-12]
+        if len(window) < STATIC_MIN_SAMPLES:
+            return
+        med = float(np.median(np.abs(window)))
+        t.static_residual = med
+        t._confirmed = med < limit
+
+    def update(self, detections_world, dt: float, radial=None):
+        """Detections: (world x, world y, body near_dx, LiDAR near_range[, near bearing]).
+
+        ``radial`` = (speed, yaw_rate, laser_x) of this scan, for the static confirmation (see
+        ``_confirm_static``); None adds no residual sample.
 
         Three-element synthetic observations remain usable for tracking-only
         callers; only scan observations supply a range for inflation.
         """
         p = self.params
+        self.clock += dt
         for t in self.tracks:
             t.x += t.vx * dt
             t.y += t.vy * dt
@@ -341,6 +411,7 @@ class OpponentTracker:
             used_d.add(di)
             t = self.tracks[ti]
             zx, zy, near_dx, *near_range = detections_world[di]
+            bearing = near_range[1] if len(near_range) > 1 else math.nan
             rx, ry = zx - t.x, zy - t.y
             t.x += p.alpha * rx
             t.y += p.alpha * ry
@@ -352,6 +423,7 @@ class OpponentTracker:
                 t.vy *= p.max_track_speed / sp
             t.near_dx = near_dx
             if near_range:
+                self._radial_sample(t, near_range[0], bearing, dt, radial)
                 t.near_range = near_range[0]
             t.hits += 1
             t.streak += 1
@@ -360,13 +432,18 @@ class OpponentTracker:
             if ti not in used_t:
                 t.misses += 1
                 t.streak = 0
+                t.prev_range = math.nan
         self.tracks = [t for t in self.tracks if t.misses <= p.max_misses]
         for di, det in enumerate(detections_world):
             if di not in used_d:
                 self.tracks.append(Track(det[0], det[1], near_dx=det[2],
                                          near_range=det[3] if len(det) > 3 else math.nan,
+                                         prev_range=det[3] if len(det) > 3 else math.nan,
+                                         prev_clock=self.clock,
                                          track_id=self._next_id))
                 self._next_id += 1
+        for t in self.tracks:
+            self._confirm_static(t)
         for t in self.tracks:
             if t.moving:
                 t.moving = t.speed >= 0.5 * p.moving_speed
@@ -562,6 +639,10 @@ class FollowCapMemory:
         self._cap_t = None        # when it was stored; None: nothing is held
         self._last_t = None       # the time of the previous call
 
+    def clear(self):
+        """Forget the held cap (the car it belonged to turned out to be a static object)."""
+        self._cap, self._cap_t = math.inf, None
+
     def update(self, follow_cap: float, t_s: float) -> tuple:
         if self.memory_sec == 0.0:
             return follow_cap, False
@@ -611,6 +692,8 @@ class OpponentAwareness:
         self.steer = SteeringEstimate(params.steer_delay, params.steer_gain,
                                       params.steer_rate_max)
         self.detections = []
+        # Median |radial residual| (m/s) of each static-confirmed track this tick's follow cap skipped.
+        self.static_skipped = []
         self.follow_memory = FollowCapMemory(params.follow_memory_sec)
 
     def reset(self, steering: float = 0.0):
@@ -637,17 +720,21 @@ class OpponentAwareness:
         world = []
         for d in self.detections:
             wx, wy = self.ego.to_world(d.x, d.y)
-            world.append((wx, wy, d.near_x - d.x, d.near_range))
+            world.append((wx, wy, d.near_x - d.x, d.near_range, d.near_bearing))
+        self.static_skipped = []
         if dt is None:
-            for wx, wy, near_dx, near_range in world:
+            for wx, wy, near_dx, near_range, _bearing in world:
                 self.tracker.tracks.append(Track(wx, wy, near_dx=near_dx,
                                                  near_range=near_range,
+                                                 prev_range=near_range,
+                                                 prev_clock=self.tracker.clock,
                                                  track_id=self.tracker._next_id))
                 self.tracker._next_id += 1
         else:
-            self.tracker.update(world, dt)
+            omega = speed * math.tan(self.steer.angle) / self.wheelbase
+            self.tracker.update(world, dt, radial=(speed, omega, self.laser_x))
 
-    def moving_body(self):
+    def moving_body(self, followable_only: bool = False):
         """Moving tracks: (x, y, vx, vy, near_x, LiDAR near_range).
 
         Relevant: not behind this car, within ``relevant_lateral`` to either
@@ -669,6 +756,8 @@ class OpponentAwareness:
             bvx, bvy = self.ego.vector_to_body(t.vx, t.vy)
             if bvx < 0.0:
                 continue
+            if followable_only and self._skip_static(t):
+                continue
             out.append((bx, by, bvx, bvy, bx + t.near_dx, t.near_range))
         return out
 
@@ -687,7 +776,15 @@ class OpponentAwareness:
         """
         return self.moving_body() + self._held_body()
 
-    def _held_body(self):
+    def _skip_static(self, t) -> bool:
+        """A static-confirmed track is not followed: only the follow cap ignores it. It stays an obstacle
+        for gap selection, clearance, TTC and the braking ceiling, which read the scan."""
+        if not t.static_confirmed:
+            return False
+        self.static_skipped.append(t.static_residual)
+        return True
+
+    def _held_body(self, followable_only: bool = False):
         """Relevant confirmed cars whose moving latch has recently released."""
         out = []
         p = self.params
@@ -762,8 +859,8 @@ class OpponentAwareness:
         This is the part FollowCapMemory may hold after the car is lost.
         """
         moving_cap = self._follow_over(
-            self.moving_body(), None if passing else self.params.relevant_lateral, True)
-        held_cap = self._follow_over(self._held_body(), self.params.relevant_lateral, True)
+            self.moving_body(True), None if passing else self.params.relevant_lateral, True)
+        held_cap = self._follow_over(self._held_body(True), self.params.relevant_lateral, True)
         return min(moving_cap, held_cap)
 
     def _on_my_arc(self, near_x: float, y: float) -> bool:
@@ -823,10 +920,10 @@ class OpponentAwareness:
         # Off the arc: only on scans that see it, so FollowCapMemory cannot hold
         # a wall fragment's ceiling after the fragment has gone.
         lateral = None if passing else self.params.relevant_lateral
-        abort_cap = min(self._follow_over(self.moving_body(), lateral, False),
-                        self._follow_over(self._held_body(), self.params.relevant_lateral, False))
+        abort_cap = min(self._follow_over(self.moving_body(True), lateral, False),
+                        self._follow_over(self._held_body(True), self.params.relevant_lateral, False))
         if not passing:
-            for m in self.moving_body() + self._held_body():
+            for m in self.moving_body(True) + self._held_body(True):
                 if m[4] <= self.front_x and m[0] > self.centre_x:
                     abort_cap = min(abort_cap, max(
                         self.params.follow_floor,

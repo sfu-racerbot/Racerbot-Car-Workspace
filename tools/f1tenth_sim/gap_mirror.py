@@ -549,6 +549,8 @@ class GapController:
         # gap_follow_node: speed only, on the same tick, before the no_safe_gap stop.
         # The alongside-abort ceiling is added after the memory, never held by it.
         if self.opponents is not None:
+            if follow_cap == math.inf and self.opponents.static_skipped:
+                self.opponents.follow_memory.clear()      # as in gap_follow_node
             follow_cap, held = self.opponents.follow_memory.update(
                 follow_cap, step * CONTROL_DT)
             follow_cap = min(follow_cap, alongside_cap)
