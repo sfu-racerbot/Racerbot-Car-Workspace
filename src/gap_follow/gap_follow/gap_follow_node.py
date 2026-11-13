@@ -669,8 +669,10 @@ class GapFollowNode(Node):
                 and 90.0 <= self.reverse_band[0] < self.reverse_band[1] <= 135.0):
             raise ValueError(
                 'reverse_escape_rear_band_lo_deg and _hi_deg must be finite, with 90 <= lo < hi <= 135 deg')
-        # ValueError from the constructor names the argument that is out of range.
-        self.reverse = reverse_escape.ReverseEscape(
+        # ValueError from the constructor names the argument that is out of range. Built only when the feature
+        # is on: with it off there is no state machine at all (self.reverse is None), so no code path can command
+        # a negative speed.
+        self.reverse = None if not self.enable_reverse_escape else reverse_escape.ReverseEscape(
             wait_sec=float(self.get_parameter('reverse_escape_wait_sec').value),
             speed=float(self.get_parameter('reverse_escape_speed').value),
             max_distance=float(self.get_parameter('reverse_escape_max_distance').value),
@@ -1481,7 +1483,7 @@ class GapFollowNode(Node):
 
     def _scan_step(self, scan: LaserScan):
         self.last_scan_time = self.get_clock().now()
-        if self.enable_reverse_escape:
+        if self.reverse is not None:
             self._reverse_tick_start(scan)
 
         deadman_ok, stop_state, stop_detail = self._deadman_status()
@@ -1514,7 +1516,7 @@ class GapFollowNode(Node):
         # they must never trigger the emergency stop, but must stay
         # non-free for gap selection -- see gap_logic.sanitize_ranges.
         clean, valid = gap_logic.sanitize_ranges(scan.ranges, self.max_range, scan.range_min)
-        if self.enable_reverse_escape:
+        if self.reverse is not None:
             self._reverse_rear_check(scan)
         self.opponent_mode = None
         if self.opponents is not None:
@@ -2772,7 +2774,7 @@ class GapFollowNode(Node):
         return now, min(self.command_slew_max_dt, max(0.0, elapsed))
 
     def _publish_drive(self, steering_angle: float, speed: float, now=None):
-        if self.enable_reverse_escape:
+        if self.reverse is not None:
             override = self._reverse_override(speed)
             if override is not None:
                 # Straight, at most reverse_escape_speed, no ramp. Every command goes through here, so the deadman

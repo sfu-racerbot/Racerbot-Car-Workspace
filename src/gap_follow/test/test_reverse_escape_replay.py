@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURE = os.path.join(HERE, 'data', 'nose_in_rb2_20261111-142254.npz')
 CONFIG = os.path.join(HERE, '..', 'config', 'gap_follow.yaml')
 DT = 0.025
+TEST_ONLY_DRIVE = ['-p', 'drive_topic:=/test_only/drive']
 
 
 def replay(monkeypatch, extra):
@@ -28,7 +29,7 @@ def replay(monkeypatch, extra):
     args = ['--ros-args']
     for file in layered(CONFIG, 'gap_follow.yaml', 'rb2'):
         args += ['--params-file', file]
-    rclpy.init(args=[*args, *extra, '-p', 'drive_topic:=/test_only/drive'])
+    rclpy.init(args=[*args, *extra, *TEST_ONLY_DRIVE])
     node = GapFollowNode()
     data = np.load(FIXTURE)
     sent = []

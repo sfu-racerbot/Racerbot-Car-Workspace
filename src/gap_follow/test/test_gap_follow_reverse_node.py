@@ -289,6 +289,7 @@ def test_no_safe_gap_stopped_is_blocked_ahead(rig):
 def test_feature_off_never_goes_negative_over_the_whole_scenario(rig, use_config):
     r = rig((), use_config=use_config)
     assert r.node.enable_reverse_escape is False
+    assert r.node.reverse is None                                         # off is structural: no state machine exists
     r.drive_up()
     speeds = [r.tick(speed=0.0)[1] for _ in range(400)]
     speeds += [r.tick(speed=-0.30)[1] for _ in range(100)]
@@ -301,7 +302,8 @@ def test_feature_off_never_goes_negative_over_the_whole_scenario(rig, use_config
     ('reverse_escape_wait_sec', '0.2', 'wait_sec'), ('reverse_escape_max_attempts', '4', 'max_attempts'),
     ('reverse_escape_rear_band_hi_deg', '140.0', 'rear_band')])
 def test_bad_parameters_refuse_to_start(name, value, match):
-    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG), '-p', f'{name}:={value}', *TEST_ONLY_DRIVE])
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG), '-p', 'enable_reverse_escape:=true',
+                          '-p', f'{name}:={value}', *TEST_ONLY_DRIVE])
     try:
         with pytest.raises(ValueError, match=match):
             GapFollowNode()
