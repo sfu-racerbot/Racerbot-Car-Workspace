@@ -77,3 +77,22 @@ tests pass unedited). Follow-bound ticks by source (live law, live alongside cei
 
 Acceptance (< 20 follow ticks per seed) is not met: the hold and the memory keep 48-159. Replay fixture wall_rb1_20261111-155542.npz
 (episode 22.24 s, pure wall): follow-bound ticks 56 off, 46 on with the hold exempt, 6 with the hold also gated.
+
+## Proven movers: candidate rules (2026-11-13, controller ruling on the hold)
+
+`proof_report` in range_rate_study.py. Wall tracks = tracks followed during wall episodes; real tracks = tracks with >= 4 truly-moving
+ticks in real episodes. Delays are from the first truly-moving tick (the truth label needs a 0.2 s look-back, so delays are negative:
+every real track is proven before it can be labelled moving).
+
+| rule | 155542 wall proven | 153721 wall proven | real tracks proven (155542: 99, 128, 63, 44, 130, 180, 377) |
+|---|---|---|---|
+| P1 radial median >= 0.35, 1 tick | 14/14 | 10/10 | 7/7 |
+| P2 radial median >= 0.5, 3 ticks | 14/14 | 9/10 | 7/7 |
+| P3 P2 or tangential >= 2.0, 3 ticks | 14/14 | 10/10 | 7/7 |
+| P4 P2 or tangential >= 2.5, 3 ticks | 14/14 | 10/10 | 7/7 |
+
+P2 is chosen (fewest wall tracks proven), but no candidate separates walls from cars: every wall-episode track is proven on run
+155542. Example, replay fixture wall_rb1_20261111-155542.npz, track 20 (the wall object): radial window median 0.63-0.77 m/s and
+tangential 2.2-2.9 m/s on ticks 64-73 (proof on tick 66) while the car is in a hard turn, tracker speed 3 m/s, then 0.1 m/s at rest.
+The residuals are not zero for a wall during a steering transition (the steering-model yaw rate lags the real one), which is also what
+makes the tracker call it a mover.

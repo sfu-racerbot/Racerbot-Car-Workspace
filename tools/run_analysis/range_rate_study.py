@@ -341,6 +341,57 @@ def tangential_report(rows, eps, label, S=0.35):
     return result
 
 
+PROOF_RULES = {
+    "P1": dict(radial=(0.35, 1), tangential=None),
+    "P2": dict(radial=(0.5, 3), tangential=None),
+    "P3": dict(radial=(0.5, 3), tangential=(2.0, 3)),
+    "P4": dict(radial=(0.5, 3), tangential=(2.5, 3)),
+}
+
+
+def proof_tick(rows, track_id, ticks, rule):
+    """First row index at which ``track_id`` is a proven mover under ``rule`` (sticky), or None. Radial: window median |radial| >= x
+    on n consecutive ticks of this track; tangential the same, either one proves it."""
+    streak = {"radial": 0, "tangential": 0}
+    for k in ticks:
+        rad, tang = window_medians(rows, track_id, k)
+        for name, val in (("radial", rad), ("tangential", tang)):
+            spec = rule[name]
+            streak[name] = streak[name] + 1 if spec and math.isfinite(val) and val >= spec[0] else 0
+            if spec and streak[name] >= spec[1]:
+                return k
+    return None
+
+
+def proof_report(rows, eps, label):
+    wall, real = classify(eps)
+    ticks_of = {}
+    for k, r in enumerate(rows):
+        for tid in r["rr"]:
+            ticks_of.setdefault(tid, []).append(k)
+    wall_ids = {rows[k]["obj"]["track"] for e in wall for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1) if rows[k]["obj"]}
+    moving_ticks = {}
+    for e in real:
+        for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1):
+            o = rows[k]["obj"]
+            if o and track_truth(rows, k, o["track"]) == "moving":
+                moving_ticks.setdefault(o["track"], []).append(k)
+    real_ids = {t: v for t, v in moving_ticks.items() if len(v) >= 4}
+    print(f"== PROOF {label}: {len(wall_ids)} wall-episode tracks, {len(real_ids)} real tracks (>= 4 truly-moving ticks)")
+    out = {}
+    for name, rule in PROOF_RULES.items():
+        wall_proven = [t for t in wall_ids if proof_tick(rows, t, ticks_of.get(t, []), rule) is not None]
+        line = []
+        for t, mv in sorted(real_ids.items(), key=lambda kv: rows[kv[1][0]]["t"]):
+            k = proof_tick(rows, t, ticks_of[t], rule)
+            delay = (rows[k]["t"] - rows[mv[0]]["t"]) if k is not None else math.nan
+            line.append((t, len(mv), delay))
+        print(f"   {name}: wall tracks proven {len(wall_proven)}/{len(wall_ids)}; real: "
+              + ", ".join(f"track {t} ({n} moving ticks) delay {'never' if math.isnan(d) else f'{d:.3f}s'}" for t, n, d in line))
+        out[name] = (len(wall_proven), len(wall_ids), line)
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run")
@@ -352,6 +403,7 @@ def main(argv=None) -> int:
     report(rows, eps, Path(args.run).name)
     gate_report(rows, eps, Path(args.run).name)
     tangential_report(rows, eps, Path(args.run).name)
+    proof_report(rows, eps, Path(args.run).name)
     return 0
 
 

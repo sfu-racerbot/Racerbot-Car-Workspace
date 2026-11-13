@@ -555,7 +555,8 @@ class GapController:
             self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())   # as in gap_follow_node
             follow_cap, held = self.opponents.follow_memory.update(
                 follow_cap, step * CONTROL_DT,
-                self.opponents.follow_cap_track if follow_cap != math.inf else None)
+                self.opponents.follow_cap_track if follow_cap != math.inf else None,
+                self.opponents.follow_cap_remember)
             follow_cap = min(follow_cap, alongside_cap)
             if held:
                 self.opponent_mode = ("follow_memory" if alongside_cap == math.inf

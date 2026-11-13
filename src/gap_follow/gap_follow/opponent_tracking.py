@@ -306,6 +306,9 @@ class Track:
     prev_bearing: float = math.nan  # nearest-beam bearing at that sighting
     samples: list = field(default_factory=list)   # (clock, radial residual, tangential residual) m/s, newest last
     _confirmed: bool = False
+    proven_mover: bool = False   # sticky: its own residuals showed it moving (P2), never reset for the track's life
+    _proof_streak: int = 0
+    has_evidence: bool = False   # sticky: its residual window was ever full enough (>= 4 samples) to judge it
     static_residual: float = math.nan  # median |radial residual| of the window when it was last evaluated
     static_tangential: float = math.nan  # median |tangential residual| likewise
 
@@ -323,6 +326,8 @@ STATIC_EXPIRY_SEC = 0.6    # s, a residual sample older than this is not used
 STATIC_NEWEST = 8          # samples at most
 STATIC_MIN_SAMPLES = 4     # fewer than this: not confirmed (a missing sample never confirms)
 STATIC_MAX_DT = 0.25       # s, between two sightings of a track; longer or not positive gives no sample
+PROOF_RADIAL = 0.5         # m/s, window median |radial residual| that proves a mover (rule P2) ...
+PROOF_TICKS = 3            # ... on this many consecutive scans of the track
 
 
 @dataclass
@@ -380,7 +385,13 @@ class OpponentTracker:
 
     def _confirm_static(self, t: Track):
         """static_confirmed = at least 4 radial and 4 tangential samples no older than 0.6 s (the newest 8) and each
-        median |residual| strictly below its limit. Anything else is not confirmed: today's behaviour."""
+        median |residual| strictly below its limit. Anything else is not confirmed: today's behaviour.
+
+        proven_mover (sticky): the radial window median reached PROOF_RADIAL on PROOF_TICKS consecutive scans.
+        With the gate on, a track that was judged by its residuals (has_evidence) and never proven is neither held
+        after it stops nor has its follow cap remembered: a wall the tracker latched as a mover from noise. A track
+        with no residual evidence at all (no range data, fewer than 4 samples ever) is treated as today.
+        """
         limit = self.params.follow_static_radial_speed
         tangential_limit = self.params.follow_static_tangential_speed
         t._confirmed = False
@@ -390,9 +401,16 @@ class OpponentTracker:
         fresh = [(r, q) for c, r, q in t.samples if self.clock - c <= STATIC_EXPIRY_SEC + 1e-12]
         radial = [r for r, _q in fresh]
         across = [q for _r, q in fresh if math.isfinite(q)]
+        if len(radial) >= STATIC_MIN_SAMPLES:
+            t.has_evidence = True
+            t.static_residual = float(np.median(np.abs(radial)))
+            t._proof_streak = t._proof_streak + 1 if t.static_residual >= PROOF_RADIAL else 0
+            if t._proof_streak >= PROOF_TICKS:
+                t.proven_mover = True
+        else:
+            t._proof_streak = 0
         if len(radial) < STATIC_MIN_SAMPLES or len(across) < STATIC_MIN_SAMPLES:
             return
-        t.static_residual = float(np.median(np.abs(radial)))
         t.static_tangential = float(np.median(np.abs(across)))
         t._confirmed = t.static_residual < limit and t.static_tangential < tangential_limit
 
@@ -666,7 +684,7 @@ class FollowCapMemory:
         if self._source is not None and self._source in static_ids:
             self._cap, self._cap_t, self._source = math.inf, None, None
 
-    def update(self, follow_cap: float, t_s: float, source=None) -> tuple:
+    def update(self, follow_cap: float, t_s: float, source=None, remember: bool = True) -> tuple:
         if self.memory_sec == 0.0:
             return follow_cap, False
         if not math.isfinite(t_s):
@@ -681,7 +699,7 @@ class FollowCapMemory:
         if follow_cap != math.inf:
             # A finite cap is stored. -inf is not a cap at all and is passed
             # through untouched: the memory must never raise a speed.
-            if math.isfinite(follow_cap):
+            if math.isfinite(follow_cap) and remember:
                 self._cap, self._cap_t, self._source = follow_cap, t_s, source
             return follow_cap, False
         if self._cap_t is not None and t_s - self._cap_t <= self.memory_sec + _HOLD_TOLERANCE_SEC:
@@ -718,6 +736,7 @@ class OpponentAwareness:
         # Median |radial residual| (m/s) of each static-confirmed track this tick's follow cap skipped.
         self.static_skipped = []
         self.follow_cap_track = None     # id of the track that set the last follow_law_cap (None: none/unknown)
+        self.follow_cap_remember = True  # False: the gate is on and that track is not a proven mover
         self._over_src = None
         self.follow_memory = FollowCapMemory(params.follow_memory_sec)
 
@@ -748,6 +767,7 @@ class OpponentAwareness:
             world.append((wx, wy, d.near_x - d.x, d.near_range, d.near_bearing))
         self.static_skipped = []
         self.follow_cap_track = None
+        self.follow_cap_remember = True
         if dt is None:
             for wx, wy, near_dx, near_range, _bearing in world:
                 self.tracker.tracks.append(Track(wx, wy, near_dx=near_dx,
@@ -803,6 +823,9 @@ class OpponentAwareness:
         """
         return self.moving_body() + self._held_body()
 
+    def _gate_on(self) -> bool:
+        return self.params.follow_static_radial_speed > 0.0 and self.params.follow_static_tangential_speed > 0.0
+
     def _skip_static(self, t) -> bool:
         """A static-confirmed track is not followed: only the follow cap ignores it. It stays an obstacle
         for gap selection, clearance, TTC and the braking ceiling, which read the scan."""
@@ -821,6 +844,8 @@ class OpponentAwareness:
             if (t.moving or not t.confirmed_car
                     or t.stopped_sec > p.stopped_release_sec + 1e-12):
                 continue
+            if self._gate_on() and t.has_evidence and not t.proven_mover:
+                continue          # judged by its residuals and never seen moving: a static obstacle, not a car to hold
             bx, by = self.ego.to_body(t.x, t.y)
             if (bx <= -p.radius or abs(by) > p.relevant_lateral
                     or math.hypot(bx, by) > p.max_range):
@@ -890,6 +915,8 @@ class OpponentAwareness:
         moving_src = self._over_src
         held_cap = self._follow_over(self._held_body(True), self.params.relevant_lateral, True)
         self.follow_cap_track = self._track_id_of(moving_src if moving_cap <= held_cap else self._over_src)
+        self.follow_cap_remember = (not self._gate_on()) or not any(
+            t.track_id == self.follow_cap_track and t.has_evidence and not t.proven_mover for t in self.tracker.tracks)
         return min(moving_cap, held_cap)
 
     def _track_id_of(self, body):
