@@ -198,12 +198,18 @@ def main(argv=None) -> int:
     ap.add_argument("--imu-topic", default="/imu/vesc/data")
     ap.add_argument("--car", default="")
     ap.add_argument("--json", default="")
+    ap.add_argument("--max-steering-change", type=float, default=0.03,
+                    help="rad over the window; the plan's 0.03 leaves few samples on a pure pursuit run")
+    ap.add_argument("--max-long-accel", type=float, default=0.5, help="m/s^2")
+    ap.add_argument("--window", type=float, default=0.3, help="s")
     args = ap.parse_args(argv)
     asked, acc, gyro = [], [], []
     for run in args.runs:
         v, yaw, lat, steer, t, bias, count = per_run_samples(run, args.loc, args.imu_topic)
         print(f"{Path(run).name}: removed bias {bias:+.3f} m/s^2 from {count} straight samples")
-        mask = steady_corners(t, v, yaw, lat, steer)
+        mask = steady_corners(t, v, yaw, lat, steer, window=args.window,
+                              max_steering_change=args.max_steering_change,
+                              max_long_accel=args.max_long_accel)
         asked.append(asked_lateral_accel(v, steer)[mask])
         acc.append(np.abs(lat)[mask])
         gyro.append(np.abs(v * yaw)[mask])
