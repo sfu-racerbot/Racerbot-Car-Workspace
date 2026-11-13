@@ -95,34 +95,53 @@ def test_no_straights_means_no_bias_estimate():
     assert np.array_equal(corrected, np.full(n, 3.4))   # untouched, not guessed
 
 
-def _rows(delivered, n=100, asked=3.0):
-    return [{'low': asked - 0.5, 'high': asked + 0.5, 'asked': asked, 'n': n,
+def _rows(delivered, n=100, centre=3.0):
+    return [{'low': centre - 0.25, 'high': centre + 0.25, 'asked': centre, 'n': n,
              'median': delivered, 'p90': delivered}]
 
 
-def test_a_slide_is_excluded_from_the_sustained_limit():
-    # gyro says 5, accelerometer says 3: the gyro keeps reading yaw while the path straightens.
-    slide = grip_truth.sustained_limit(_rows(3.0, asked=6.0), _rows(5.0, asked=6.0))
-    grip = grip_truth.sustained_limit(_rows(3.0, asked=3.0), _rows(3.1, asked=3.0))
-    assert math.isnan(slide)
-    assert grip == pytest.approx(3.0, abs=1e-9)  # accelerometer median of the agreeing bin
+def test_sustained_limit_is_the_plateau_of_a_curve_that_rises_then_falls():
+    # gyro-basis medians: rising to 3.0 at a 3.75 ask, then falling past the tyre's peak
+    gyro = (_rows(2.2, centre=2.25) + _rows(2.7, centre=2.75) + _rows(2.9, centre=3.25)
+            + _rows(3.0, centre=3.75) + _rows(2.6, centre=4.5) + _rows(2.4, centre=5.5))
+    limit, peak = grip_truth.sustained_limit(gyro)
+    assert limit == pytest.approx(3.0, abs=1e-12)  # m/s^2, the largest median
+    assert peak == pytest.approx(3.75, abs=1e-12)  # m/s^2, that bin's centre (3.5-4.0)
 
 
-def test_sustained_limit_takes_the_highest_agreeing_bin_with_enough_samples():
-    acc = _rows(2.8, asked=3.0) + _rows(3.2, asked=5.0) + _rows(3.3, asked=7.0, n=49)
-    gyro = _rows(2.9, asked=3.0) + _rows(3.3, asked=5.0) + _rows(3.3, asked=7.0, n=49)
-    # the 7.0 bin has 49 < 50 samples; the 5.0 bin agrees within 15% (3.2 against 3.3)
-    assert grip_truth.sustained_limit(acc, gyro) == pytest.approx(3.2, abs=1e-9)  # m/s^2
+def test_bins_under_fifty_samples_give_nan_for_both_numbers():
+    gyro = _rows(3.0, n=49, centre=3.75)
+    limit, peak = grip_truth.sustained_limit(gyro)
+    assert math.isnan(limit) and math.isnan(peak)
+    assert math.isnan(grip_truth.accel_over_gyro(_rows(3.5, n=49, centre=3.75), gyro))
 
 
-def test_agreement_boundary_is_fifteen_percent_of_the_gyro_value():
-    assert grip_truth.sustained_limit(_rows(3.0), _rows(3.0 / 0.85)) == pytest.approx(3.0)  # exactly 15%
-    assert math.isnan(grip_truth.sustained_limit(_rows(3.0), _rows(3.0 / 0.85 * 1.01)))      # just past it
+def test_exactly_fifty_samples_qualify():
+    limit, peak = grip_truth.sustained_limit(_rows(3.0, n=50, centre=3.75))
+    assert limit == pytest.approx(3.0, abs=1e-12)  # m/s^2
+    assert peak == pytest.approx(3.75, abs=1e-12)  # m/s^2
+
+
+def test_an_accelerometer_25_percent_above_the_gyro_changes_nothing_but_the_roll_indicator():
+    gyro = _rows(2.9, centre=3.25) + _rows(3.0, centre=3.75)
+    acc = _rows(2.9 * 1.25, centre=3.25) + _rows(3.0 * 1.25, centre=3.75)
+    limit, peak = grip_truth.sustained_limit(gyro)
+    assert limit == pytest.approx(3.0, abs=1e-12)  # m/s^2, the accelerometer is not consulted
+    assert grip_truth.accel_over_gyro(acc, gyro) == pytest.approx(1.25, abs=0.01)
+
+
+def test_accel_over_gyro_is_the_median_ratio_over_qualifying_bins_only():
+    gyro = _rows(3.0, centre=2.75) + _rows(3.0, centre=3.25) + _rows(3.0, centre=3.75) + _rows(3.0, n=10, centre=4.5)
+    acc = _rows(3.3, centre=2.75) + _rows(3.6, centre=3.25) + _rows(3.9, centre=3.75) + _rows(30.0, n=10, centre=4.5)
+    # ratios 1.1, 1.2, 1.3 (the n=10 bin with ratio 10 is excluded): median 1.2
+    assert grip_truth.accel_over_gyro(acc, gyro) == pytest.approx(1.2, abs=1e-9)
 
 
 def test_empty_input_returns_an_empty_curve_and_nan_limit():
     assert grip_truth.curve(np.array([]), np.array([]), bins=((0.0, 1.0),)) == []
-    assert math.isnan(grip_truth.sustained_limit([], []))
+    limit, peak = grip_truth.sustained_limit([])
+    assert math.isnan(limit) and math.isnan(peak)
+    assert math.isnan(grip_truth.accel_over_gyro([], []))
 
 
 def test_nan_samples_are_dropped_not_propagated():
@@ -133,11 +152,14 @@ def test_nan_samples_are_dropped_not_propagated():
     assert rows[0]['median'] == pytest.approx(2.0, abs=1e-12)
 
 
-def test_analyse_reports_both_signals_and_their_ratio():
+def test_analyse_reports_both_signals_the_plateau_and_the_roll_indicator():
     t, speed, yaw, lat, steer = circle(seconds=20.0)
+    lat = lat * 1.25                                           # accelerometer 25% above speed * gyro
     result = grip_truth.analyse(t, speed, yaw, lat, steer, WHEELBASE, bins=((2.5, 3.5),), min_bin_samples=10)
     row = result['rows'][0]
-    assert row['acc_median'] == pytest.approx(3.0, abs=0.01)    # m/s^2
-    assert row['gyro_median'] == pytest.approx(3.0, abs=0.01)   # speed * yaw = 3 * 1
-    assert row['ratio'] == pytest.approx(1.0, abs=0.01)
-    assert result['sustained_limit'] == pytest.approx(3.0, abs=0.01)
+    assert row['acc_median'] == pytest.approx(3.75, abs=0.01)    # m/s^2
+    assert row['gyro_median'] == pytest.approx(3.0, abs=0.01)    # speed * yaw = 3 * 1
+    assert row['ratio'] == pytest.approx(1.25, abs=0.01)
+    assert result['sustained_limit'] == pytest.approx(3.0, abs=0.01)   # gyro basis
+    assert result['peak_asked'] == pytest.approx(3.0, abs=1e-9)        # bin 2.5-3.5 centre
+    assert result['accel_over_gyro'] == pytest.approx(1.25, abs=0.01)

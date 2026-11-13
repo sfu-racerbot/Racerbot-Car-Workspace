@@ -72,5 +72,7 @@
       "n": 1
     }
   ],
-  "sustained_limit": null
+  "sustained_limit": 3.5611453842254974,
+  "peak_asked": 4.5,
+  "accel_over_gyro": 1.3410788956161885
 }

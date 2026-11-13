@@ -7,9 +7,11 @@
 Asked is true speed squared times the commanded curvature (what the steering would
 deliver with perfect grip). Delivered is measured twice: by the accelerometer
 (linear_acceleration.y, bias-corrected and averaged over 0.2 s) and by true speed
-times the gyro. In a slide the gyro keeps reading yaw while the path straightens, so
-speed times gyro overstates grip and the accelerometer does not; where the two agree
-within 15% the grip is usable. Only steady cornering counts: steering and speed
+times the gyro. On steady corners speed times gyro IS the centripetal acceleration, so
+the sustained limit is the largest gyro-basis median among bins with 50 or more samples
+(the plateau; the curve falls past the tyre's peak), reported with the asked value at
+that bin. The accelerometer also reads body roll, so accelerometer over gyro is printed
+as a roll indicator, not a gate. Only steady cornering counts: steering and speed
 constant over 0.3 s. Needs runs located with loc.py, and a bag with the chosen IMU
 topic (our own launches record /imu/data and /imu/vesc/data; team A's launches record
 only /sensors/imu/raw, which this tool does not convert). The math is importable
@@ -31,7 +33,6 @@ STRAIGHT_YAW = 0.05       # rad/s, below this the car is on a straight
 BINS = ((0, .5), (.5, 1), (1, 1.5), (1.5, 2), (2, 2.5), (2.5, 3), (3, 3.5), (3.5, 4),
         (4, 5), (5, 6), (6, 8), (8, 12), (12, 30))
 AVERAGE_SEC = 0.2         # accelerometer averaging window
-AGREE = 0.15              # accelerometer and gyro agree within this fraction of the gyro value
 MIN_BIN_SAMPLES = 50
 
 
@@ -113,21 +114,32 @@ def curve(asked, delivered, bins=BINS, min_samples: int = 1) -> list:
     return rows
 
 
-def sustained_limit(acc_rows, gyro_rows, min_samples: int = MIN_BIN_SAMPLES,
-                    agree: float = AGREE) -> float:
-    """The accelerometer's median delivered in the highest bin that has ``min_samples`` or more
-    samples and where accelerometer and gyro agree within ``agree`` of the gyro value; NaN if
-    no bin qualifies."""
-    gyro = {(r["low"], r["high"]): r for r in gyro_rows}
+def sustained_limit(gyro_rows, min_samples: int = MIN_BIN_SAMPLES):
+    """(limit, peak_asked): the largest gyro-basis median delivered among bins with at least
+    ``min_samples`` samples, and the centre of that bin's asked range; (NaN, NaN) if none.
+
+    On steady corners true speed times gyro IS the centripetal acceleration, so the gyro
+    basis is the delivered grip. The accelerometer also reads body roll, so it is not used
+    here (advisor ruling at checkpoint 2, plan section 1.3)."""
     best = None
+    for row in gyro_rows:
+        if row["n"] >= min_samples and (best is None or row["median"] > best["median"]):
+            best = row
+    if best is None:
+        return math.nan, math.nan
+    return float(best["median"]), float((best["low"] + best["high"]) / 2.0)
+
+
+def accel_over_gyro(acc_rows, gyro_rows, min_samples: int = MIN_BIN_SAMPLES) -> float:
+    """Median over bins with at least ``min_samples`` of accelerometer median over gyro median.
+    A roll indicator (body roll adds g*sin(roll) to the accelerometer), not a gate; NaN if none."""
+    gyro = {(r["low"], r["high"]): r for r in gyro_rows}
+    ratios = []
     for row in acc_rows:
         other = gyro.get((row["low"], row["high"]))
-        if other is None or min(row["n"], other["n"]) < min_samples:
-            continue
-        if abs(row["median"] - other["median"]) <= agree * other["median"] + 1e-9:
-            if best is None or row["low"] > best["low"]:
-                best = row
-    return math.nan if best is None else float(best["median"])
+        if other is not None and min(row["n"], other["n"]) >= min_samples and other["median"] > 0:
+            ratios.append(row["median"] / other["median"])
+    return float(np.median(ratios)) if ratios else math.nan
 
 
 def analyse(t, speed, yaw_rate, lateral_accel, steering, wheelbase: float = WHEELBASE,
@@ -151,7 +163,9 @@ def _tables(asked, acc, gyro, bins, min_bin_samples) -> dict:
                          acc_median=r["median"], acc_p90=r["p90"],
                          gyro_median=g["median"], gyro_p90=g["p90"],
                          ratio=r["median"] / g["median"] if g["median"] > 0 else math.nan))
-    return dict(rows=rows, sustained_limit=sustained_limit(acc_rows, gyro_rows, min_bin_samples),
+    limit, peak = sustained_limit(gyro_rows, min_bin_samples)
+    return dict(rows=rows, sustained_limit=limit, peak_asked=peak,
+                accel_over_gyro=accel_over_gyro(acc_rows, gyro_rows, min_bin_samples),
                 samples=int(len(asked)))
 
 
@@ -190,6 +204,10 @@ def per_run_samples(run, loc_dir, topic):
     return (v[keep], a[keep, COL["gyro_z"]], lat, a[keep, COL["steer_cmd"]], t[keep], bias, count)
 
 
+def _finite(x):
+    return float(x) if math.isfinite(x) else None
+
+
 def main(argv=None) -> int:
     from run_analysis.loc import DEFAULT_OUT
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -223,7 +241,8 @@ def main(argv=None) -> int:
     for r in result["rows"]:
         print(f"{r['low']:4.1f}-{r['high']:4.1f} {r['n']:6d}  {r['acc_median']:7.2f} {r['acc_p90']:5.2f}"
               f"  {r['gyro_median']:7.2f} {r['gyro_p90']:5.2f}  {r['ratio']:5.2f}")
-    print(f"sustained_limit {result['sustained_limit']:.2f} m/s^2")
+    print(f"sustained_limit {result['sustained_limit']:.2f} m/s^2 (gyro basis) at asked {result['peak_asked']:.2f}; "
+          f"accel/gyro {result['accel_over_gyro']:.2f}")
     if args.json:
         car = args.car or next((p for p in Path(args.runs[0]).resolve().parts if p in ("rb1", "rb2")), "unknown")
         Path(args.json).write_text(json.dumps(dict(
@@ -231,7 +250,8 @@ def main(argv=None) -> int:
             criteria=dict(window=args.window, max_steering_change=args.max_steering_change,
                           max_long_accel=args.max_long_accel),
             curve=[dict(asked=r["asked"], delivered=r["acc_median"], n=r["n"]) for r in result["rows"]],
-            sustained_limit=result["sustained_limit"] if math.isfinite(result["sustained_limit"]) else None),
+            sustained_limit=_finite(result["sustained_limit"]), peak_asked=_finite(result["peak_asked"]),
+            accel_over_gyro=_finite(result["accel_over_gyro"])),
             indent=2))
     return 0
 
