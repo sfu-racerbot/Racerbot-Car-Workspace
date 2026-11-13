@@ -134,15 +134,46 @@ def test_no_curve_returns_the_clipped_steering():
     assert rm.understeer_steering(0.9, SPEED, WHEELBASE, None, MAX_STEER) == pytest.approx(MAX_STEER, abs=1e-12)
 
 
-def test_wanted_above_the_last_delivered_leaves_the_steering_alone():
-    # The car cannot deliver 7.0 m/s^2 (last delivered 5.5); steering harder loses grip, so no
-    # compensation: the input comes back, clipped (advisor addition at checkpoint 2).
-    s = steering_for_lateral(7.0)
-    assert lateral_of(s) > 5.5
-    out = rm.understeer_steering(s, SPEED, WHEELBASE, example_curve(), MAX_STEER)
-    assert out == pytest.approx(min(s, MAX_STEER), abs=1e-12)  # rad
-    huge = rm.understeer_steering(1.5, SPEED, WHEELBASE, example_curve(), MAX_STEER)
+def test_steering_is_continuous_across_the_grip_limit():
+    # Oracle: the curve's last delivered is 5.5 m/s^2. Just below it the output is the steering for
+    # asked[-1] = 10; just above it must not drop back to the kinematic steering (advisor correction:
+    # the earlier "unchanged above the last delivered" rule was a discontinuity there).
+    c = example_curve()
+    below = rm.understeer_steering(steering_for_lateral(5.5 - 1e-6), SPEED, WHEELBASE, c, MAX_STEER)
+    above = rm.understeer_steering(steering_for_lateral(5.5 + 1e-6), SPEED, WHEELBASE, c, MAX_STEER)
+    assert abs(above - below) < 1e-6   # rad
+
+
+def test_just_above_the_peak_the_output_holds_the_peak_ask_steering():
+    # Oracle: closed form atan(asked[-1] * wheelbase / speed^2) = atan(10 * 0.36 / 9).
+    c = example_curve()
+    for wanted in (5.5 + 1e-6, 7.0, 9.9):
+        out = rm.understeer_steering(steering_for_lateral(wanted), SPEED, WHEELBASE, c, MAX_STEER)
+        assert out == pytest.approx(math.atan(10.0 * WHEELBASE / SPEED ** 2), abs=1e-9)   # rad
+
+
+def test_wanted_at_or_above_the_last_asked_equals_the_clipped_input():
+    c = example_curve()
+    for wanted in (10.0, 12.0, 30.0):
+        s = steering_for_lateral(wanted)
+        out = rm.understeer_steering(s, SPEED, WHEELBASE, c, 1.4)
+        assert out == pytest.approx(min(s, 1.4), abs=1e-12)   # rad
+        assert rm.understeer_steering(-s, SPEED, WHEELBASE, c, 1.4) == pytest.approx(-min(s, 1.4), abs=1e-12)
+    huge = rm.understeer_steering(1.5, SPEED, WHEELBASE, c, MAX_STEER)
     assert huge == pytest.approx(MAX_STEER, abs=1e-12)   # still clipped
+
+
+def test_compensation_never_steers_less_than_the_clipped_input():
+    # Invariant over 200 seeded inputs: the curve only ever asks for more steering.
+    rng = random.Random(20261112)
+    c = example_curve()
+    for _ in range(200):
+        s = rng.uniform(-0.6, 0.6)
+        speed = rng.uniform(1.0, 6.0)
+        out = rm.understeer_steering(s, speed, WHEELBASE, c, MAX_STEER)
+        clipped = max(-MAX_STEER, min(MAX_STEER, s))
+        assert abs(out) >= abs(clipped) - 1e-12   # rad
+        assert out * clipped >= 0.0
 
 
 def test_non_finite_input_never_returns_nan():

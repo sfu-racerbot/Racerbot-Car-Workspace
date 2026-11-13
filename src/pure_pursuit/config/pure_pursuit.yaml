@@ -305,6 +305,18 @@ pure_pursuit_node:
     # here would reject every body_contact escape before it started. Must
     # sit below emergency_stop_clearance to ever be reachable at all.
     body_contact_escape_clearance: 0.0
+    # Crawl away from a wall alongside the body while the body's own arc is
+    # clear. Added 2026-11-12: rb2 20261111-152132 stopped 30.5 s (19.0-49.5 s)
+    # in body_contact with the right wall 0.18 m from the LiDAR (2.5 cm off
+    # the body) and 0.63 m free ahead; a flank contact never escapes (the
+    # directional gate). With this on, a non-touching flank contact crawls at
+    # emergency_escape_speed when the body rectangle, widened by
+    # flank_creep_margin a side (the stop floor is emergency_stop_clearance
+    # 0.03, so the body plus 1 cm), driven along the steering being asked for,
+    # meets no return within flank_creep_length (m). Touching the wall, or
+    # steering into it, still stops. 0 = off. Plan section 1.2.
+    flank_creep_length: 0.50
+    flank_creep_margin: 0.01
     scan_timeout_sec: 0.5
     max_range: 10.0   # range readings beyond this (and inf/NaN) are clipped/filled before any math touches them
 

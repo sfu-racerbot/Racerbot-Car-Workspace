@@ -245,6 +245,11 @@ class GapFollowNode(Node):
         # Crawl allowed once inside forward_stop_clearance, so a car that has
         # found its way out of a corner can take it instead of latching.
         self.declare_parameter('escape_creep_speed', 0.40)
+        # Crawl away from a wall alongside the body when the body's own arc is
+        # clear (gap_logic.body_arc_free_distance); 0 = off. See the
+        # speed stage and docs/superpowers/plans/2026-11-12-post-race-speed-program.md.
+        self.declare_parameter('flank_creep_length', 0.0)
+        self.declare_parameter('flank_creep_margin', 0.02)
 
         # Cornering anticipation: an extra speed cap from how much the
         # chosen gap's near-only bearing (gap_logic.near_gap_bearing)
@@ -493,6 +498,10 @@ class GapFollowNode(Node):
             self.get_parameter('forward_stop_fov_deg').value))
         self.escape_creep_speed = float(
             self.get_parameter('escape_creep_speed').value)
+        self.flank_creep_length = float(
+            self.get_parameter('flank_creep_length').value)
+        self.flank_creep_margin = float(
+            self.get_parameter('flank_creep_margin').value)
         self.enable_cornering_anticipation = bool(
             self.get_parameter('enable_cornering_anticipation').value)
         self.anticipation_near_depth = float(
@@ -628,6 +637,15 @@ class GapFollowNode(Node):
             raise ValueError(
                 'escape_creep_speed must be finite, positive, and no greater '
                 'than max(min_speed, 0.5) -- it is a crawl, not a drive speed')
+        if not (math.isfinite(self.flank_creep_length)
+                and 0.0 <= self.flank_creep_length <= 2.0):
+            raise ValueError(
+                'flank_creep_length must be finite and within [0, 2] m '
+                '(0 turns the flank creep off)')
+        if not (math.isfinite(self.flank_creep_margin)
+                and 0.0 <= self.flank_creep_margin <= 0.10):
+            raise ValueError(
+                'flank_creep_margin must be finite and within [0, 0.10] m')
         if not math.isfinite(self.forward_stop_fov) or not (
                 0.0 < self.forward_stop_fov <= self.forward_fov):
             raise ValueError(
@@ -1914,6 +1932,32 @@ class GapFollowNode(Node):
                     self.max_speed,
                 ),
             )
+        # Flank creep: the swept-path ceiling above is zero for any wall
+        # inside its band beside the body (a return alongside gives along < 0,
+        # clamped to 0), and the cone above reads clear, so a car 5 cm off a
+        # wall with open road ahead stopped for good (rb1 20261111-155542,
+        # 87.6-95.9 s). The crawl is allowed only when the body's own
+        # rectangle, driven along the arc the rack will drive this tick, meets
+        # no return within flank_creep_length: touching the wall, or steering
+        # into it, still stops. Never on an emergency or TTC tick.
+        flank_creeping = False
+        if (self.flank_creep_length > 0.0 and clearance_speed <= 0.0
+                and not creeping and not (emergency_tripped or ttc_tripped)
+                and gap_logic.body_arc_free_distance(
+                    raw_window, window_valid, beam_angles,
+                    math.tan(steering_angle) / self.wheelbase,
+                    self.car_width / 2.0 + self.flank_creep_margin,
+                    self.car_length, self.wheelbase, self.laser_offset_x,
+                    self.laser_offset_y,
+                    max_length=self.flank_creep_length) == math.inf):
+            clearance_speed = self.escape_creep_speed
+            creeping = True
+            flank_creeping = True
+            # A crawl away from a wall is not a launch: do not start the
+            # boost on it (it would drop the ramp and caps), and end one that
+            # is running, as the other escapes do.
+            launching = False
+            self.launch_boost.end('flank_creep')
         understeer_cap, understeer_off = self._understeer_cap(steering_angle, command_dt)
         # Launch boost: end it once the braking ceiling reaches the car, the car
         # turns, or the time/distance backstop runs out (launch_boost.step).
@@ -2092,7 +2136,10 @@ class GapFollowNode(Node):
                if launching else "")
             + (f", follow cap={follow_cap:.2f}m/s" if math.isfinite(follow_cap) and not launching else "")
             + (f", opponent mode={self.opponent_mode}" if self.opponent_mode else "")
-            + (f", CREEP (forward clearance {forward_clearance:.3f}m inside "
+            + (f", FLANK CREEP (wall alongside, body arc clear for "
+               f"{self.flank_creep_length:.2f}m; crawling away)"
+               if flank_creeping else
+               f", CREEP (forward clearance {forward_clearance:.3f}m inside "
                f"the {self.forward_stop_clearance:.3f}m reserve; crawling out)"
                if creeping else ""))
         # A trip that found a gap prefixes the *why* (the same detail the
@@ -2124,7 +2171,8 @@ class GapFollowNode(Node):
         # cannot be mistaken for a cap.
         intent_factors = [
             schema.factor('curve cap', normal_speed),
-            schema.factor('creep cap' if creeping else 'clearance cap',
+            schema.factor('flank creep' if flank_creeping
+                          else 'creep cap' if creeping else 'clearance cap',
                           clearance_speed),
         ]
         if used_fallback:
