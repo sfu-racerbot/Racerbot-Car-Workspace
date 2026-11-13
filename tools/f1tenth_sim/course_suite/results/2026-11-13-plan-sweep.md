@@ -6,7 +6,7 @@ Floor `sfu_course_2026_11_11_rb2` (grip scale 1.15), map racer (`delay_lqr`, rb2
 
 Not done / owed: mini_Oschersleben for P2 to P6 (the coupled builds ran over an hour each, so they were stopped; C0 and P1 are in the table). The understeer-curve variant was run for C0 and P2 only because no arm ranked (not the rule's "two best"); it fails in this simulator (13 and 17 contact runs): the node's compensation asks for up to 3.75 m/s^2 while this floor's tyres (2.94 x 1.15 peak, falling) deliver less past the peak, and the math-level mirror of the node's compensation (`start_replay.understeer_compensation`) is not validated against the node tick for tick. Treat it as inconclusive.
 
-Failed-pose standing start (s 0.00, 0.134 m right, +14.61 deg) with the cap on: C0 and P1 do not touch (right@14 about 0.22 m); P3, P4, P5 touch in 3/3 seeds within 2 m; P2 and P6 in 1 to 2 of 3 (c > 0 lines start differently). Real launch: 0.40 m right at s = 14 (cap not binding).
+Failed-pose standing start (s 0.00, 0.134 m right, +14.61 deg) with the cap on: C0 and P1 do not touch (right@14 about 0.22 m); P3, P4, P5 touch in 3/3 seeds within 2 m; P2 in 2 of 3 and P6 in 1 of 3 (the c > 0 lines start differently). Real launch: 0.40 m right at s = 14 (cap not binding).
 
 | arm | course | line | est lap s | median flying lap s | contact seeds | unfinished seeds | online cap binding | reactive ticks |
 |---|---|---|---|---|---|---|---|---|
