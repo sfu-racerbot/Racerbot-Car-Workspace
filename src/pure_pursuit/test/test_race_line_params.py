@@ -19,7 +19,7 @@ def test_car_physics_and_controller_stop(car, angle, grip, accel, gain, delay, m
     assert asdict(cfg.physics) == dict(
         a_lat_left=grip, a_lat_right=grip, a_accel=accel, a_brake=3.,
         v_max=5., v_min=.5, wheelbase=.36, max_steering_angle=angle,
-        linkage_gain=gain, steering_rate=1., steering_delay=.1, speed_delay=delay)
+        linkage_gain=gain, steering_rate=1., steering_delay=.1, speed_delay=delay, grip_coupling=0.)
     from racerbot_car.layers import effective_config
     assert cfg.emergency_stop_distance == effective_config(
         'pure_pursuit.yaml', 'pure_pursuit_node', car)['emergency_stop_distance']
@@ -52,6 +52,8 @@ def test_parameter_mapping_preserves_handedness_and_all_builder_knobs():
     ('profile_max_accel', -1., 'a_accel'),
     ('profile_steering_delay', float('nan'), 'steering_delay'),
     ('profile_speed_delay', float('inf'), 'speed_delay'),
+    ('profile_grip_coupling', 1.5, 'grip_coupling'),
+    ('profile_grip_coupling', float('nan'), 'grip_coupling'),
     ('race_line_mode', 'unknown', 'unknown mode'),
     ('waypoint_spacing', 0., 'spacing'),
 ])
@@ -69,3 +71,14 @@ def test_missing_physics_is_not_silently_replaced_with_another_cars_default():
     # oracle: spec, no implicit CarPhysics (car 2) default for an incomplete config.
     with pytest.raises(KeyError, match='profile_max_lateral_accel_right'):
         RaceLineConfig.from_params(values)
+
+
+def test_grip_coupling_parameter_reaches_the_physics_and_defaults_to_the_box():
+    values = load_params('rb1')
+    # oracle: the shared default is 0 (a box, every line planned before 2026-11-12).
+    assert values['profile_grip_coupling'] == 0.0
+    assert RaceLineConfig.from_params(values).physics.grip_coupling == 0.0
+    values['profile_grip_coupling'] = 0.5
+    assert RaceLineConfig.from_params(values).physics.grip_coupling == 0.5
+    del values['profile_grip_coupling']          # an older parameter set without the key keeps the box
+    assert RaceLineConfig.from_params(values).physics.grip_coupling == 0.0

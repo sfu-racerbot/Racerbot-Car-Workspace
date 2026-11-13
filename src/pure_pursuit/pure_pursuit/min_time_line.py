@@ -47,6 +47,10 @@ class CarPhysics:
     steering_rate: float = 1.0         # rad/s, pure_pursuit.yaml max_steering_rate
     steering_delay: float = 0.10       # s, the servo's fitted delay (4 ticks at 40 Hz)
     speed_delay: float = 0.10          # s, the speed loop's fitted delay (3 ticks) plus one command period
+    # How much of the tyres' grip a station's cornering uses up of the acceleration and braking available
+    # there, 0 to 1: 0 is a box (the lateral and longitudinal limits independent, how every line was planned
+    # until 2026-11-12), 1 the full friction ellipse. See _accel_brake.
+    grip_coupling: float = 0.0
 
     def __post_init__(self):
         for name in ('a_lat_left', 'a_lat_right', 'a_accel', 'a_brake', 'v_max', 'v_min', 'wheelbase',
@@ -60,6 +64,8 @@ class CarPhysics:
                 raise ValueError(f'{name} must be finite and >= 0, got {value!r}')
         if self.v_min > self.v_max:
             raise ValueError('v_min cannot exceed v_max')
+        if not (math.isfinite(self.grip_coupling) and 0.0 <= self.grip_coupling <= 1.0):
+            raise ValueError(f'grip_coupling must be finite and in [0, 1], got {self.grip_coupling!r}')
 
     @property
     def curvature_limit(self) -> float:
@@ -109,7 +115,7 @@ def speed_profile(xy, physics: CarPhysics, passes: int = 3):
         with np.errstate(divide='ignore'):
             v_rate = physics.curvature_rate / np.maximum(slope, 1e-9)
         speed = np.minimum(cap, v_rate)
-        speed = _accel_brake(speed, seg, physics)
+        speed = _accel_brake(speed, seg, physics, kappa, grip)
         speed = _respond_early(speed, s, physics.speed_delay)
     return np.maximum(speed, physics.v_min), kappa, seg
 
@@ -144,8 +150,8 @@ def _respond_early(speed, s, delay):
     return out
 
 
-def _accel_brake(cap, seg, physics):
-    """Forward (acceleration) and backward (braking) passes round a closed loop."""
+def _accel_brake_box(cap, seg, physics):
+    """Forward (acceleration) and backward (braking) passes round a closed loop, the limits independent."""
     # In squared speed w = v^2 the forward pass w[j] = min(cap[j], w[j-1] + 2 a ds) has the closed form
     # w[j] = 2 a S[j] + min over k <= j of (cap[k] - 2 a S[k]), S the distance along the path: a running
     # minimum. Two laps' worth of stations make the loop's closure exact (no corner is further than a lap
@@ -161,6 +167,80 @@ def _accel_brake(cap, seg, physics):
     accel = two_a * S + np.minimum.accumulate(w - two_a * S)
     brake = two_b * R + np.minimum.accumulate((w - two_b * R)[::-1])[::-1]
     return np.sqrt(np.minimum(accel, brake)[n:2 * n])
+
+
+# Damped fixed-point rounds of the combined-grip solution (_accel_brake_coupled).
+_COUPLING_ROUNDS = 4
+
+
+def _envelope_forward(cap2, a2ds):
+    """w[j] = A[j] + min_{k<=j}(cap2[k] - A[k]), A[j] = sum_{i<j} a2ds[i]: the acceleration envelope of the
+    caps for a station-dependent limit (a2ds[i] = 2 a ds of segment i to i+1), a running minimum on the last axis."""
+    A = np.concatenate([np.zeros(a2ds.shape[:-1] + (1,)), np.cumsum(a2ds, axis=-1)[..., :-1]], axis=-1)
+    return A + np.minimum.accumulate(cap2 - A, axis=-1)
+
+
+def _envelope_backward(cap2, b2ds):
+    """The mirror: w[j] = B[j] + min_{k>=j}(cap2[k] - ... ), B[j] = sum_{i>=j} b2ds[i] (the braking envelope)."""
+    B = np.cumsum(b2ds[..., ::-1], axis=-1)[..., ::-1]
+    return B + np.minimum.accumulate((cap2 - B)[..., ::-1], axis=-1)[..., ::-1]
+
+
+def _accel_brake_coupled(cap, seg, physics, kappa, grip, rounds=None):
+    """Acceleration and braking limits round a closed loop, sharing the tyres with the cornering.
+
+    Works on one path (n,) or a batch (B, n). At a station of speed v, curvature k and lateral grip g the
+    longitudinal authority shrinks with the cornering already using it,
+
+        use = min(1, (v^2 |k| / g)^2),     a_eff = a * sqrt(max(0, 1 - coupling * use)),
+
+    an ellipse at coupling 1 (a box, _accel_brake_box, at 0: that planned full braking and full cornering at
+    one station, 3.0 and 3.2 m/s^2 together being 4.4 m/s^2 on tyres that deliver about 3, 2026-11-12).
+    The limit depends on the speed it limits, so there is no closed form; but for a FIXED station-dependent
+    limit there is one, the running-minimum form of _accel_brake_box with A[j] = sum_{i<j} 2 a_acc[i] ds[i]
+    in place of 2 a S[j] (and B[j] likewise for braking). Let F(w) be one evaluation of it with the limits read
+    from the squared speed w (the acceleration limit at the station being left, the braking limit at the
+    station being entered; three laps tiled, the middle one kept). F is antitone: a slower plan leaves more
+    grip for longitudinal force, so w_a <= w_b pointwise gives F(w_a) >= F(w_b). The solution is the fixed
+    point w = F(w), found as
+
+        w = (box solution)^2                                    # an upper bound
+        repeat ``_COUPLING_ROUNDS`` times:  w = 0.5 w + 0.5 F(w)    # damped: converges quickly, not always feasible
+        u = max(w, F(w));  w = F(u)                              # feasibility projection
+
+    Why the projection makes ANY w feasible: u >= w, so F(u) <= F(w) <= u. The result F(u) is therefore at or
+    below u, the state its limits were read from, so those limits are at least what it needs: it is inside the
+    ellipse. (Undamped iterates oscillate between too slow and too fast and need an odd count and many rounds;
+    the damped rounds get within 0.6% of the converged lap in four and the projection removes the risk.)
+    """
+    c = physics.grip_coupling
+    rounds = _COUPLING_ROUNDS if rounds is None else rounds
+    cap = np.asarray(cap, dtype=float)
+    n = cap.shape[-1]
+    reps = [1] * (cap.ndim - 1) + [3]
+    box = _accel_brake_box(cap, seg, physics) if cap.ndim == 1 else _batch_accel_brake_box(cap, seg, physics)
+    cap2, ds = np.tile(cap ** 2, reps), np.tile(seg, reps)
+    k, g = np.abs(kappa), np.asarray(grip, dtype=float)
+
+    def F(w):
+        f = np.sqrt(np.maximum(0.0, 1.0 - c * np.minimum(1.0, (w * k / g) ** 2)))
+        f3 = np.tile(f, reps)
+        f_next = np.concatenate([f3[..., 1:], f3[..., -1:]], axis=-1)
+        w3 = np.minimum(_envelope_forward(cap2, 2.0 * physics.a_accel * f3 * ds),
+                        _envelope_backward(cap2, 2.0 * physics.a_brake * f_next * ds))
+        return w3[..., n:2 * n]
+
+    w = box ** 2
+    for _ in range(rounds):
+        w = 0.5 * w + 0.5 * F(w)
+    return np.sqrt(F(np.maximum(w, F(w))))
+
+
+def _accel_brake(cap, seg, physics, kappa=None, grip=None):
+    """The box at coupling 0 (exactly _accel_brake_box), else _accel_brake_coupled."""
+    if physics.grip_coupling == 0.0 or kappa is None:
+        return _accel_brake_box(cap, seg, physics)
+    return _accel_brake_coupled(cap, seg, physics, kappa, grip)
 
 
 def lap_time(xy, physics: CarPhysics) -> float:
@@ -212,7 +292,7 @@ def _batch_curvature(xy):
     return np.where(usable, 2.0 * cross / np.where(usable, denominator, 1.0), 0.0)
 
 
-def _batch_accel_brake(cap, seg, physics):
+def _batch_accel_brake_box(cap, seg, physics):
     n = cap.shape[1]
     w = np.tile(cap ** 2, (1, 3))
     ds = np.tile(seg, (1, 3))
@@ -222,6 +302,13 @@ def _batch_accel_brake(cap, seg, physics):
     accel = two_a * S + np.minimum.accumulate(w - two_a * S, axis=1)
     brake = two_b * R + np.minimum.accumulate((w - two_b * R)[:, ::-1], axis=1)[:, ::-1]
     return np.sqrt(np.minimum(accel, brake)[:, n:2 * n])
+
+
+def _batch_accel_brake(cap, seg, physics, kappa=None, grip=None):
+    """_accel_brake for every row (B, n): the box closed form at coupling 0, else _accel_brake_coupled."""
+    if physics.grip_coupling == 0.0 or kappa is None:
+        return _batch_accel_brake_box(cap, seg, physics)
+    return _accel_brake_coupled(cap, seg, physics, kappa, grip)
 
 
 def _batch_respond_early(speed, s, delay):
@@ -263,7 +350,7 @@ def _batch_speed_profile(xy, physics: CarPhysics, passes: int = 3):
         with np.errstate(divide='ignore'):
             v_rate = physics.curvature_rate / np.maximum(slope, 1e-9)
         speed = np.minimum(cap, v_rate)
-        speed = _batch_accel_brake(speed, seg, physics)
+        speed = _batch_accel_brake(speed, seg, physics, kappa, grip)
         speed = _batch_respond_early(speed, s, physics.speed_delay)
     return np.maximum(speed, physics.v_min), kappa, seg
 

@@ -1,4 +1,6 @@
 """Oracle: 2026-11-06 car_measure runs 163633, 170803, 171030 and wiring brief."""
+from pathlib import Path
+
 import pytest
 
 from racerbot_car.guards import check_calibration_overlay
@@ -38,3 +40,13 @@ def test_line_calibration_allows_physics_but_not_safety_or_mode(tmp_path):
         path.write_text(f'auto_map_race_node:\n  ros__parameters:\n    {key}: 1\n')
         problems = check_calibration_overlay(path, path.name)
         assert len(problems) == 1 and key in problems[0]
+
+
+@pytest.mark.parametrize('car', ['rb1', 'rb2'])
+def test_grip_coupling_is_shared_and_not_set_by_any_car(car):
+    # oracle: spec (2026-11-12 brief): profile_grip_coupling is a shared planner setting, default 0; no
+    # car's calibration sets it.
+    assert effective_config('auto_map_race.yaml', 'auto_map_race_node', car)['profile_grip_coupling'] == 0.0
+    overlay = Path(__file__).resolve().parents[1] / 'cars' / car / 'calibration' / 'auto_map_race.yaml'
+    if overlay.exists():
+        assert 'profile_grip_coupling' not in overlay.read_text()

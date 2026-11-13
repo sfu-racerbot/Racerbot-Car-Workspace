@@ -70,7 +70,9 @@ class RaceLineConfig:
             'emergency_stop_distance': 'emergency_stop_distance',
         }
         tight = values.get('race_line_body_floor_tight')   # optional: absent = constant floor
-        return cls(physics=CarPhysics(**{k: values[v] for k, v in physics_keys.items()}),
+        # Optional, 0 (a box: braking and cornering independent) when absent: profile_grip_coupling.
+        return cls(physics=CarPhysics(**{k: values[v] for k, v in physics_keys.items()},
+                                      grip_coupling=float(values.get('profile_grip_coupling', 0.0))),
                    body_floor_tight=None if tight is None else float(tight),
                    speed_floor_gain=float(values.get('race_line_speed_floor_gain', 0.0)),
                    speed_floor_from=float(values.get('race_line_speed_floor_from', 3.0)),
