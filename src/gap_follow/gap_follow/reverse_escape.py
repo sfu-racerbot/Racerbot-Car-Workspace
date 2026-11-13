@@ -174,3 +174,12 @@ def rear_quarter_clear(ranges, angle_min, angle_increment, range_min, *, car_wid
             if near < clearance:
                 return False, detail
     return True, detail
+
+
+def blocked_by_clearance(speed, clearance_speed, flank_creeping, ttc_tripped):
+    """Did the drive path end at zero because the clearance ceiling (or the forward-reserve creep) is zero?
+
+    True only for a final speed of exactly 0.0 with the clearance/creep ceiling at or below zero, not a flank creep
+    (the body's own arc is free: it moves) and not a TTC trip. A zero from any other cap (follow, corridor,
+    understeer, speed hold) is not "blocked ahead"."""
+    return bool(speed == 0.0 and clearance_speed <= 0.0 and not flank_creeping and not ttc_tripped)

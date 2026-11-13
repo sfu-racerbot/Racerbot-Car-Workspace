@@ -407,6 +407,26 @@ gap_follow_node:
     flank_creep_length: 0.50
     flank_creep_margin: 0.02
 
+    # --- Reverse escape (reverse_escape.py, docs/gap-follow.md#reverse-escape) ---
+    # Back out of a nose-in stop: something close ahead, no forward arc clears it, the car stopped (rb2
+    # 20261111-142254, 104.6-118.2 s: 13.6 s parked 0.22 m from a return). After reverse_escape_wait_sec of that it
+    # drives straight back at reverse_escape_speed over ground it drove across in the last 3 s, at most
+    # reverse_escape_max_distance (and no further than it came), only while the rear quarters (95-130 deg each side,
+    # clear of the body by reverse_escape_rear_quarter_clearance) read clear. The LiDAR sees +-135 deg, not directly
+    # behind. OFF: no car turns it on yet. Not modelled by the simulators (gap_mirror).
+    enable_reverse_escape: false
+    reverse_escape_speed: 0.30
+    reverse_escape_max_distance: 0.35
+    reverse_escape_max_time: 1.6
+    reverse_escape_wait_sec: 1.0
+    reverse_escape_settle_sec: 0.3
+    reverse_escape_cooldown_sec: 4.0
+    reverse_escape_max_attempts: 2
+    reverse_escape_rearm_progress: 3.0
+    reverse_escape_rear_quarter_clearance: 0.10
+    reverse_escape_rear_band_lo_deg: 95.0
+    reverse_escape_rear_band_hi_deg: 130.0
+
     # --- Cornering anticipation ---
     # An extra speed cap from how much the chosen gap's near-only bearing
     # disagrees with aim_within_gap's own choice -- see

@@ -347,3 +347,21 @@ def test_a_scan_that_does_not_reach_the_rear_quarters_is_not_clear():
 def test_non_finite_and_wrong_input_is_not_clear():
     assert not clear(np.full(N, float('nan')))
     assert not clear(np.array([]))
+
+
+# --- blocked_by_clearance ------------------------------------------------------------------------------
+
+from gap_follow.reverse_escape import blocked_by_clearance
+
+
+@pytest.mark.parametrize('speed,clearance,flank,ttc,expected', [
+    (0.0, 0.0, False, False, True),
+    (0.0, -0.1, False, False, True),
+    (0.0, 0.4, False, False, False),      # zero from another cap (follow, corridor, understeer, hold)
+    (0.4, 0.0, False, False, False),      # the car is moving
+    (0.0, 0.0, True, False, False),       # a flank creep moves the car
+    (0.0, 0.0, False, True, False),       # a TTC trip is not a nose-in stop
+    (1e-9, 0.0, False, False, False),
+])
+def test_blocked_by_clearance(speed, clearance, flank, ttc, expected):
+    assert blocked_by_clearance(speed, clearance, flank, ttc) is expected
