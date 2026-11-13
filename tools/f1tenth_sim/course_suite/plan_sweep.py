@@ -98,6 +98,26 @@ def race_job(arm, track, seed, out, understeer=False):
                 end_arc=sr_["end_arc"])
 
 
+def failed_pose_job(arm, out):
+    """The standing start from the real failed launch pose with the cap on, two laps so that s = 14 is reached (one
+    lap ends at the gym's start line, which the failed pose has already crossed: 9.6 m in)."""
+    import start_replay as sr
+    from pure_pursuit import racing_math
+    os.environ["RACERBOT_CAR"] = "rb2"
+    track = "car2_course_2026_11_11"
+    line = out / arm / track / "run" / "raceline_profiled.csv"
+    spec, *_ = track_files(track)
+    failed = []
+    for k in range(3):
+        cal, plan, trace, result = sr.trace_run(spec, FLOOR, str(line), FAILED_POSE, 12345 + k, 60.0, 2, 0.42, 5.0,
+                                                ONLINE_LATERAL, "delay_lqr")
+        row = sr.summarise(cal, plan, trace, result, [14.0])
+        at = row["at"].get(14.0)
+        failed.append(dict(contact=bool(row["seed_result"]["contact"] > 0 or row["seed_result"]["collision"]),
+                           right14=None if at is None else -at["offset_left"], end_arc=row["seed_result"]["end_arc"]))
+    return dict(stage="failedpose", arm=arm, failed_pose=failed)
+
+
 def extras_job(arm, out, understeer=False):
     import start_replay as sr
     from pure_pursuit import racing_math
@@ -120,7 +140,7 @@ def extras_job(arm, out, understeer=False):
                 if r["seed_result"]["contact"] > 0 or r["seed_result"]["collision"]]
     failed = []
     for k in range(3):
-        cal, plan, trace, result = sr.trace_run(spec, FLOOR, str(line), FAILED_POSE, 12345 + k, 60.0, 1, 0.42, 5.0,
+        cal, plan, trace, result = sr.trace_run(spec, FLOOR, str(line), FAILED_POSE, 12345 + k, 60.0, 2, 0.42, 5.0,
                                                 ONLINE_LATERAL, "delay_lqr")
         row = sr.summarise(cal, plan, trace, result, [14.0])
         at = row["at"].get(14.0)
