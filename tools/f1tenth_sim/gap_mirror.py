@@ -48,6 +48,11 @@ NOT_MIRRORED = {
     # sample to time out (docs/gap-follow.md#steering-damping-gyro).
     "imu_topic", "imu_status_topic", "imu_timeout_sec",
     'fused_odom_topic', 'wheel_odom_topic', 'imu_traction_timeout_sec',
+    # Reverse escape (2026-11-13): the simulators never command negative speed, so the mirror does not model it.
+    'enable_reverse_escape', 'reverse_escape_speed', 'reverse_escape_max_distance', 'reverse_escape_max_time',
+    'reverse_escape_wait_sec', 'reverse_escape_settle_sec', 'reverse_escape_cooldown_sec',
+    'reverse_escape_max_attempts', 'reverse_escape_rearm_progress', 'reverse_escape_rear_quarter_clearance',
+    'reverse_escape_rear_band_lo_deg', 'reverse_escape_rear_band_hi_deg',
 }
 
 
