@@ -37,12 +37,15 @@ def test_the_floor_names_its_runs_and_every_override_has_a_source():
     assert floor.track == 'car2_course_2026_11_11'
 
 
-def test_grip_curve_is_the_measured_gyro_curve_times_the_replay_scale_and_it_falls():
-    # Oracle: grip_truth.py's recorded gyro-basis medians (bins of 10+ samples), scaled by the
-    # replay-selected 1.25 and never above the request, as the 11-06 floor was built.
+def test_grip_curve_is_the_measured_gyro_curve_times_the_chosen_scale_and_it_falls():
+    # Oracle: grip_truth.py's recorded gyro-basis medians (bins of 10+ samples), scaled by the scale chosen
+    # closed loop on the 152132 launch (replay JSON closed_loop_selection: 1.15, advisor's rule 2026-11-13; it
+    # replaces the open-loop 1.25, which flew the flying lap too fast) and never above the request.
     rows = [(0.0, 0.0)] + [(r['asked'], min(r['asked'], r['delivered'])) for r in evidence('grip_rb2_vesc')['gyro_curve']
                            if r['n'] >= 10]
-    expected = [(a, min(a, d * 1.25)) for a, d in rows]
+    scale = evidence('replay')['closed_loop_selection']['grip_scale']
+    assert scale == 1.15
+    expected = [(a, min(a, d * scale)) for a, d in rows]
     cal = with_floor(NAME, calibration_for_car('rb2'))
     np.testing.assert_allclose(cal.grip_curve, expected, rtol=0., atol=1e-12)    # m/s^2
     assert cal.grip_curve_falls

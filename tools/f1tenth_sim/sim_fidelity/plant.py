@@ -361,9 +361,18 @@ class FidelityPlant:
         if self.profile.body_collisions:
             self.env.unwrapped.sim.ttc_threshold = -math.inf
 
-    def reset(self, poses: np.ndarray):
+    def reset(self, poses: np.ndarray, speeds=None):
+        """Place the cars at ``poses`` (x, y, yaw); ``speeds`` (true, m/s) puts them there already moving."""
         self._disable_gym_collision_response()
-        obs, info = self.env.reset(options={"poses": poses})
+        options = {"poses": poses}
+        if speeds is not None:
+            poses = np.asarray(poses, dtype=float)
+            states = np.zeros((len(poses), self.env.unwrapped.model.state_dim))
+            states[:, 0:2] = poses[:, 0:2]           # gym's single-track state: x, y, steering, v, yaw, yaw rate, slip
+            states[:, 3] = np.asarray(speeds, dtype=float)
+            states[:, 4] = poses[:, 2]
+            options = {"states": states}
+        obs, info = self.env.reset(options=options)
         self._contacted = set()
         self.chassis_contact_steps = 0
         for index in range(self.num_agents):

@@ -178,5 +178,78 @@
    "speed_rms": 0.2993843101429226,
    "lag": 0.01250000000000015
   }
+ },
+ "closed_loop_selection": {
+  "date": "2026-11-13",
+  "event": "the 20261111-152132 launch from s=8.1 m (loc: wheel 3.42 m/s, 0.098 m right, heading +0.48 deg), where the real online cap stopped binding; original-guard race-day line (est. 9.404 s), rb2 race-day config, online cap off, 6 seeds per cell",
+  "rule": "cells with cap-on flying lap in [9.95, 10.45] s; smallest |right@14 - 0.40| with a contact before s=14 counted as 0.60; tie-break |v@12 - 4.94|",
+  "grip_scale": 1.15,
+  "grip_coupling": 0.0,
+  "open_loop_scale_it_replaces": 1.25,
+  "why": "the advisor rejected open-loop 1.25: it flew the flying lap in 9.69 s against the car's 10.05 s; the yaw-rate fit cannot separate the scales (0.2768 to 0.2858 over 1.0-1.15 on 60 s)",
+  "cells": [
+   {
+    "scale": 1.05,
+    "coupling": 0.0,
+    "v10": 4.74,
+    "v11": 5.09,
+    "v12": null,
+    "contact": "6/6 at s 11.4",
+    "flying_lap": 10.31
+   },
+   {
+    "scale": 1.05,
+    "coupling": 0.5,
+    "v10": 4.74,
+    "v11": 5.09,
+    "v12": null,
+    "contact": "6/6 at s 10.9",
+    "flying_lap": 10.44
+   },
+   {
+    "scale": 1.1,
+    "coupling": 0.0,
+    "v10": 4.74,
+    "v11": 5.09,
+    "v12": null,
+    "contact": "6/6 at s 11.4",
+    "flying_lap": 10.12
+   },
+   {
+    "scale": 1.1,
+    "coupling": 0.5,
+    "v10": 4.74,
+    "v11": 5.09,
+    "v12": null,
+    "contact": "6/6 at s 11.1",
+    "flying_lap": 10.21
+   },
+   {
+    "scale": 1.15,
+    "coupling": 0.0,
+    "v10": 4.74,
+    "v11": 5.09,
+    "v12": 4.96,
+    "contact": "6/6 at s 11.7-12.0",
+    "flying_lap": 9.95
+   },
+   {
+    "scale": 1.15,
+    "coupling": 0.5,
+    "v10": 4.74,
+    "v11": 5.09,
+    "v12": null,
+    "contact": "6/6 at s 11.1-11.2",
+    "flying_lap": 10.04
+   }
+  ],
+  "real": {
+   "v10": 4.28,
+   "v11": 4.75,
+   "v12": 4.94,
+   "right13": 0.27,
+   "right14": 0.4,
+   "note": "then the reactive stop at s 15.3; flying laps with the cap on 10.05 s"
+  }
  }
 }

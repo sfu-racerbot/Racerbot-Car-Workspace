@@ -533,8 +533,10 @@ SFU_2026_11_11_RB2_GYRO_CURVE = (
                 (4.3847966706921095, 2.7063512860611474),
                 (5.279196169155968, 2.7998427458681205),
 )
-# Times which the plant's own tyres' understeer is made up in the plant (replay-selected, see FLOORS).
-SFU_2026_11_11_RB2_GRIP_SCALE = 1.25
+# Times which the plant's own tyres' understeer is made up in the plant. Chosen closed loop on the real
+# 20261111-152132 launch (FLOORS provenance; sfu_course_2026_11_11_rb2_replay.json closed_loop_selection):
+# the open-loop replay's 1.25 flew the flying lap in 9.69 s against the car's 10.05 s.
+SFU_2026_11_11_RB2_GRIP_SCALE = 1.15
 
 
 def sfu_2026_11_11_rb2_grip_curve(scale: float) -> tuple:
@@ -639,8 +641,8 @@ FLOORS: dict[str, Floor] = {
             floor="sfu_course_2026_11_11_rb2",
             steering_linkage=((-0.461, -0.448), (-0.436, -0.423), (-0.349, -0.3370065000246209), (0.0, 0.011993499975379084), (0.349, 0.36099349997537905), (0.436, 0.423), (0.528, 0.509)),
             # Gyro-basis median delivered lateral acceleration per asked bin, bins of 10 or more
-            # samples, never above the request (grip_truth.py --json gyro_curve), times the replay-selected 1.25
-            # (the plant's own tyres understeer on top). Falls past the peak.
+            # samples, never above the request (grip_truth.py --json gyro_curve), times 1.15 (the plant's
+            # own tyres understeer on top; chosen on the 152132 launch). Falls past the peak.
             grip_curve=sfu_2026_11_11_rb2_grip_curve(SFU_2026_11_11_RB2_GRIP_SCALE),
             grip_curve_falls=True,
             steering_delay_ticks=2,
@@ -667,7 +669,13 @@ FLOORS: dict[str, Floor] = {
                              "gyro replay on 20261111-152132 over slopes 0.95-1.1 and delays 2-4 ticks, "
                              "sfu_course_2026_11_11_rb2_replay.json; outer points retained from 2026-10-16 circles",
             grip_curve="grip_truth.py on 20261111-152132, -135934, -142254, /imu/vesc/data, steering window 0.10 rad, "
-                       "gyro basis, bins of 10+ samples; sfu_course_2026_11_11_grip_rb2_vesc.json gyro_curve",
+                       "gyro basis, bins of 10+ samples; sfu_course_2026_11_11_grip_rb2_vesc.json gyro_curve; times 1.15, CALIBRATED ON "
+                       "THE 20261111-152132 LAUNCH: from s=8.1 m (3.42 m/s, 0.098 m right) with the online cap off, the "
+                       "simulated car makes contact at s 11.7-12.0 in 6/6 seeds, where the real car reached 0.40 m right "
+                       "at s=14 and needed the reactive stop at s=15.3 (sim speed 4.74 / 5.09 m/s at s=10 / 11 against "
+                       "the real 4.28 / 4.75): reproduced in kind, the sim is harder on the car by 3-4 s of travel; "
+                       "cap-on flying lap 9.95 s (12 laps) against the real 10.05 s, the 1% edge of the rule. "
+                       "Selection rule and all six cells: sfu_course_2026_11_11_rb2_replay.json closed_loop_selection",
             grip_curve_falls="the same curve: 2.94 m/s^2 at 3.75 asked falling to 2.71 at 4.38",
             steering_delay_ticks="fit-plant gyro replay on 20261111-152132 selects 2 ticks by yaw RMS (0.1256 against 0.1333 at 3); sfu_course_2026_11_11_rb2_replay.json",
             steering_rate_max="car_measure.py servo replay on 20261111-152132, -135934, -142254",

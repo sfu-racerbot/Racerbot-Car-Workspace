@@ -43,6 +43,18 @@ def project(xy, seg, ds, arc, x, y):
     return float(arc[j]), float((x - xy[j, 0]) * -ty + (y - xy[j, 1]) * tx)
 
 
+def pose_on_line(xy, arc_s, right=0.0, heading_error_deg=0.0):
+    """(x, y, yaw_deg) at arc length ``arc_s`` along the closed line, ``right`` m to the right of it, the
+    heading ``heading_error_deg`` to the left of its tangent."""
+    xy, seg, ds, arc = line_geometry(xy)
+    arc_s = arc_s % float(ds.sum())
+    j = int(np.searchsorted(arc, arc_s, side="right")) - 1
+    tx, ty = seg[j] / ds[j]
+    x, y = xy[j] + (arc_s - arc[j]) * np.array([tx, ty])
+    return (float(x + right * ty), float(y - right * tx),
+            float(math.degrees(math.atan2(ty, tx)) + heading_error_deg))
+
+
 def lap_times(times, arcs, length):
     """Times between successive start/finish crossings (arc wrapping from the end to the start)."""
     crossings = [times[i] for i in range(1, len(arcs)) if arcs[i - 1] > 0.75 * length and arcs[i] < 0.25 * length]
@@ -72,7 +84,7 @@ def solo_arguments(law, speed, lateral, laps, steering_limit, safety="map"):
 
 
 def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit, speed, lateral, law,
-              grip_scale=None, grip_coupling=None):
+              grip_scale=None, grip_coupling=None, start_wheel_speed=None):
     from pure_pursuit import racing_math
     cal = floor_calibration(floor, grip_scale, grip_coupling)
     rv.RACELINE_SOURCE = "plan"
@@ -89,6 +101,9 @@ def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit
     def wrapped(*a, **k):
         plant = make_plant(*a, **k)
         step = plant.step
+        if start_wheel_speed is not None:
+            reset = plant.reset         # already moving: the wheels read true speed times the odometry scale
+            plant.reset = lambda poses: reset(poses, speeds=[start_wheel_speed / cal.odom_speed_scale])
 
         def recording(commands):
             truth = plant.truth(0)
@@ -104,6 +119,15 @@ def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit
     finally:
         rv.make_plant, rv.plan_initial_pose = make_plant, plan_pose
     return cal, plan, np.array(trace, float), result
+
+
+def _flying_worst(arc, off, length, sign):
+    """Worst offset (right for -1, left for +1) after the first start/finish crossing; None before one."""
+    crossed = [i for i in range(1, len(arc)) if arc[i - 1] > 0.75 * length and arc[i] < 0.25 * length]
+    if not crossed:
+        return None
+    tail = off[crossed[0]:]
+    return float(max(0.0, -tail.min() if sign < 0 else tail.max()))
 
 
 def summarise(cal, plan, trace, result, arcs_wanted):
@@ -122,9 +146,45 @@ def summarise(cal, plan, trace, result, arcs_wanted):
     return dict(seed_result=dict(contact=int(result.get("contact_steps", 0) or 0), collision=bool(result["collision"]),
                                  passed=bool(result["passed"]), max_cross_track=result["max_cross_track_m"],
                                  laps=float(result["laps"]), end_t=float(t[-1]), end_arc=float(s[-1]),
-                                 end_offset_left=float(off[-1])),
+                                 end_offset_left=float(off[-1]), max_right=float(max(0.0, -off.min())),
+                                 max_left=float(max(0.0, off.max())), max_right_flying=_flying_worst(s, off, length, -1),
+                                 max_left_flying=_flying_worst(s, off, length, +1)),
                 at=at, laps_s=lap_times(t, s, length), profile_at={a: float(np.interp(a, np.r_[arc, length],
                 np.r_[plan.speed, plan.speed[0]])) for a in arcs_wanted}, start_arc=float(s[0]), start_offset=float(off[0]))
+
+
+def check_profile_alone(args, line_xy):
+    """The planned profile driven without the online cap's help: standing starts round the line, then flying laps.
+
+    Every run is cap-off (online lateral 99). Prints per run the worst right and left offset and any contact;
+    returns (exit code, runs): 1 when any run touched anything. The gate for a new speed plan: it must be
+    drivable on its own (2026-11-13).
+    """
+    _, _, ds, _ = line_geometry(line_xy)
+    length = float(ds.sum())
+    jobs = [(f"standing start at s={i * length / args.poses:.1f}", pose_on_line(line_xy, i * length / args.poses), 1)
+            for i in range(args.poses)]
+    jobs.append((f"{args.check_laps} flying laps after a standing start at s=0", pose_on_line(line_xy, 0.0), args.check_laps + 1))
+    runs, touched = [], False
+    for label, start, laps in jobs:
+        for k in range(args.seeds):
+            seed = args.first_seed + k
+            cal, plan, trace, result = trace_run(args.track, args.floor, args.line, start, seed, args.seconds, laps,
+                                                 args.steering_limit, args.speed, 99.0, args.law,
+                                                 args.grip_scale, args.grip_coupling)
+            row = summarise(cal, plan, trace, result, [])
+            row.update(label=label, seed=seed)
+            hit = bool(row["seed_result"]["contact"] > 0 or row["seed_result"]["collision"])
+            touched |= hit
+            worst = row["seed_result"]
+            where = f" contact at s={worst['end_arc']:.1f} m ({worst['end_offset_left']:+.2f} m)" if hit else ""
+            flying = worst["max_right_flying"], worst["max_left_flying"]
+            fly = "" if flying[0] is None else f", flying laps worst right {flying[0]:.2f} left {flying[1]:.2f}"
+            print(f"{label}, seed {seed}: worst right {worst['max_right']:.2f} m, left {worst['max_left']:.2f} m{fly};"
+                  f"{where if hit else ' no contact'}", flush=True)
+            runs.append(row)
+    print("PROFILE ALONE: " + ("FAIL, contact" if touched else "pass, no contact"), flush=True)
+    return (1 if touched else 0), runs
 
 
 def parse_args(argv=None):
@@ -132,7 +192,12 @@ def parse_args(argv=None):
     ap.add_argument("--track", required=True)
     ap.add_argument("--floor", required=True, choices=sorted(FLOORS))
     ap.add_argument("--line", required=True, help="profiled x,y,speed CSV")
-    ap.add_argument("--start", required=True, help="x,y,yaw_deg of the spawn pose")
+    ap.add_argument("--start", help="x,y,yaw_deg of the spawn pose, at rest")
+    ap.add_argument("--start-s", type=float, help="spawn at this arc length of the line, already moving")
+    ap.add_argument("--start-speed", type=float, default=0.0, help="wheel speed at --start-s, m/s")
+    ap.add_argument("--start-right", type=float, default=0.0, help="metres right of the line at --start-s")
+    ap.add_argument("--start-heading-error", type=float, default=0.0,
+                    help="degrees left of the line's heading at --start-s")
     ap.add_argument("--seeds", type=int, default=6)
     ap.add_argument("--first-seed", type=int, default=12345)
     ap.add_argument("--seconds", type=float, default=80.0)
@@ -149,19 +214,42 @@ def parse_args(argv=None):
                          "(default: the floor's, 0)")
     ap.add_argument("--law", default="delay_lqr")
     ap.add_argument("--arcs", default=",".join(str(a) for a in DEFAULT_ARCS))
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--check-profile-alone", action="store_true",
+                    help="drive the profile with the online cap off from --poses standing starts and --check-laps "
+                         "flying laps, every seed; exit 1 on any contact")
+    ap.add_argument("--poses", type=int, default=5, help="standing starts evenly spaced round the line")
+    ap.add_argument("--check-laps", type=int, default=3)
+    ap.add_argument("--out")
     return ap.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    start = tuple(float(v) for v in args.start.split(","))
+    if args.check_profile_alone:
+        from pure_pursuit import racing_math
+        line_xy, _ = racing_math.load_profiled_csv(args.line)
+        code, runs = check_profile_alone(args, line_xy)
+        if args.out:
+            Path(args.out).write_text(json.dumps(runs, indent=1))
+        return code
+    if not args.out:
+        raise SystemExit("start_replay: --out is required")
+    start_wheel_speed = None
+    if args.start_s is not None:
+        from pure_pursuit import racing_math
+        line_xy, _ = racing_math.load_profiled_csv(args.line)
+        start = pose_on_line(line_xy, args.start_s, args.start_right, args.start_heading_error)
+        start_wheel_speed = args.start_speed
+    elif args.start:
+        start = tuple(float(v) for v in args.start.split(","))
+    else:
+        raise SystemExit("start_replay: give --start x,y,yaw_deg or --start-s")
     arcs = [float(a) for a in args.arcs.split(",")]
     rows = []
     for k in range(args.seeds):
         cal, plan, trace, result = trace_run(args.track, args.floor, args.line, start, args.first_seed + k,
                                              args.seconds, args.laps, args.steering_limit, args.speed,
-                                             args.lateral, args.law, args.grip_scale, args.grip_coupling)
+                                             args.lateral, args.law, args.grip_scale, args.grip_coupling, start_wheel_speed)
         row = summarise(cal, plan, trace, result, arcs)
         row["seed"] = args.first_seed + k
         rows.append(row)

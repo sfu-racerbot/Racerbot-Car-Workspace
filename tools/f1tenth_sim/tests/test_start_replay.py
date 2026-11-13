@@ -70,7 +70,7 @@ def test_grip_scale_replaces_the_floors_curve_with_the_measured_one_at_that_scal
     # Oracle: at scale 1.0 the delivered peak is the measured gyro-basis plateau, 2.94 m/s^2 (grip_truth.py).
     peak = max(d for _, d in cal.grip_curve)
     assert peak == pytest.approx(2.94, abs=0.005)       # m/s^2
-    assert max(d for _, d in with_floor(FLOOR).grip_curve) == pytest.approx(2.94 * 1.25, abs=0.01)
+    assert max(d for _, d in with_floor(FLOOR).grip_curve) == pytest.approx(2.94 * 1.15, abs=0.01)     # the floor's scale
     assert cal.grip_curve != with_floor(FLOOR).grip_curve
     assert replace(cal, grip_curve=with_floor(FLOOR).grip_curve) == with_floor(FLOOR)    # nothing else changed
 
@@ -129,3 +129,116 @@ def test_summary_reports_speed_offset_and_where_the_run_ended():
     assert out['at'][5.0]['wheel_speed'] == pytest.approx(3.0, abs=1e-9)
     assert out['at'][5.0]['offset_left'] == pytest.approx(-0.5, abs=0.01)
     assert out['seed_result']['contact'] == 7
+
+
+# --- starting already moving (2026-11-13) -----------------------------------------------------
+
+def _dense(xy, step=0.005):
+    """The closed polyline resampled every ``step`` m by linear interpolation, so a nearest-sample projection is exact to step/2."""
+    xy = np.asarray(xy, float)
+    closed = np.vstack([xy, xy[:1]])
+    d = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(closed, axis=0).T))])
+    t = np.arange(0.0, d[-1], step)
+    return np.column_stack([np.interp(t, d, closed[:, 0]), np.interp(t, d, closed[:, 1])])
+
+
+def _where(xy, x, y):
+    """(arc s, offset left, heading of the line there, deg) of (x, y), by projection onto the dense line."""
+    g, seg, ds, arc = sr.line_geometry(_dense(xy))
+    s, off = sr.project(g, seg, ds, arc, x, y)
+    j = int(np.argmin(np.abs(arc - s)))
+    return s, off, math.degrees(math.atan2(seg[j][1], seg[j][0]))
+
+
+def test_pose_on_line_projects_back_to_the_requested_arc_offset_and_heading():
+    xy, _, _, _ = circle()
+    x, y, yaw_deg = sr.pose_on_line(xy, 8.0, right=0.10, heading_error_deg=0.5)
+    s, off, tangent = _where(xy, x, y)
+    assert s == pytest.approx(8.0, abs=0.02)              # m
+    assert off == pytest.approx(-0.10, abs=0.02)          # m, right is negative left
+    assert (yaw_deg - tangent) == pytest.approx(0.5, abs=0.5)     # deg
+
+
+def test_the_plants_first_state_is_the_requested_position_speed_offset_and_heading():
+    import eval_gap
+    from pure_pursuit import racing_math
+    xy = racing_math.load_xy_csv(
+        '/home/bryan/racerbot-ws/src/pure_pursuit/test/data/course_20261111/raceline_raw.csv')
+    x, y, yaw_deg = sr.pose_on_line(xy, 8.0, right=0.098, heading_error_deg=0.48)
+    cal = sr.floor_calibration(FLOOR)
+    plant = eval_gap.make_plant('car2_course_2026_11_11', 12345, cal)
+    try:
+        plant.reset(np.array([[x, y, math.radians(yaw_deg)]]), speeds=[3.42 / cal.odom_speed_scale])
+        truth = plant.truth(0)
+        s, off, tangent = _where(xy, truth[0], truth[1])
+        heading = (math.degrees(truth[4]) - tangent + 180.0) % 360.0 - 180.0
+        assert s == pytest.approx(8.0, abs=0.02)           # m, projected back independently
+        assert -off == pytest.approx(0.098, abs=0.02)      # m right
+        assert truth[3] * cal.odom_speed_scale == pytest.approx(3.42, abs=0.02)    # m/s on the wheels
+        assert heading == pytest.approx(0.48, abs=0.5)     # deg
+    finally:
+        plant.close()
+
+
+# --- --check-profile-alone (2026-11-13) -------------------------------------------------------
+PLANNED_LINE = SIM / 'maps' / 'car2_course_2026_11_11_planned_line.csv'
+
+
+def _check(line, extra):
+    return sr.main(['--track', 'car2_course_2026_11_11', '--floor', FLOOR, '--line', str(line), '--check-profile-alone',
+                    '--seeds', '1', '--check-laps', '1', *extra])
+
+
+def test_a_slow_profile_passes_the_profile_alone_check(tmp_path, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb2')
+    # A deliberately slow plan (the race-day line's speeds times 0.6) is drivable with no online cap: exit 0.
+    rows = np.loadtxt(PLANNED_LINE, delimiter=',', skiprows=1)
+    rows[:, 2] *= 0.6
+    slow = tmp_path / 'slow.csv'
+    np.savetxt(slow, rows, delimiter=',', header='x,y,speed', comments='')
+    assert _check(slow, ['--poses', '2']) == 0
+
+
+def test_the_planned_race_day_profile_fails_the_profile_alone_check(capsys, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb2')
+    # RECORDED SIMULATOR MEASUREMENT and change-detector (not an oracle): 2026-11-13, floor sfu_course_2026_11_11_rb2,
+    # the original-guard race-day line (est. 9.404 s), cap off, standing start at s=0: contact near s 7.5 in all
+    # 6 seeds (6/6 at s 7.3-8.2 over 15 grip cells). If the plan or the floor changes this may legitimately flip.
+    assert _check(PLANNED_LINE, ['--poses', '1']) == 1
+    out = capsys.readouterr().out
+    assert 'contact at s=' in out and 'FAIL' in out
+
+
+# --- the floor's closed-loop calibration against the real 152132 (2026-11-13) --------------------
+
+def test_cap_on_flying_lap_is_within_one_percent_faster_to_four_percent_slower_than_the_real_car(monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb2')
+    # RECORDED MEASUREMENT: real flying laps of run 20261111-152132 are 10.05 s (race-day line, online cap 3.1).
+    # The floor's admissible band (advisor's rule, 2026-11-13) is [9.95, 10.45] s: never more than 1% faster than
+    # the car. Simulated here on the original-guard race-day line (est. 9.404 s), standing start, 3 laps, 3 seeds.
+    laps = []
+    for seed in (12345, 12346, 12347):
+        cal, plan, trace, result = sr.trace_run('car2_course_2026_11_11', FLOOR, str(PLANNED_LINE), sr.pose_on_line(
+            np.loadtxt(PLANNED_LINE, delimiter=',', skiprows=1)[:, :2], 0.0), seed, 80.0, 3, 0.42, 5.0, 3.1, 'delay_lqr')
+        xy, seg, ds, arc = sr.line_geometry(plan.xy)
+        s = np.array([sr.project(xy, seg, ds, arc, x, y)[0] for x, y in zip(trace[:, 1], trace[:, 2])])
+        assert not result['collision'] and result['contact_steps'] == 0
+        laps += sr.lap_times(trace[:, 0], s, float(ds.sum()))
+    assert len(laps) >= 6
+    assert 9.95 - 1e-9 <= float(np.median(laps)) <= 10.45, sorted(laps)
+
+
+def test_launch_with_the_cap_off_makes_contact_before_the_second_bend_like_the_real_car_could_not(monkeypatch):
+    # RECORDED SIMULATOR MEASUREMENT and change-detector (not an oracle), 2026-11-13: from the 152132 launch state
+    # at s=8.1 m (3.42 m/s on the wheels, 0.098 m right, +0.48 deg) with the online cap off, the floor's car touches
+    # at s 11.7-12.0 in 6/6 seeds. The real car, capped only by the reactive layer, reached 0.40 m right at s=14.
+    monkeypatch.setenv('RACERBOT_CAR', 'rb2')     # rb2's race-day controller config (rb1's pure pursuit differs)
+    from pure_pursuit import racing_math
+    line_xy, _ = racing_math.load_profiled_csv(str(PLANNED_LINE))
+    start = sr.pose_on_line(line_xy, 8.10, 0.098, 0.48)
+    for seed in (12345, 12346):
+        cal, plan, trace, result = sr.trace_run('car2_course_2026_11_11', FLOOR, str(PLANNED_LINE), start, seed, 40.0, 1,
+                                                0.42, 5.0, 99.0, 'delay_lqr', start_wheel_speed=3.42)
+        row = sr.summarise(cal, plan, trace, result, [])
+        assert row['seed_result']['contact'] > 0
+        assert 11.0 < row['seed_result']['end_arc'] < 13.0, row['seed_result']['end_arc']     # m
