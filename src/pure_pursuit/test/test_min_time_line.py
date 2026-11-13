@@ -1,5 +1,6 @@
 """ROS-free minimum-time line tests, collected by the pure_pursuit suite."""
 import math
+from pathlib import Path
 
 from dataclasses import replace
 
@@ -349,3 +350,128 @@ def test_speed_floor_extra_with_zero_gain_is_zero_and_bad_gains_are_refused():
     for gain in (-0.01, float('nan'), float('inf')):
         with pytest.raises(ValueError, match='speed floor gain must be finite'):
             min_time_line.speed_floor_extra(_circle(4.0), phys, gain, 3.0)
+
+
+# ============================================================================
+# Combined grip (friction ellipse) in the speed profile (2026-11-12)
+# ============================================================================
+#
+# Finding (rb2 20261111-152132 launch): the profile bounded lateral and longitudinal limits independently,
+# a box, so it planned 3.0 braking together with 3.2 lateral = 4.4 m/s^2 on tyres that deliver about 3.
+
+RACE_DAY_LINE = Path(__file__).parent / 'data' / 'course_20261111' / 'raceline_raw.csv'
+ELLIPSE_SLACK = 0.05   # discretisation of a station step (the speed is taken at one end of it)
+
+
+def race_day_line():
+    from pure_pursuit.racing_math import load_xy_csv
+    return resample_closed_path(load_xy_csv(RACE_DAY_LINE), 0.15)       # as the builder's min_time candidate is
+
+
+def long_stadium(straight=40.0, radius=2.0, spacing=0.1):
+    """Two straights of ``straight`` m joined by two constant-radius semicircles, counter-clockwise."""
+    x = np.arange(0.0, straight, spacing)
+    count = int(round(math.pi * radius / spacing))
+    angle = np.linspace(-np.pi / 2, np.pi / 2, count, endpoint=False)
+    return np.vstack([
+        np.column_stack([x, np.full_like(x, -radius)]),
+        np.column_stack([straight + radius * np.cos(angle), radius * np.sin(angle)]),
+        np.column_stack([straight - x, np.full_like(x, radius)]),
+        np.column_stack([-radius * np.cos(angle), -radius * np.sin(angle)]),
+    ])
+
+
+def ellipse_use(xy, physics):
+    """(a_long / a_limit)^2 + (lateral / grip)^2 for each station step, and a mask of the unpinned ones."""
+    speed, kappa, seg = speed_profile(xy, physics)
+    grip = np.where(kappa >= 0.0, physics.a_lat_left, physics.a_lat_right)
+    w = speed ** 2
+    a_long = (np.roll(w, -1) - w) / (2.0 * seg)
+    # The cornering that competes with a step is the cornering at the station the limit is read at: the one
+    # being left when accelerating, the one being entered when braking (braking into a corner is limited by
+    # the corner it reaches, not the straight it leaves). Measured at the left station for both, a braking
+    # step into a corner on the raw race-day line reads up to 1.72.
+    lateral = np.where(a_long > 0.0, w * np.abs(kappa) / grip,
+                       np.roll(w, -1) * np.abs(np.roll(kappa, -1)) / np.roll(grip, -1))
+    limit = np.where(a_long > 0.0, physics.a_accel, physics.a_brake)
+    use = (a_long / limit) ** 2 + lateral ** 2
+    pinned = np.zeros(len(speed), dtype=bool)
+    for edge in (physics.v_min, physics.v_max):
+        pinned |= (np.abs(speed - edge) < 1e-9) | (np.abs(np.roll(speed, -1) - edge) < 1e-9)
+    return use, ~pinned
+
+
+def stadium_physics(c):
+    return CarPhysics(v_max=8.0, steering_rate=100.0, steering_delay=0.0, speed_delay=0.0, grip_coupling=c)
+
+
+def race_physics(c):
+    return CarPhysics(steering_delay=0.0, speed_delay=0.0, grip_coupling=c)
+
+
+def test_coupling_zero_is_exactly_todays_profile():
+    # Oracle: the unchanged closed-form helper, kept as _accel_brake_box, called directly.
+    for xy, physics in ((stadium(), CarPhysics(v_max=8.0)), (race_day_line(), CarPhysics())):
+        kappa = signed_curvature(xy)
+        seg = min_time_line._segments(xy)
+        grip = np.where(kappa >= 0.0, physics.a_lat_left, physics.a_lat_right)
+        cap = np.minimum(np.sqrt(grip / np.maximum(np.abs(kappa), 1e-9)), physics.v_max)
+        assert physics.grip_coupling == 0.0
+        assert np.array_equal(min_time_line._accel_brake(cap, seg, physics, kappa, grip),
+                              min_time_line._accel_brake_box(cap, seg, physics))
+        # and through the whole profile: the same numbers as with the keyword never given
+        assert np.array_equal(speed_profile(xy, physics)[0], speed_profile(xy, replace(physics, grip_coupling=0.0))[0])
+
+
+@pytest.mark.parametrize('name,xy,physics', [('stadium', stadium(), stadium_physics(1.0)),
+                                             ('race-day', race_day_line(), race_physics(1.0))])
+def test_every_station_stays_inside_the_ellipse(name, xy, physics):
+    # Oracle: the invariant itself, recomputed here; 5% over 1 for the discretisation of a station step.
+    use, free = ellipse_use(xy, physics)
+    assert free.sum() > 0.4 * len(xy), 'most stations must be unpinned for this to test anything'
+    assert use[free].max() <= 1.0 + ELLIPSE_SLACK, (name, float(use[free].max()))
+
+
+def test_box_profile_violates_the_ellipse_on_a_corner_entry():
+    # The flaw, and proof the test above can fail: without coupling some station asks > 1.3 of the tyres.
+    use, free = ellipse_use(race_day_line(), race_physics(0.0))
+    assert use[free].max() > 1.3, float(use[free].max())
+
+
+@pytest.mark.parametrize('xy,make', [(stadium(), stadium_physics), (race_day_line(), race_physics)])
+def test_coupling_never_makes_the_lap_faster(xy, make):
+    laps = [lap_time(xy, make(c)) for c in (0.0, 0.5, 1.0)]
+    assert laps[2] >= laps[1] - 1e-9 >= laps[0] - 2e-9, laps       # s
+    # and it is a real effect at every coupling: half coupling costs time, full costs more than half
+    assert laps[1] - laps[0] > 1e-3 and laps[2] - laps[1] > 1e-3, laps
+
+
+def test_straight_and_steady_corner_are_unchanged_but_the_exit_comes_later():
+    xy = long_stadium()
+    box, full = stadium_physics(0.0), stadium_physics(1.0)
+    v0, kappa, seg = speed_profile(xy, box)
+    v1, _, _ = speed_profile(xy, full)
+    s = np.concatenate([[0.0], np.cumsum(seg)[:-1]])
+    straight, radius = 40.0, 2.0
+    stop = box.v_max ** 2 / (2.0 * box.a_brake) + 1.0              # braking distance from v_max, plus 1 m
+    far = (s > stop) & (s < straight - stop)                        # the first straight, far from both ends
+    assert far.sum() > 100
+    np.testing.assert_allclose(v1[far], v0[far], rtol=0.0, atol=1e-6)      # m/s
+    corner = np.sqrt(box.a_lat_left * radius)
+    arc = np.flatnonzero((s > straight + 0.3 * math.pi * radius) & (s < straight + 0.7 * math.pi * radius))
+    assert len(arc) > 20
+    np.testing.assert_allclose(v1[arc], v0[arc], rtol=0.0, atol=1e-6)      # m/s, the steady corner
+    assert v0[arc] == pytest.approx(corner, abs=0.05)
+    # Exit: the first station after the arc where speed passes corner + 0.5 m/s.
+    after = np.flatnonzero(s > straight + math.pi * radius)
+
+    def exit_s(v):
+        return s[after[np.flatnonzero(v[after] > corner + 0.5)[0]]]
+    assert exit_s(v1) > exit_s(v0)
+
+
+def test_grip_coupling_is_validated():
+    for bad in (-0.1, 1.1, float('nan'), float('inf')):
+        with pytest.raises(ValueError, match='grip_coupling'):
+            CarPhysics(grip_coupling=bad)
+    assert CarPhysics(grip_coupling=1.0).grip_coupling == 1.0 and CarPhysics().grip_coupling == 0.0

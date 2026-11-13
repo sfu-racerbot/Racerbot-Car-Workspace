@@ -182,3 +182,17 @@ def test_parallel_starts_give_exactly_the_serial_candidates(monkeypatch):
     for source in want:
         np.testing.assert_array_equal(got[source].xy, want[source].xy)
         assert got[source].reason == want[source].reason
+
+
+@pytest.mark.parametrize('coupling', [0.0, 0.5, 1.0])
+def test_batch_matches_scalar_with_coupling(coupling):
+    # Oracle: the single-path speed_profile, row by row, at each coupling (2026-11-12).
+    physics = mtl.CarPhysics(speed_delay=0.1, grip_coupling=coupling)
+    paths = wobbly_paths(rows=4, n=120)
+    speed, kappa, seg = mtl._batch_speed_profile(paths, physics)
+    for r, xy in enumerate(paths):
+        want, _, _ = mtl.speed_profile(xy, physics)
+        np.testing.assert_allclose(speed[r], want, rtol=0, atol=1e-9)   # m/s
+    if coupling > 0.0:
+        box, _, _ = mtl._batch_speed_profile(paths, mtl.CarPhysics(speed_delay=0.1))
+        assert np.any(speed < box - 1e-3), 'coupling must change something on these paths'

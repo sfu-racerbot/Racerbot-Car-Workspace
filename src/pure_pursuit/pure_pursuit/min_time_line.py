@@ -47,6 +47,10 @@ class CarPhysics:
     steering_rate: float = 1.0         # rad/s, pure_pursuit.yaml max_steering_rate
     steering_delay: float = 0.10       # s, the servo's fitted delay (4 ticks at 40 Hz)
     speed_delay: float = 0.10          # s, the speed loop's fitted delay (3 ticks) plus one command period
+    # How much of the tyres' grip a station's cornering uses up of the acceleration and braking available
+    # there, 0 to 1: 0 is a box (the lateral and longitudinal limits independent, how every line was planned
+    # until 2026-11-12), 1 the full friction ellipse. See _accel_brake.
+    grip_coupling: float = 0.0
 
     def __post_init__(self):
         for name in ('a_lat_left', 'a_lat_right', 'a_accel', 'a_brake', 'v_max', 'v_min', 'wheelbase',
@@ -60,6 +64,8 @@ class CarPhysics:
                 raise ValueError(f'{name} must be finite and >= 0, got {value!r}')
         if self.v_min > self.v_max:
             raise ValueError('v_min cannot exceed v_max')
+        if not (math.isfinite(self.grip_coupling) and 0.0 <= self.grip_coupling <= 1.0):
+            raise ValueError(f'grip_coupling must be finite and in [0, 1], got {self.grip_coupling!r}')
 
     @property
     def curvature_limit(self) -> float:
@@ -109,7 +115,7 @@ def speed_profile(xy, physics: CarPhysics, passes: int = 3):
         with np.errstate(divide='ignore'):
             v_rate = physics.curvature_rate / np.maximum(slope, 1e-9)
         speed = np.minimum(cap, v_rate)
-        speed = _accel_brake(speed, seg, physics)
+        speed = _accel_brake(speed, seg, physics, kappa, grip)
         speed = _respond_early(speed, s, physics.speed_delay)
     return np.maximum(speed, physics.v_min), kappa, seg
 
@@ -144,8 +150,8 @@ def _respond_early(speed, s, delay):
     return out
 
 
-def _accel_brake(cap, seg, physics):
-    """Forward (acceleration) and backward (braking) passes round a closed loop."""
+def _accel_brake_box(cap, seg, physics):
+    """Forward (acceleration) and backward (braking) passes round a closed loop, the limits independent."""
     # In squared speed w = v^2 the forward pass w[j] = min(cap[j], w[j-1] + 2 a ds) has the closed form
     # w[j] = 2 a S[j] + min over k <= j of (cap[k] - 2 a S[k]), S the distance along the path: a running
     # minimum. Two laps' worth of stations make the loop's closure exact (no corner is further than a lap
@@ -161,6 +167,56 @@ def _accel_brake(cap, seg, physics):
     accel = two_a * S + np.minimum.accumulate(w - two_a * S)
     brake = two_b * R + np.minimum.accumulate((w - two_b * R)[::-1])[::-1]
     return np.sqrt(np.minimum(accel, brake)[n:2 * n])
+
+
+def _accel_brake(cap, seg, physics, kappa=None, grip=None):
+    """Acceleration and braking limits round a closed loop, sharing the tyres with the cornering.
+
+    With ``physics.grip_coupling`` 0 this is exactly _accel_brake_box: acceleration and braking bounded
+    independently of the corners (a box), which plans full braking and full cornering at the same station:
+    3.0 and 3.2 m/s^2 together is 4.4 m/s^2 on tyres that deliver about 3 (2026-11-12, the car running wide
+    into the corner on the 2026-11-11 launch). Otherwise the longitudinal authority at a station of speed v,
+    curvature k and lateral grip g shrinks with the cornering already using it,
+
+        use = min(1, (v^2 |k| / g)^2),     a_eff = a * sqrt(max(0, 1 - coupling * use)),
+
+    an ellipse at coupling 1. The limits depend on the speed itself, so there is no closed form: forward
+    w[j] = min(w[j], w[j-1] + 2 a_accel_eff(w[j-1]) ds) and backward w[j] = min(w[j], w[j+1] +
+    2 a_brake_eff(w[j+1]) ds) over three laps of stations (w = v^2; the middle lap is the answer), forward
+    again, and the three repeated until nothing moves by more than 1e-9 (at most 6 rounds): state-dependent
+    limits do not commute, so one backward pass can break what the forward pass guaranteed.
+    """
+    if physics.grip_coupling == 0.0 or kappa is None:
+        return _accel_brake_box(cap, seg, physics)
+    n = len(cap)
+    c = physics.grip_coupling
+    a_acc, a_brk = physics.a_accel, physics.a_brake
+    w = np.tile(np.asarray(cap, dtype=float) ** 2, 3).tolist()
+    ds = np.tile(seg, 3).tolist()
+    k = np.tile(np.abs(kappa), 3).tolist()
+    g = np.tile(grip, 3).tolist()
+    last = 3 * n - 1
+
+    def eff(a, wj, j):
+        use = min(1.0, (wj * k[j] / g[j]) ** 2)
+        return a * math.sqrt(max(0.0, 1.0 - c * use))
+
+    def forward():
+        for j in range(1, last + 1):
+            w[j] = min(w[j], w[j - 1] + 2.0 * eff(a_acc, w[j - 1], j - 1) * ds[j - 1])
+
+    def backward():
+        for j in range(last - 1, -1, -1):
+            w[j] = min(w[j], w[j + 1] + 2.0 * eff(a_brk, w[j + 1], j + 1) * ds[j])
+
+    for _ in range(6):
+        before = list(w)
+        forward()
+        backward()
+        forward()
+        if max(abs(x - y) for x, y in zip(w, before)) < 1e-9:
+            break
+    return np.sqrt(np.array(w[n:2 * n]))
 
 
 def lap_time(xy, physics: CarPhysics) -> float:
@@ -212,7 +268,7 @@ def _batch_curvature(xy):
     return np.where(usable, 2.0 * cross / np.where(usable, denominator, 1.0), 0.0)
 
 
-def _batch_accel_brake(cap, seg, physics):
+def _batch_accel_brake_box(cap, seg, physics):
     n = cap.shape[1]
     w = np.tile(cap ** 2, (1, 3))
     ds = np.tile(seg, (1, 3))
@@ -222,6 +278,42 @@ def _batch_accel_brake(cap, seg, physics):
     accel = two_a * S + np.minimum.accumulate(w - two_a * S, axis=1)
     brake = two_b * R + np.minimum.accumulate((w - two_b * R)[:, ::-1], axis=1)[:, ::-1]
     return np.sqrt(np.minimum(accel, brake)[:, n:2 * n])
+
+
+def _batch_accel_brake(cap, seg, physics, kappa=None, grip=None):
+    """_accel_brake for every row (B, n): the box closed form at coupling 0, else the same sequential
+    passes with each station's step taken for all rows at once."""
+    if physics.grip_coupling == 0.0 or kappa is None:
+        return _batch_accel_brake_box(cap, seg, physics)
+    rows, n = cap.shape
+    c = physics.grip_coupling
+    a_acc, a_brk = physics.a_accel, physics.a_brake
+    w = np.tile(cap ** 2, (1, 3))
+    ds = np.tile(seg, (1, 3))
+    k = np.tile(np.abs(kappa), (1, 3))
+    g = np.tile(grip, (1, 3))
+    last = 3 * n - 1
+
+    def eff(a, wj, j):
+        use = np.minimum(1.0, (wj * k[:, j] / g[:, j]) ** 2)
+        return a * np.sqrt(np.maximum(0.0, 1.0 - c * use))
+
+    def forward():
+        for j in range(1, last + 1):
+            w[:, j] = np.minimum(w[:, j], w[:, j - 1] + 2.0 * eff(a_acc, w[:, j - 1], j - 1) * ds[:, j - 1])
+
+    def backward():
+        for j in range(last - 1, -1, -1):
+            w[:, j] = np.minimum(w[:, j], w[:, j + 1] + 2.0 * eff(a_brk, w[:, j + 1], j + 1) * ds[:, j])
+
+    for _ in range(6):
+        before = w.copy()
+        forward()
+        backward()
+        forward()
+        if np.max(np.abs(w - before)) < 1e-9:
+            break
+    return np.sqrt(w[:, n:2 * n])
 
 
 def _batch_respond_early(speed, s, delay):
@@ -263,7 +355,7 @@ def _batch_speed_profile(xy, physics: CarPhysics, passes: int = 3):
         with np.errstate(divide='ignore'):
             v_rate = physics.curvature_rate / np.maximum(slope, 1e-9)
         speed = np.minimum(cap, v_rate)
-        speed = _batch_accel_brake(speed, seg, physics)
+        speed = _batch_accel_brake(speed, seg, physics, kappa, grip)
         speed = _batch_respond_early(speed, s, physics.speed_delay)
     return np.maximum(speed, physics.v_min), kappa, seg
 

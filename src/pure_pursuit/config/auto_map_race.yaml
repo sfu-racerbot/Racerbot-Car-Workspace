@@ -194,6 +194,12 @@ auto_map_race_node:
     profile_steering_rate: 1.0  # rad/s, pure_pursuit max_steering_rate
     profile_steering_delay: 0.10  # s
     profile_speed_delay: 0.10  # s
+    # Share of the tyres' grip that cornering takes from braking and acceleration in the speed profile,
+    # 0 (a box: full braking and full cornering planned at the same station) to 1 (the friction ellipse).
+    # 0 is every line planned before 2026-11-12. Finding that day (rb2 20261111-152132 launch): 3.0 braking
+    # with 3.2 lateral is 4.4 m/s^2 asked of tyres that deliver about 3, so the car ran wide at turn-in.
+    # See min_time_line._accel_brake. Not set in any car's calibration.
+    profile_grip_coupling: 0.0
     race_line_wall_margin: 0.15  # m
     race_line_cone_margin: 0.10  # m beyond the unchanged forward stop distance
     # Body clearance the racing line keeps from the walls (2026-11-07, was

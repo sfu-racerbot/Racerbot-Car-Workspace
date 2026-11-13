@@ -252,3 +252,20 @@ def test_min_time_keeps_the_fastest_passing_start(course):
     field = grid.clearance_field()
     ok, *_ = check_line(lambda x, y: grid.clearance_at(x, y, field), best.xy, cfg)
     assert ok
+
+
+def test_profile_grip_coupling_parameter_never_shortens_the_estimated_lap(course):
+    # Oracle: invariant, sharing the tyres between braking and cornering can only slow a plan (2026-11-12);
+    # the setting arrives through the builder's parameter mapping (profile_grip_coupling), on the 2026-11-06
+    # course of the other tests here. Slow: the coupled profile is a sequential pass (about 6x the box's).
+    from pure_pursuit.race_line import load_params
+    grid, seed, _, box_line = course
+    values = load_params('rb2')
+    values['profile_grip_coupling'] = 1.0
+    coupled_cfg = RaceLineConfig.from_params(values)
+    assert coupled_cfg.physics.grip_coupling == 1.0
+    box_cfg = RaceLineConfig.from_params(dict(values, profile_grip_coupling=0.0))
+    box = build_race_line(grid, seed, box_cfg)
+    coupled = build_race_line(grid, seed, coupled_cfg)
+    assert box.ok and coupled.ok
+    assert coupled.est_lap_s >= box.est_lap_s
