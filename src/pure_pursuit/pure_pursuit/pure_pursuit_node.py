@@ -68,7 +68,7 @@ from std_msgs.msg import String
 
 from drive_intent import predict, schema
 from drive_intent.throttle import FailureLatch, IntentThrottle
-from pure_pursuit import following, live_tuning, pass_completion, pass_planner, racing_math, tracking_laws
+from pure_pursuit import following, launch_scale, live_tuning, pass_completion, pass_planner, racing_math, tracking_laws
 from pure_pursuit.opponent_gate import OpponentGate, WallDistance
 
 
@@ -243,6 +243,12 @@ class PurePursuitNode(Node):
         # Braking is never brought forward by this; the curvature ceiling and
         # every safety stage still apply to the result.
         self.declare_parameter('speed_lead_time', 0.0)
+        # Launch-lap speed scale (launch_scale.py): after a deadman press from standstill the profiled speed is
+        # multiplied by this for the next launch_scale_distance metres driven (0 = one line length), then back
+        # to 1. 1.0 = off. Applied after the lead and before the min/max clip and every cap, so no limit can
+        # be raised by it. Refused outside (0.5, 1.0].
+        self.declare_parameter('launch_speed_scale', 1.0)
+        self.declare_parameter('launch_scale_distance', 0.0)
         # Frozen-localization watchdog: only armed once odometry is sure the
         # car is really moving, so a legitimately parked car never trips it.
         self.declare_parameter('pose_frozen_timeout_sec', 0.5)
@@ -520,6 +526,13 @@ class PurePursuitNode(Node):
         if not (math.isfinite(self.speed_lead_time) and 0.0 <= self.speed_lead_time <= 1.0):
             raise ValueError(
                 f'speed_lead_time must be finite and in [0, 1] s, got {self.speed_lead_time}')
+        try:
+            self._launch = launch_scale.LaunchScale(
+                float(self.get_parameter('launch_speed_scale').value),
+                float(self.get_parameter('launch_scale_distance').value))
+        except ValueError as exc:
+            raise RuntimeError(f'pure_pursuit_node: {exc}') from exc
+        self._launch_last_tick = None
         self.pose_frozen_timeout_sec = float(
             self.get_parameter('pose_frozen_timeout_sec').value)
         self.pose_frozen_min_speed = float(
@@ -1443,6 +1456,10 @@ class PurePursuitNode(Node):
             self.deadman_held = bool(msg.buttons[self.deadman_button])
         else:
             self.deadman_held = False
+        # Launch-lap scale: a press from standstill arms it (stale odometry counts as standing).
+        self._launch.on_deadman(
+            self.deadman_held, abs(self.current_speed) if self._odom_fresh() else None,
+            self.total_track_length)
 
         if self.deadman_held and was_released and self._pending_profile is not None:
             if (self.last_odom_time is not None and math.isfinite(self.current_speed)
@@ -1525,6 +1542,9 @@ class PurePursuitNode(Node):
             # Releasing LB is the operator acknowledging an exhausted
             # off-line recovery; the next hold may try once more.
             self._off_line_recovery_exhausted = False
+            # The launch scale re-arms on the next press from standstill; the tick clock restarts.
+            self._launch.on_deadman(False, None, self.total_track_length)
+            self._launch_last_tick = None
             # Same for MPC's miss latch: the operator re-arms the controller.
             if self.steering_law_name in tracking_laws.DEADLINE_LAWS:
                 self.tracking_law.miss_policy.clear()
@@ -1778,13 +1798,21 @@ class PurePursuitNode(Node):
         # or, while recovering, a fixed cautious crawl. The profile speed
         # at the nearest point assumes the car is actually tracking the
         # line, which recovering is the admission it currently is not. ---
+        tick = self.get_clock().now().nanoseconds / 1e9
+        self._launch.step(abs(self.current_speed) if self._odom_fresh() else None,
+                          0.0 if self._launch_last_tick is None else min(0.25, tick - self._launch_last_tick))
+        self._launch_last_tick = tick
+        launch_factor = self._launch.factor
+        unscaled_cmd = None
         if recovering:
             speed_cmd = min(self.off_racing_line_recovery_speed, self.max_speed)
         else:
             profiled = racing_math.lead_speed(
                 self.speed_profile, self.cumulative_arc_length, self.total_track_length,
                 nearest_idx, self.current_speed, self.speed_lead_time, closed=self.closed_loop)
-            speed_cmd = float(np.clip(profiled, self.min_speed, self.max_speed))
+            unscaled_cmd = float(np.clip(profiled, self.min_speed, self.max_speed))
+            # Launch-lap scale: on the profiled speed, before the clip and every cap below.
+            speed_cmd = float(np.clip(profiled * launch_factor, self.min_speed, self.max_speed))
         hard_speed_cap = self.max_speed
         decision_state = (
             'off_racing_line_recovery' if recovering else self.steering_law_name)
@@ -1798,7 +1826,11 @@ class PurePursuitNode(Node):
         # separate locals rather than recovered afterwards from the final
         # number, because "which limit won" is exactly the thing a single
         # min() throws away -- and exactly the thing worth knowing.
-        intent_profile_speed = speed_cmd
+        intent_profile_speed = speed_cmd if unscaled_cmd is None else unscaled_cmd
+        if not recovering and launch_factor < 1.0:
+            decision_detail_launch = f"launch lap x{launch_factor:.2f}, {self._launch.remaining:.1f} m left"
+        else:
+            decision_detail_launch = None
         intent_reactive_cap = None
         intent_curve_cap = None
 
@@ -1882,6 +1914,8 @@ class PurePursuitNode(Node):
             hard_speed_cap = min(hard_speed_cap, self.follow_speed_cap)
         if understeer_delta != 0.0:
             decision_detail += f"; understeer {understeer_delta:+.3f}rad"
+        if decision_detail_launch is not None:
+            decision_detail += f"; {decision_detail_launch}"
         desired_steering = steering_angle
         desired_speed = speed_cmd
         if desired_speed <= 0.0 or hard_speed_cap <= 0.0:
@@ -1930,6 +1964,8 @@ class PurePursuitNode(Node):
         # Intent goes out last: the drive command for this tick is already
         # published above, whichever branch produced it.
         intent_factors = [schema.factor('profile speed', intent_profile_speed)]
+        if decision_detail_launch is not None:
+            intent_factors.append(schema.factor('launch scale', intent_profile_speed * launch_factor))
         if intent_curve_cap is not None:
             intent_factors.append(schema.factor('curve cap', intent_curve_cap))
         if intent_reactive_cap is not None:

@@ -197,3 +197,12 @@ def test_tuning_allows_a_higher_or_equal_tier1_arc_value(tmp_path, key, shared_v
     """Oracle: spec (the same floor rule: at or above the shared value passes)."""
     assert check_pure_pursuit(tmp_path, key, shared_value * 1.1, shared_value) == []
     assert check_pure_pursuit(tmp_path, key, shared_value, shared_value) == []
+
+
+def test_tuning_rejects_launch_speed_scale_above_shared(tmp_path):
+    # oracle: spec (2026-11-13): launch_speed_scale is a ceiling key, an overlay may only lower it.
+    rejected(check(tmp_path, 'launch_speed_scale', '1.0', shared={'launch_speed_scale': 0.9}), 'launch_speed_scale')
+
+
+def test_tuning_allows_launch_speed_scale_below_shared(tmp_path):
+    assert check(tmp_path, 'launch_speed_scale', '0.88', shared={'launch_speed_scale': 1.0}) == []
