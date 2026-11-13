@@ -169,9 +169,8 @@ def _accel_brake_box(cap, seg, physics):
     return np.sqrt(np.minimum(accel, brake)[n:2 * n])
 
 
-# Rounds of the combined-grip fixed point in _accel_brake_coupled. MUST be odd: see that function.
-_COUPLING_ITERATIONS = 3
-assert _COUPLING_ITERATIONS % 2 == 1
+# Damped fixed-point rounds of the combined-grip solution (_accel_brake_coupled).
+_COUPLING_ROUNDS = 4
 
 
 def _envelope_forward(cap2, a2ds):
@@ -187,7 +186,7 @@ def _envelope_backward(cap2, b2ds):
     return B + np.minimum.accumulate((cap2 - B)[..., ::-1], axis=-1)[..., ::-1]
 
 
-def _accel_brake_coupled(cap, seg, physics, kappa, grip, iterations=None):
+def _accel_brake_coupled(cap, seg, physics, kappa, grip, rounds=None):
     """Acceleration and braking limits round a closed loop, sharing the tyres with the cornering.
 
     Works on one path (n,) or a batch (B, n). At a station of speed v, curvature k and lateral grip g the
@@ -199,43 +198,42 @@ def _accel_brake_coupled(cap, seg, physics, kappa, grip, iterations=None):
     one station, 3.0 and 3.2 m/s^2 together being 4.4 m/s^2 on tyres that deliver about 3, 2026-11-12).
     The limit depends on the speed it limits, so there is no closed form; but for a FIXED station-dependent
     limit there is one, the running-minimum form of _accel_brake_box with A[j] = sum_{i<j} 2 a_acc[i] ds[i]
-    in place of 2 a S[j] (and B[j] likewise for braking), so the speed is found by iterating it:
+    in place of 2 a S[j] (and B[j] likewise for braking). Let F(w) be one evaluation of it with the limits read
+    from the squared speed w (the acceleration limit at the station being left, the braking limit at the
+    station being entered; three laps tiled, the middle one kept). F is antitone: a slower plan leaves more
+    grip for longitudinal force, so w_a <= w_b pointwise gives F(w_a) >= F(w_b). The solution is the fixed
+    point w = F(w), found as
 
-        w = (box solution)^2                                   # an upper bound
-        repeat _COUPLING_ITERATIONS times:
-            f = sqrt(max(0, 1 - c * min(1, (w |k| / g)^2)))    # from the previous iterate
-            a_acc[i] = a_accel * f[i]       # segment i to i+1, the limit read at the station being left
-            a_brk[i] = a_brake * f[i+1]     # the limit read at the station being entered
-            w = min(forward(cap2, a_acc), backward(cap2, a_brk))   # three laps tiled, the middle one kept
+        w = (box solution)^2                                    # an upper bound
+        repeat ``_COUPLING_ROUNDS`` times:  w = 0.5 w + 0.5 F(w)    # damped: converges quickly, not always feasible
+        u = max(w, F(w));  w = F(u)                              # feasibility projection
 
-    Why the count must be odd. A limit shrinks as the speed it is read from grows (f falls with w), and a
-    faster plan is a plan with smaller limits. The box solution w0 is an upper bound on the true speed, so
-    limits computed from it are too small: iterate 1 is feasible (it respects the ellipse) but slow, and at
-    or below the truth. Limits computed from iterate 1, a lower bound, are too big: iterate 2 is fast but
-    may violate the ellipse, at or above the truth. Iterate 3 takes its limits from iterate 2, which is
-    pointwise at or below the box w0, so they are at least iterate 1's and at most the truth's: iterate 3 is
-    feasible again and at or above iterate 1. Odd iterates are feasible and non-decreasing; even ones are
-    neither guaranteed.
+    Why the projection makes ANY w feasible: u >= w, so F(u) <= F(w) <= u. The result F(u) is therefore at or
+    below u, the state its limits were read from, so those limits are at least what it needs: it is inside the
+    ellipse. (Undamped iterates oscillate between too slow and too fast and need an odd count and many rounds;
+    the damped rounds get within 0.6% of the converged lap in four and the projection removes the risk.)
     """
-    if _COUPLING_ITERATIONS % 2 != 1:
-        raise ValueError(f'_COUPLING_ITERATIONS must be odd, got {_COUPLING_ITERATIONS}')
-    rounds = _COUPLING_ITERATIONS if iterations is None else iterations     # ``iterations``: a test hook
     c = physics.grip_coupling
+    rounds = _COUPLING_ROUNDS if rounds is None else rounds
     cap = np.asarray(cap, dtype=float)
     n = cap.shape[-1]
     reps = [1] * (cap.ndim - 1) + [3]
     box = _accel_brake_box(cap, seg, physics) if cap.ndim == 1 else _batch_accel_brake_box(cap, seg, physics)
-    w = box ** 2
     cap2, ds = np.tile(cap ** 2, reps), np.tile(seg, reps)
     k, g = np.abs(kappa), np.asarray(grip, dtype=float)
-    for _ in range(rounds):
+
+    def F(w):
         f = np.sqrt(np.maximum(0.0, 1.0 - c * np.minimum(1.0, (w * k / g) ** 2)))
         f3 = np.tile(f, reps)
         f_next = np.concatenate([f3[..., 1:], f3[..., -1:]], axis=-1)
         w3 = np.minimum(_envelope_forward(cap2, 2.0 * physics.a_accel * f3 * ds),
                         _envelope_backward(cap2, 2.0 * physics.a_brake * f_next * ds))
-        w = w3[..., n:2 * n]
-    return np.sqrt(w)
+        return w3[..., n:2 * n]
+
+    w = box ** 2
+    for _ in range(rounds):
+        w = 0.5 * w + 0.5 * F(w)
+    return np.sqrt(F(np.maximum(w, F(w))))
 
 
 def _accel_brake(cap, seg, physics, kappa=None, grip=None):

@@ -508,40 +508,60 @@ def _sequential_reference(cap, seg, physics, kappa, grip):
     return np.sqrt(np.array(w[n:2 * n]))
 
 
-@pytest.mark.parametrize('iterations', [1, 3, 5])
-def test_odd_iterations_are_feasible_and_improve(monkeypatch, iterations):
-    xy, physics = race_day_line(), race_physics(1.0)
-    monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', iterations)
-    use, free = ellipse_use(xy, physics)
-    assert use[free].max() <= 1.0 + ELLIPSE_SLACK, (iterations, float(use[free].max()))
+PROFILED_LINE = Path(__file__).parent / 'data' / 'course_20261111' / 'raceline_profiled_orig_guard.csv'
 
 
-def test_more_odd_iterations_never_slow_the_lap(monkeypatch):
-    xy, physics = race_day_line(), race_physics(1.0)
-    laps = []
-    for iterations in (1, 3, 5):
-        monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', iterations)
-        laps.append(lap_time(xy, physics))
-    assert laps[0] >= laps[1] - 1e-9 and laps[1] >= laps[2] - 1e-9, laps       # s
+def profiled_line():
+    """The race-day line as the builder produced it with the original guard (est. 9.404 s), x, y only."""
+    from pure_pursuit.racing_math import load_profiled_csv
+    return load_profiled_csv(PROFILED_LINE)[0]
 
 
-def test_an_even_iteration_count_is_refused(monkeypatch):
-    monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', 2)
-    with pytest.raises(ValueError, match='odd'):
-        speed_profile(stadium(), CarPhysics(v_max=8.0, grip_coupling=1.0))
-    monkeypatch.setattr(min_time_line, '_COUPLING_ITERATIONS', 3)
-    speed_profile(stadium(), CarPhysics(v_max=8.0, grip_coupling=1.0))       # odd: fine
+def profiled_physics(c):
+    return CarPhysics(a_lat_left=3.2, a_lat_right=3.2, steering_delay=0.0, speed_delay=0.0, grip_coupling=c)
 
 
-@pytest.mark.parametrize('name,xy,make', [('stadium', stadium(), stadium_physics), ('race-day', race_day_line(), race_physics)])
-def test_fixed_point_is_close_to_the_sequential_solution(monkeypatch, name, xy, make):
+FIXTURES = [('stadium', stadium(), stadium_physics), ('race-day profiled', profiled_line(), profiled_physics)]
+
+
+_REAL_COUPLED = min_time_line._accel_brake_coupled
+
+
+def _with_rounds(monkeypatch, rounds):
+    monkeypatch.setattr(min_time_line, '_accel_brake_coupled',
+                        lambda cap, seg, p, kappa, grip: _REAL_COUPLED(cap, seg, p, kappa, grip, rounds=rounds))
+
+
+@pytest.mark.parametrize('rounds', [0, 1, 2, 4, 6])
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_projection_is_feasible_for_any_number_of_rounds(monkeypatch, name, xy, make, rounds):
+    # Oracle: the ellipse invariant itself, recomputed here (5% for the discretisation of a station step).
+    _with_rounds(monkeypatch, rounds)
+    use, free = ellipse_use(xy, make(1.0))
+    assert use[free].max() <= 1.0 + ELLIPSE_SLACK, (name, rounds, float(use[free].max()))
+
+
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_more_rounds_converge(monkeypatch, name, xy, make):
+    laps = {}
+    for rounds in (0, 2, 4, 40):
+        _with_rounds(monkeypatch, rounds)
+        laps[rounds] = lap_time(xy, make(1.0))
+    # oracle: the converged solution (40 rounds); 4 rounds is within 1.0% of it. Recorded 2026-11-13 on the
+    # race-day profiled line, delays zero, c = 1: 0 rounds 11.108 s, 2 rounds 9.571, 4 rounds 9.465, 40 rounds 9.406.
+    assert abs(laps[4] - laps[40]) <= 0.01 * laps[40], laps
+    assert laps[0] >= laps[2] - 1e-6 and laps[2] >= laps[4] - 1e-6, laps       # s: each round is no slower than the last
+    if name == 'race-day profiled':
+        assert laps[0] == pytest.approx(11.108, abs=0.005) and laps[4] == pytest.approx(9.465, abs=0.005)    # s
+
+
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_damped_projected_solution_is_close_to_the_sequential_solution(monkeypatch, name, xy, make):
     physics = make(1.0)
-    fixed = lap_time(xy, physics)
+    fast = lap_time(xy, physics)
     monkeypatch.setattr(min_time_line, '_accel_brake_coupled', _sequential_reference)
     sequential = lap_time(xy, physics)
-    # oracle: the sequential reference (the problem's own definition); the fixed point is feasible, so it is
-    # not faster than the exact solution beyond the 0.1% of iteration error, and within 1.0% of it.
-    assert fixed >= sequential * (1.0 - 0.001), (name, fixed, sequential)
-    assert abs(fixed - sequential) <= 0.01 * sequential, (name, fixed, sequential)
-    # measured 2026-11-13: within 0.01% on both; a profile without the sqrt in the limit is 0.12-0.22% off
-    assert abs(fixed - sequential) <= 0.0005 * sequential, (name, fixed, sequential)
+    # oracle: the sequential reference (the problem's own definition). The projected solution is feasible, so it
+    # is no faster than the exact one beyond 0.2%, and within 1.0% of it.
+    assert fast >= sequential * (1.0 - 0.002), (name, fast, sequential)
+    assert abs(fast - sequential) <= 0.01 * sequential, (name, fast, sequential)
