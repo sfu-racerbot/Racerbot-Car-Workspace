@@ -82,7 +82,7 @@ def raw_min(scan, angles, lo_deg, hi_deg, range_min, max_range):
     return float(r.min()) if r.size else math.inf
 
 
-def replay_window(run, params, t_from, t_to, gyro, imu_timeout=0.1, loc=None):
+def replay_window(run, params, t_from, t_to, gyro, imu_timeout=0.1, loc=None, hook=None):
     """Rows for the scans in (t_from, t_to) absolute, replayed from the start of the LB hold that contains t_from."""
     press = max((a for a, b in run.lb_windows(min_duration=0.0) if a <= t_from < b), default=None)
     if press is None:
@@ -144,6 +144,8 @@ def replay_window(run, params, t_from, t_to, gyro, imu_timeout=0.1, loc=None):
             k2 = min(max(k2, 0), len(loc) - 1)
             row.update(x=float(loc[k2, COL["x"]]), y=float(loc[k2, COL["y"]]), yaw=float(loc[k2, COL["yaw"]]),
                        true_speed=float(loc[k2, COL["wheel_v"]]))
+        if hook is not None:
+            hook(ctrl, row)      # lets a caller read the controller's state for this tick (follow_cost.py)
         rows.append(row)
     return rows
 
