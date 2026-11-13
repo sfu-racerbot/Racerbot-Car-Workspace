@@ -31,12 +31,12 @@ The brief's reading of "even truth fails" is "the cause is the sliding centroid"
    1.2-3.2 m/s (true yaw rate 0.7-1.7 rad/s), peaks 1.9-4.1 m/s (table "LATCH (steering)"). A 20% yaw error at 2.7 m and
    1.7 rad/s is 0.9 m/s, so the steering model's error (lag, lead, slip) is larger than the yaw-gain error alone.
 2. **With true ego the wall is much slower but not slow enough.** Per-episode median speed 0.07-0.26 m/s, but the track
-   still crosses the 0.6 m/s threshold: first `moving` at 0.60-0.66 m/s, range 2.1-2.5 m, peak 0.64-0.84 m/s (the sliding
+   still crosses the 0.6 m/s threshold: first `moving` at 0.60-0.66 m/s (range 1.9-2.5 m, or 0.5 m for four tracks that first count as moving only as the car passes), peak 0.64-0.84 m/s (the sliding
    centroid of a wall end: the tracked point's path is 0.13-1.8 m over the 1.0-1.9 s episodes, median 0.145 m over all 22).
 3. **The cap outlives the spike.** Once a track has been `moving` it is a confirmed car and stays in `followed_body()` for
    `stopped_release_sec` (1.0 s = 40 ticks; "held" column) after the speed falls back, so a 15-35 tick excursion above 0.6
    m/s holds the 0.5 m/s follow floor for another second. With truth ego a wall track is `moving` for only 14-35 ticks of a
-   110-250 tick life, yet it feeds the cap for 40 held ticks on 13 of 22 episodes.
+   110-250 tick life, yet it feeds the cap for 37-44 held ticks on 16 of 22 episodes (7 distinct tracks).
 4. Real cars: speeds 2-3.5 m/s median in every variant; they keep the cap in 7/7 (gyro) and 6/7 (truth; the exception is a
    one-tick episode).
 
