@@ -61,6 +61,73 @@ def lap_times(times, arcs, length):
     return [b - a for a, b in zip(crossings, crossings[1:])]
 
 
+import contextlib  # noqa: E402
+
+
+@contextlib.contextmanager
+def cap_binding_counter():
+    """Counts, over the commands the controller's final stage issues, the ticks on which the online curvature
+    cap (CommandShaper's curve_speed) was below both the wanted speed and the hard cap: the factor that set
+    the speed. Yields a dict with ``ticks`` and ``binding``; undone on exit."""
+    stats = dict(ticks=0, binding=0)
+    last = {}
+    original_limit = rv.racing_math.curvature_speed_limit
+    original_command = rv.CommandShaper.command
+
+    def limit(*a, **k):
+        last["curve"] = original_limit(*a, **k)
+        return last["curve"]
+
+    def command(self, desired_steering, desired_speed, hard_speed_cap=None, measured_speed=None):
+        last.clear()
+        out = original_command(self, desired_steering, desired_speed, hard_speed_cap, measured_speed)
+        if "curve" in last:
+            stats["ticks"] += 1
+            hard = self.max_speed if hard_speed_cap is None else hard_speed_cap
+            if last["curve"] < min(desired_speed, hard) - 1e-9:
+                stats["binding"] += 1
+        return out
+
+    rv.racing_math.curvature_speed_limit = limit
+    rv.CommandShaper.command = command
+    try:
+        yield stats
+    finally:
+        rv.racing_math.curvature_speed_limit = original_limit
+        rv.CommandShaper.command = original_command
+
+
+@contextlib.contextmanager
+def understeer_compensation(table):
+    """The node's understeer compensation (off unless a table is given) in the math-level controller:
+    ``racing_math.understeer_steering`` on the tracking law's steering at the measured speed, and the online cap
+    from ``delivered_curvature_speed_limit``, as pure_pursuit_node does with ``understeer_curve_asked/delivered``.
+    ``table`` is dict(asked=[...], delivered=[...]) or None (nothing changes)."""
+    if not table:
+        yield
+        return
+    from pure_pursuit import racing_math
+    curve = racing_math.grip_curve_from_params(list(table["asked"]), list(table["delivered"]))
+    original_command = rv.PathFollower.command
+    original_limit = rv.racing_math.curvature_speed_limit
+
+    def command(self, state, *a, **k):
+        steering, speed, *rest = original_command(self, state, *a, **k)
+        steering = racing_math.understeer_steering(steering, abs(float(state[3])), rv.WHEELBASE, curve, rv.STEERING_LIMIT)
+        return (steering, speed, *rest)
+
+    def limit(curvature, max_lateral_accel, max_speed):
+        return racing_math.delivered_curvature_speed_limit(curvature, max_lateral_accel, max_speed, curve)
+
+    rv.PathFollower.command = command
+    rv.racing_math.curvature_speed_limit = limit
+    try:
+        yield
+    finally:
+        rv.PathFollower.command = original_command
+        rv.racing_math.curvature_speed_limit = original_limit
+
+
 def floor_calibration(floor, grip_scale=None, grip_coupling=None):
     """The floor, with its grip scale and longitudinal coupling overridden only where given."""
     from dataclasses import replace
@@ -84,7 +151,7 @@ def solo_arguments(law, speed, lateral, laps, steering_limit, safety="map"):
 
 
 def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit, speed, lateral, law,
-              grip_scale=None, grip_coupling=None, start_wheel_speed=None):
+              grip_scale=None, grip_coupling=None, start_wheel_speed=None, understeer=None):
     from pure_pursuit import racing_math
     cal = floor_calibration(floor, grip_scale, grip_coupling)
     rv.RACELINE_SOURCE = "plan"
@@ -114,8 +181,10 @@ def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit
         return plant
     rv.make_plant, rv.plan_initial_pose = wrapped, spawn
     try:
-        result = rv.run_pure_solo(eval_gap.track_path(track), seed, seconds, calibration=cal, plan=plan,
-                                  **solo_arguments(law, speed, lateral, laps, steering_limit))
+        with understeer_compensation(understeer), cap_binding_counter() as cap:
+            result = rv.run_pure_solo(eval_gap.track_path(track), seed, seconds, calibration=cal, plan=plan,
+                                      **solo_arguments(law, speed, lateral, laps, steering_limit))
+        result["cap_binding_ticks"], result["command_ticks"] = cap["binding"], cap["ticks"]
     finally:
         rv.make_plant, rv.plan_initial_pose = make_plant, plan_pose
     return cal, plan, np.array(trace, float), result

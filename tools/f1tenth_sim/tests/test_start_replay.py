@@ -242,3 +242,41 @@ def test_launch_with_the_cap_off_makes_contact_before_the_second_bend_like_the_r
         row = sr.summarise(cal, plan, trace, result, [])
         assert row['seed_result']['contact'] > 0
         assert 11.0 < row['seed_result']['end_arc'] < 13.0, row['seed_result']['end_arc']     # m
+
+
+def test_cap_binding_counter_counts_ticks_where_the_online_cap_set_the_speed():
+    import run_validation as rv
+    with sr.cap_binding_counter() as stats:
+        shaper = rv.CommandShaper('rb2', 5.0, 2.0)               # online lateral limit 2.0 m/s^2
+        for _ in range(10):
+            shaper.command(0.0, 4.0)                              # straight: no cap below the wanted speed
+        for _ in range(10):
+            shaper.command(0.35, 4.0)                             # tan(.35)/.36 = 0.97 /m: cap sqrt(2/.97) = 1.43
+        for _ in range(5):
+            shaper.command(0.35, 1.0)                             # wanted speed already below the cap
+    assert stats == dict(ticks=25, binding=10)
+    import run_validation
+    assert not hasattr(run_validation.racing_math.curvature_speed_limit, '__wrapped__')
+    assert run_validation.CommandShaper.command.__name__ == 'command' and 'cap_binding_counter' not in repr(
+        run_validation.CommandShaper.command)                    # undone on exit
+
+
+def test_understeer_compensation_steers_harder_and_caps_speed_by_the_delivered_curve_and_is_undone():
+    # Oracle: racing_math's own closed forms (understeer_steering / delivered_curvature_speed_limit) at the table
+    # rb2's gyro-basis grip gives (asked 0, 2.7, 3.25, 3.75 -> delivered 0, 2.7, 2.88, 2.94).
+    import run_validation as rv
+    from pure_pursuit import racing_math
+    table = dict(asked=[0.0, 2.7, 3.25, 3.75], delivered=[0.0, 2.7, 2.88, 2.94])
+    curve = racing_math.grip_curve_from_params(table['asked'], table['delivered'])
+    original = (rv.PathFollower.command, rv.racing_math.curvature_speed_limit)
+    with sr.understeer_compensation(table):
+        assert rv.PathFollower.command is not original[0]
+        k = 0.9                                              # 1/m
+        assert rv.racing_math.curvature_speed_limit(k, 3.1, 5.0) == pytest.approx(
+            racing_math.delivered_curvature_speed_limit(k, 3.1, 5.0, curve), abs=1e-12)    # m/s
+        # 3.1 m/s^2 is more than this table ever delivers, so the cap is the last asked (3.75): above the plain one
+        assert rv.racing_math.curvature_speed_limit(k, 3.1, 5.0) == pytest.approx(math.sqrt(3.75 / k), abs=1e-9)
+        assert rv.racing_math.curvature_speed_limit(k, 2.5, 5.0) == pytest.approx(original[1](k, 2.5, 5.0), abs=1e-9)
+    assert (rv.PathFollower.command, rv.racing_math.curvature_speed_limit) == original
+    with sr.understeer_compensation(None):
+        assert (rv.PathFollower.command, rv.racing_math.curvature_speed_limit) == original
