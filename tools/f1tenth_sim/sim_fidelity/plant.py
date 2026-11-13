@@ -250,7 +250,8 @@ class FidelityPlant:
         self.degrade_agents = degrade_agents
 
         self.grip = [
-            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase)
+            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase,
+                            falling=calibration.grip_curve_falls)
             if calibration.grip_curve is not None
             else GripEnvelope(
                 friction_accel_limit=calibration.friction_accel_limit,

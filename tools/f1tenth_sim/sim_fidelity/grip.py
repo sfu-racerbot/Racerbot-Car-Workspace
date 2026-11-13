@@ -157,12 +157,17 @@ class ProgressiveGrip:
     total_steps: int = 0
     max_demanded_lateral: float = 0.0
     max_allowed_lateral: float = 0.0
+    # True for a measured curve whose delivered column falls past a peak (rb2, 2026-11-11:
+    # 2.94 m/s^2 at 3.75 asked, 2.7 beyond). The default still refuses one, so a typo in a
+    # table cannot make the tyres weaker as they are pushed harder unnoticed.
+    falling: bool = False
 
     def __post_init__(self):
         asked = [row[0] for row in self.curve]
         delivered = [row[1] for row in self.curve]
-        if len(asked) < 2 or asked != sorted(asked) or delivered != sorted(delivered):
-            raise ValueError(f"grip curve must be ascending in both columns, got {self.curve!r}")
+        if len(asked) < 2 or asked != sorted(asked) or (not self.falling and delivered != sorted(delivered)):
+            columns = "asked" if self.falling else "both columns"
+            raise ValueError(f"grip curve must be ascending in {columns}, got {self.curve!r}")
         self._asked, self._delivered = asked, delivered
 
     def deliver(self, asked: float) -> float:
@@ -184,8 +189,8 @@ class ProgressiveGrip:
 
     def report(self) -> dict:
         return {
-            "grip_limit_mps2": round(self._delivered[-1], 3),
-            "grip_limit_g": round(self._delivered[-1] / 9.81, 3),
+            "grip_limit_mps2": round(max(self._delivered), 3),
+            "grip_limit_g": round(max(self._delivered) / 9.81, 3),
             "grip_limited_steps": self.limited_steps,
             "grip_limited_fraction": (round(self.limited_steps / self.total_steps, 4)
                                       if self.total_steps else 0.0),

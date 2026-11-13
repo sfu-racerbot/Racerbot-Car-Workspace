@@ -67,6 +67,37 @@ def test_progressive_grip_refuses_a_curve_that_is_not_ascending(curve):
         ProgressiveGrip(curve, L)
 
 
+FALLING = ((0.0, 0.0), (2.0, 2.0), (4.0, 3.0), (6.0, 2.0), (8.0, 2.4))
+
+
+def test_progressive_grip_takes_a_falling_curve_only_when_told_to():
+    # Oracle: docs/sim-calibration.md, 2026-11-11 rb2 grip: delivered lateral acceleration
+    # peaks and then FALLS as more is asked. The default refusal (test above) stays.
+    with pytest.raises(ValueError, match="ascending"):
+        ProgressiveGrip(FALLING, L)
+    g = ProgressiveGrip(FALLING, L, falling=True)
+    assert g.deliver(4.0) == pytest.approx(3.0, abs=1e-12)     # m/s^2, the peak
+    assert g.deliver(5.0) == pytest.approx(2.5, abs=1e-12)     # halfway down the fall
+    assert g.deliver(6.0) == pytest.approx(2.0, abs=1e-12)
+    assert g.deliver(50.0) == pytest.approx(2.4, abs=1e-12)    # holds the last value
+
+
+def test_progressive_grip_falling_curve_turns_the_car_less_when_asked_for_more():
+    # Oracle: a_lat = v^2 tan(delta) / L; asking 5 m/s^2 must deliver 2.5, below the 3.0 peak.
+    g = ProgressiveGrip(FALLING, L, falling=True)
+    v = 3.0
+    at_peak = g.apply(math.atan(4.0 * L / (v * v)), v)
+    past_peak = g.apply(math.atan(5.0 * L / (v * v)), v)
+    assert v * v * math.tan(at_peak) / L == pytest.approx(3.0, abs=1e-9)
+    assert v * v * math.tan(past_peak) / L == pytest.approx(2.5, abs=1e-9)
+    assert past_peak < at_peak
+
+
+def test_progressive_grip_falling_still_refuses_asked_that_does_not_ascend():
+    with pytest.raises(ValueError, match="ascending"):
+        ProgressiveGrip(((0.0, 0.0), (3.0, 2.0), (2.0, 2.5)), L, falling=True)
+
+
 # --- the floor profile -----------------------------------------------------------------
 
 def test_plain_calibration_keeps_every_floor_model_off():

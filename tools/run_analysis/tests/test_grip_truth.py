@@ -163,3 +163,12 @@ def test_analyse_reports_both_signals_the_plateau_and_the_roll_indicator():
     assert result['sustained_limit'] == pytest.approx(3.0, abs=0.01)   # gyro basis
     assert result['peak_asked'] == pytest.approx(3.0, abs=1e-9)        # bin 2.5-3.5 centre
     assert result['accel_over_gyro'] == pytest.approx(1.25, abs=0.01)
+
+
+def test_json_curves_carry_both_bases():
+    rows = [dict(asked=3.2, n=80, acc_median=3.1, gyro_median=2.9, low=3.0, high=3.5),
+            dict(asked=3.8, n=70, acc_median=3.2, gyro_median=2.95, low=3.5, high=4.0)]
+    out = grip_truth.curves_for_json(rows)
+    assert out['curve'] == [dict(asked=3.2, delivered=3.1, n=80), dict(asked=3.8, delivered=3.2, n=70)]
+    # the simulator's grip is the gyro basis (speed * gyro is the centripetal acceleration on steady corners)
+    assert out['gyro_curve'] == [dict(asked=3.2, delivered=2.9, n=80), dict(asked=3.8, delivered=2.95, n=70)]
