@@ -243,6 +243,58 @@ def test_stale_odometry_during_the_reverse_ends_it(rig):
     assert r.tick(odom=False)[1] == 0.0
 
 
+def test_odometry_going_stale_during_the_reverse_commands_zero_on_the_next_tick(rig):
+    # enable_ttc is off here so the node's own odometry_stale stop (which also commands zero) cannot answer for the
+    # reverse's own freshness check: this isolates _reverse_override's `measured_speed=None` when odometry is old.
+    r = rig([*ON, '-p', 'enable_ttc:=false'])
+    r.drive_up()
+    assert r.wait_for_reverse() is not None
+    for _ in range(3):
+        assert r.tick(speed=-0.30)[1] < 0.0
+    r.node.last_odom_time = r.node.get_clock().now() - Duration(seconds=r.node.odom_timeout_sec + 1.0)
+    assert r.tick(odom=False)[1] == 0.0                                   # exactly zero, on the very next scan
+    for _ in range(20):
+        r.node.last_odom_time = r.node.get_clock().now() - Duration(seconds=r.node.odom_timeout_sec + 1.0)
+        assert r.tick(odom=False)[1] >= 0.0
+
+
+def test_scans_more_than_a_quarter_second_apart_end_the_reverse(rig):
+    r = rig(ON)
+    r.drive_up()
+    assert r.wait_for_reverse() is not None
+    for _ in range(3):
+        assert r.tick(speed=-0.30)[1] < 0.0
+    r.t += 0.275                                                          # this scan is stamped 0.30 s after the last
+    assert r.tick(speed=-0.30)[1] == 0.0
+    for _ in range(20):
+        assert r.tick(speed=-0.30)[1] >= 0.0
+
+
+def test_the_attempt_limit_holds_over_a_minute_and_rearms_after_three_metres_at_node_level(rig):
+    r = rig(ON)
+
+    def stuck(seconds):
+        """Ticks at the wall; odometry follows the command (backs at -0.30 while reversing). Counts the bursts."""
+        n, prev = 0, 0.0
+        for _ in range(int(seconds / DT)):
+            s = r.tick(speed=prev if prev < 0.0 else 0.0)[1]
+            n += (s < 0.0 and prev >= 0.0)
+            prev = s
+        return n
+
+    # 0.3 m driven forward before each stuck spell: enough ground to reverse over (>= 0.20 m), never 3.0 m in total.
+    bursts = []
+    for _ in range(8):                                                    # 8 x 8 s = 64 s of blocked ticks
+        r.drive_up(metres=0.3, speed=1.0)
+        bursts.append(stuck(8.0))
+    assert sum(bursts) == 2 and bursts[:2] == [1, 1], bursts            # max_attempts 2, never a third
+    assert r.node.reverse.state == 'exhausted'
+    for _ in range(4):                                                    # 4 x 0.3 m more: 3.6 m since the last attempt
+        r.drive_up(metres=0.3, speed=1.0)
+    assert r.node.reverse.attempts == 0                                   # re-armed by note_forward
+    assert stuck(8.0) == 1                                                # and a third burst is possible again
+
+
 def test_nothing_driven_just_before_the_stop_never_reverses(rig):
     r = rig(ON)
     speeds = [r.tick(speed=0.0)[1] for _ in range(200)]                   # never drove: no ground to back over

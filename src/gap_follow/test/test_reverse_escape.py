@@ -365,3 +365,69 @@ from gap_follow.reverse_escape import blocked_by_clearance
 ])
 def test_blocked_by_clearance(speed, clearance, flank, ttc, expected):
     assert blocked_by_clearance(speed, clearance, flank, ttc) is expected
+
+
+# --- rule 3: an interval it cannot measure ends the reverse -------------------------------------------
+
+@pytest.mark.parametrize('dt', [0.0, -0.01, float('nan'), None])
+def test_rule3_an_unmeasurable_interval_ends_the_reverse_with_zero_that_tick(dt):
+    esc = ReverseEscape()
+    to_reversing(esc)
+    assert esc.step(dt=DT, deadman=True, blocked_ahead=True, measured_speed=-0.30, rear_quarter_clear=True,
+                    recent_forward_m=1.0) == -esc.speed                   # still reversing with a measurable dt
+    out = esc.step(dt=dt, deadman=True, blocked_ahead=True, measured_speed=-0.30, rear_quarter_clear=True,
+                   recent_forward_m=1.0)                                  # the node passes 0.0 for a stamp it cannot use
+    assert out == 0.0
+    assert esc.state == 'settling'
+
+
+# --- rule 6: the attempt limit, pinned by number ------------------------------------------------------
+
+def _bursts(esc, seconds, recent_forward_m=0.3):
+    """Blocked ticks with the car backing at the commanded speed; returns the number of distinct reversing bursts."""
+    n, prev = 0, None
+    for _ in range(int(round(seconds / DT))):
+        speed = prev if prev is not None and prev < 0.0 else 0.0
+        out = esc.step(dt=DT, deadman=True, blocked_ahead=True, measured_speed=speed, rear_quarter_clear=True,
+                       recent_forward_m=recent_forward_m)
+        n += (out is not None and out < 0.0 and not (prev is not None and prev < 0.0))
+        prev = out
+    return n
+
+
+def test_rule6_two_attempts_over_a_minute_then_a_third_only_after_three_metres_of_progress():
+    esc = ReverseEscape(max_attempts=2)
+    total = 0
+    for _ in range(4):                                                    # 4 x 16 s = 64 s, no forward progress fed
+        total += _bursts(esc, 16.0)
+    assert total == 2 and esc.state == 'exhausted'
+    esc.note_forward(2.9)
+    assert _bursts(esc, 8.0) == 0 and esc.state == 'exhausted'            # 2.9 m: still not enough
+    esc.note_forward(0.1)                                                 # 3.0 m since the last attempt
+    assert esc.attempts == 0 and esc.state == 'idle'
+    assert _bursts(esc, 16.0) == 2                                        # a fresh budget: bursts are possible again
+
+
+def test_rule6_releasing_the_deadman_mid_reverse_cannot_dodge_the_attempt_limit():
+    # the cooldown never runs when the reverse ends by deadman release (rule 4): only the check in 'waiting' stops
+    # a third burst from a car that has already used both attempts
+    esc = ReverseEscape(max_attempts=2)
+    for _ in range(2):
+        to_reversing(esc)
+        assert esc.step(dt=DT, deadman=False, blocked_ahead=True, measured_speed=-0.3, rear_quarter_clear=True,
+                        recent_forward_m=1.0) is None
+        assert esc.state == 'idle'
+    assert esc.attempts == 2
+    assert all(out is None or out >= 0.0 for out in drive(esc, 10.0, recent_forward_m=1.0))
+    assert esc.state == 'exhausted'
+
+
+def test_rule6_the_cooldown_after_the_last_attempt_ends_in_exhausted_not_idle():
+    # not blocked while it cools down, so only the cooldown's own end-of-cooldown rule can set 'exhausted'
+    # (the check in 'waiting' needs the car to be blocked again): rule 6, "after the last attempt the state is 'exhausted'"
+    esc = ReverseEscape(max_attempts=2)
+    for n in (1, 2):
+        to_reversing(esc)
+        assert esc.attempts == n
+        drive(esc, esc.max_time + esc.settle_sec + esc.cooldown_sec + 0.2, blocked_ahead=False, measured_speed=-0.3)
+        assert esc.state == ('idle' if n == 1 else 'exhausted'), (n, esc.state)

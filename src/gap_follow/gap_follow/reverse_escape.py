@@ -16,7 +16,9 @@ node's own deadman path commands zero. Rules (docs/gap-follow.md#reverse-escape)
 2. waiting -> reversing after ``wait_sec`` of continuous waiting, only if the rear quarters are clear, at least 0.20 m
    was driven forward recently and attempts < ``max_attempts``. Target = min(``max_distance``, ground driven).
 3. reversing: -``speed``; the measured |speed| * dt is integrated; it ends (-> settling, 0.0 that tick) at the
-   target, after ``max_time``, when the rear quarters stop being clear, or when the speed is stale or not finite.
+   target, after ``max_time``, when the rear quarters stop being clear, or when the speed is stale or not finite, or
+   when the scan interval cannot be measured (``dt`` not finite or <= 0: a zero, repeated or older stamp, or a gap
+   the node refuses at 0.25 s): nothing would be counted, so the reverse would never end.
 4. Deadman released at any time: None, idle; the attempt still counts.
 5. settling: 0.0 for ``settle_sec``, then cooldown: None for ``cooldown_sec`` (normal driving, no new reverse).
 6. At most ``max_attempts`` reverses until ``note_forward`` has been fed ``rearm_progress`` metres; then the count
@@ -118,6 +120,9 @@ class ReverseEscape:
             return None
         if self.state == 'reversing':
             if not fresh:
+                self._end_reverse()
+                return 0.0
+            if dt <= 0.0:                          # an interval it cannot measure (rule 3), like a speed it cannot measure
                 self._end_reverse()
                 return 0.0
             self._elapsed += dt

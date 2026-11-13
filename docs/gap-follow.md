@@ -1669,6 +1669,7 @@ The reverse ends immediately, with a zero command, if:
 
 - LB is released or the `/joy` messages go stale (the node's own deadman path commands zero, and the machine goes idle);
 - the odometry is stale or not finite (it cannot measure the distance, so it does not move);
+- the scan interval cannot be measured (a zero, repeated or older stamp, or scans more than 0.25 s apart): nothing would be counted, so the distance and time limits could never end the reverse;
 - a rear quarter stops reading clear, or the IMU impact latch trips.
 
 It is a drive command like any other: it is published from the one `_publish_drive` every scan tick passes through, after the deadman check at the top of `_scan_step`, and the deadman is also passed to the state machine. `/drive_intent` shows state `reverse_escape` with the distance left.
