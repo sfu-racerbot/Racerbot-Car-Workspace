@@ -7,8 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-W = Path.cwd() if (Path.cwd() / "tools" / "f1tenth_sim").is_dir() else \
-    Path("/home/bryan/racerbot-ws/.claude/worktrees/map-racer-faster-than-gap")
+W = Path.cwd() if (Path.cwd() / "tools" / "f1tenth_sim").is_dir() else Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(W / "tools" / "f1tenth_sim"), str(W / "tools"), str(W / "src" / "pure_pursuit")]
 import pure_course  # noqa: E402
 import run_validation as rv  # noqa: E402

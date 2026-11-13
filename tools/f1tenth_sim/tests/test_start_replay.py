@@ -163,7 +163,7 @@ def test_the_plants_first_state_is_the_requested_position_speed_offset_and_headi
     import eval_gap
     from pure_pursuit import racing_math
     xy = racing_math.load_xy_csv(
-        '/home/bryan/racerbot-ws/src/pure_pursuit/test/data/course_20261111/raceline_raw.csv')
+        str(SIM.parents[1] / 'src' / 'pure_pursuit' / 'test' / 'data' / 'course_20261111' / 'raceline_raw.csv'))
     x, y, yaw_deg = sr.pose_on_line(xy, 8.0, right=0.098, heading_error_deg=0.48)
     cal = sr.floor_calibration(FLOOR)
     plant = eval_gap.make_plant('car2_course_2026_11_11', 12345, cal)
@@ -315,3 +315,16 @@ def test_launch_scale_multiplies_the_profiled_speed_for_the_distance_then_restor
     assert speeds[0] == pytest.approx(1.7, abs=1e-12) and speeds[1] == pytest.approx(1.7, abs=1e-12)    # m/s
     assert speeds[2] == pytest.approx(2.0, abs=1e-12)
     assert follower.command(state)[1] == 2.0                  # restored on exit as well
+
+
+def test_no_simulator_file_names_a_path_under_a_home_directory():
+    # Invariant: the simulator runs from any checkout (both cars and the pit PC), so no Python file under
+    # tools/f1tenth_sim may hold a string literal that starts with /home/. On 2026-11-13 a literal
+    # /home/bryan/... path in this file failed two tests on car 1, whose checkout is elsewhere.
+    import re
+    literal = re.compile(r"""['"]/home/""")
+    files = [f for f in SIM.rglob('*.py') if '__pycache__' not in f.parts]
+    assert len(files) > 20                      # the scan found the tree, not an empty directory
+    bad = [f'{f.relative_to(SIM)}:{n}' for f in files
+           for n, line in enumerate(f.read_text(errors='replace').splitlines(), 1) if literal.search(line)]
+    assert bad == []
