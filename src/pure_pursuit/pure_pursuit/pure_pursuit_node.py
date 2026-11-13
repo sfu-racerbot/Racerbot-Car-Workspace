@@ -287,6 +287,13 @@ class PurePursuitNode(Node):
         # enough to consider an escape"; set negative to disable body_contact
         # escapes entirely while keeping tier 1's.
         self.declare_parameter('body_contact_escape_clearance', 0.0)
+        # Understeer compensation (OFF by default): what the car delivers against what the steering
+        # asks for, in lateral acceleration (m/s^2), two equal-length lists, strictly increasing from
+        # (0, 0), delivered <= asked. Measured by tools/run_analysis/grip_truth.py. See
+        # racing_math.GripCurve and docs/superpowers/plans/2026-11-12-post-race-speed-program.md Task 6.
+        # Empty default is a byte array in rclpy, so typing is dynamic; real values are double arrays.
+        self.declare_parameter('understeer_curve_asked', [], ParameterDescriptor(dynamic_typing=True))
+        self.declare_parameter('understeer_curve_delivered', [], ParameterDescriptor(dynamic_typing=True))
         # Crawl along the racing line away from a wall alongside the body
         # when the body's own arc is clear (racing_math.body_arc_free_distance);
         # 0 = off. See _reactive_override Tier 0 and
@@ -540,6 +547,12 @@ class PurePursuitNode(Node):
             self.get_parameter('emergency_escape_clearance').value)
         self.body_contact_escape_clearance = float(
             self.get_parameter('body_contact_escape_clearance').value)
+        try:
+            self.grip_curve = racing_math.grip_curve_from_params(
+                list(self.get_parameter('understeer_curve_asked').value),
+                list(self.get_parameter('understeer_curve_delivered').value))
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(f'pure_pursuit_node: understeer_curve parameters refused: {exc}') from exc
         self.flank_creep_length = float(
             self.get_parameter('flank_creep_length').value)
         self.flank_creep_margin = float(
@@ -1717,6 +1730,7 @@ class PurePursuitNode(Node):
         # as before -- recovery and overtaking keep pure-pursuit geometry
         # whatever law is selected. ---
         law_detail = ''
+        understeer_delta = 0.0
         if recovering:
             steering_unclipped = racing_math.steering_from_curvature(kappa, self.wheelbase)
             steering_angle = float(np.clip(
@@ -1749,6 +1763,16 @@ class PurePursuitNode(Node):
             steering_unclipped = result.unclipped
             law_detail = result.detail
             self._last_law_predicted = result.predicted
+            # Understeer compensation (off unless a curve is set): steer for the curvature the car
+            # will really follow. Applied to the tracking law's steering only, here, before the
+            # reactive override and the command shaping; the uncompensated value is what the intent
+            # reports as the desired steering.
+            if self.grip_curve is not None:
+                compensated = racing_math.understeer_steering(
+                    steering_angle, lookahead_speed, self.wheelbase, self.grip_curve,
+                    self.max_steering_angle)
+                understeer_delta = compensated - steering_angle
+                steering_angle = compensated
 
         # --- Speed: the profiled speed for where the car is right now --
         # or, while recovering, a fixed cautious crawl. The profile speed
@@ -1805,6 +1829,7 @@ class PurePursuitNode(Node):
                 steering_unclipped = racing_math.steering_from_curvature(kappa, self.wheelbase)
                 steering_angle = steering_unclipped
                 steering_angle = float(np.clip(steering_angle, -self.max_steering_angle, self.max_steering_angle))
+                understeer_delta = 0.0   # the overtake aims anew; nothing of the law's steering remains
                 decision_state = (
                     'overtake_left' if self.overtake_side > 0 else 'overtake_right')
 
@@ -1841,6 +1866,7 @@ class PurePursuitNode(Node):
                 desired_steering=steering_angle)
             if steering_override is not None:
                 steering_angle = steering_override
+                understeer_delta = 0.0   # a reactive steering is not compensated or reported as such
             if speed_override is not None:
                 speed_cmd = min(speed_cmd, speed_override) if reactive_state is None else speed_override
                 hard_speed_cap = min(hard_speed_cap, speed_override)
@@ -1854,6 +1880,8 @@ class PurePursuitNode(Node):
         if self.follow_speed_cap is not None:
             speed_cmd = min(speed_cmd, self.follow_speed_cap)
             hard_speed_cap = min(hard_speed_cap, self.follow_speed_cap)
+        if understeer_delta != 0.0:
+            decision_detail += f"; understeer {understeer_delta:+.3f}rad"
         desired_steering = steering_angle
         desired_speed = speed_cmd
         if desired_speed <= 0.0 or hard_speed_cap <= 0.0:
@@ -1914,7 +1942,7 @@ class PurePursuitNode(Node):
         self._publish_intent(
             decision_state,
             decision_detail,
-            desired_steering=desired_steering,
+            desired_steering=desired_steering - understeer_delta,
             desired_speed=desired_speed,
             commanded_steering=steering_angle,
             commanded_speed=speed_cmd,
@@ -3432,8 +3460,8 @@ class PurePursuitNode(Node):
         desired_curvature = math.tan(desired_steering) / self.wheelbase
         commanded_curvature = math.tan(steering) / self.wheelbase
         online_curvature = max(abs(desired_curvature), abs(commanded_curvature))
-        curve_speed = racing_math.curvature_speed_limit(
-            online_curvature, self.max_lateral_accel, self.max_speed)
+        curve_speed = racing_math.delivered_curvature_speed_limit(
+            online_curvature, self.max_lateral_accel, self.max_speed, self.grip_curve)
         speed_target = min(desired_speed, curve_speed, hard_speed_cap)
         # Ramp from where the car actually *is*, not from the last command.
         # A ceiling (avoidance, curvature) drops the command instantly while
