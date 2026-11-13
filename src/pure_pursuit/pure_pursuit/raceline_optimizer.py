@@ -562,26 +562,34 @@ def refine_centerline(occ_map, seed_path: np.ndarray, spacing: float,
 
 
 def _guarded_move(occ_map, field, old: np.ndarray, new: np.ndarray) -> np.ndarray:
-    """Take each point's step only where it does not walk into or across a wall.
+    """Take each point's step unless it puts the point in, or carries it across, occupied space.
 
-    Re-centering is meant to move a point *away* from the nearest wall, so its
-    clearance should not drop. Where it would -- an island in the track (a
-    pillar, a cone) whose far side a ray slipped past, or smoothing pulling a
-    point across one -- the step is halved until it is safe, else dropped.
-    Without this the centerline was dragged straight through a 0.5 m pillar,
-    leaving a "corridor" of a few centimetres and failing the whole race line.
+    Re-centering moves a point toward the middle of what its rays measured. Where
+    a ray slipped past an island in the track (a pillar, a cone), or smoothing
+    pulls a point across one, the step lands in or crosses that island; without
+    this the centerline was dragged straight through a 0.5 m pillar, leaving a
+    "corridor" of a few centimetres and failing the whole race line.
+
+    A step is refused only if its destination, or any point sampled along the
+    straight segment old -> new at no more than half a cell apart, has clearance
+    at or below ``1.5 * resolution`` (a wall cell or its neighbour). A refused
+    step is tried at half, then a quarter, then dropped. There is deliberately
+    no "clearance must not drop" condition: moving toward a wall is legitimate
+    where the track is simply narrower, and such a rule changed the line on
+    tracks with no island at all.
     """
     old = np.asarray(old, dtype=np.float64)
     new = np.asarray(new, dtype=np.float64)
     tol = 1.5 * occ_map.resolution
-    before = occ_map.clearance_at(old[:, 0], old[:, 1], field)
     out = old.copy()
     pending = np.ones(len(old), dtype=bool)
     for fraction in (1.0, 0.5, 0.25):
         trial = old + fraction * (new - old)
-        ok = occ_map.clearance_at(trial[:, 0], trial[:, 1], field) >= before - tol
-        for t in (0.25, 0.5, 0.75):
-            mid = old + t * (trial - old)
+        longest = float(np.max(np.linalg.norm(trial - old, axis=1))) if len(old) else 0.0
+        samples = max(1, int(np.ceil(longest / (0.5 * occ_map.resolution))))
+        ok = occ_map.clearance_at(trial[:, 0], trial[:, 1], field) > tol
+        for k in range(1, samples):
+            mid = old + (k / samples) * (trial - old)
             ok &= occ_map.clearance_at(mid[:, 0], mid[:, 1], field) > tol
         take = pending & ok
         out[take] = trial[take]

@@ -402,16 +402,18 @@ def _loop_track_with_pillar(resolution=0.05):
     return occ.OccupancyMap(grid, resolution, -span_x, -span_y)
 
 
-def _seed_passing_the_pillar(offset=0.5):
-    """The loop's centerline, bent to pass 0.3 m from the pillar's face on
-    the inside of the track (y = -3 + 0.25 + `offset`).
+def _seed_passing_the_pillar(offset=0.3):
+    """The loop's centerline, bent to pass `offset` m from the pillar's face on
+    the inside of the track (y = -3 + 0.25 + offset): the plan's 0.3 m.
 
-    The plan asks for 0.3 m. Measured on this map (5 passes, 2026-11-12) the
-    guard does NOT hold at 0.3 m: the refined line ends inside the pillar with
-    or without `_guarded_move` (clearance 0.0 both ways); at 0.4 m it is 0.18
-    with the guard and 0.158 without; from 0.5 m the guard keeps it clear
-    (0.30 against 0.0 stubbed). 0.5 m is the nearest offset where the guard is
-    the thing under test."""
+    Measured 2026-11-12 with the redesigned guard against none, minimum
+    clearance of the refined line after N passes (guard / unguarded, m):
+      offset 0.3: N=2 0.15/0.0, N=3 0.11/0.0, N=4 0.11/0.0
+      offset 0.4: 0.35/0.35, 0.21/0.21, 0.30/0.30 (this seed never reaches the pillar)
+      offset 0.5: 0.35/0.35, 0.11/0.14, 0.05/0.0
+      offset 0.6: 0.35/0.35, 0.10/0.14, 0.16/0.0
+    The test uses 0.3 m and the builder's default four passes: the guard keeps
+    0.11 m where the unguarded line ends inside the pillar."""
     seed = _rounded_rectangle(6.0, 3.0, 1.5, spacing=0.1)
     bottom = (seed[:, 1] < -2.99) & (np.abs(seed[:, 0]) < 2.0)
     blend = np.clip(2.0 - np.abs(seed[bottom, 0]), 0.0, 1.0)   # 1 within 1 m of the pillar
@@ -424,7 +426,7 @@ def test_refine_centerline_does_not_cross_an_island():
     seed = _seed_passing_the_pillar()
     # precondition, from the map itself: the seed is clear of the pillar
     assert grid.clearance_at(seed[:, 0], seed[:, 1]).min() > 0.2, 'seed must start clear'
-    line, _, _ = opt.refine_centerline(grid, seed, spacing=0.1, max_width=4.0, iterations=5)
+    line, _, _ = opt.refine_centerline(grid, seed, spacing=0.1, max_width=4.0)   # default 4 passes
     clearance = grid.clearance_at(line[:, 0], line[:, 1])
     assert clearance.min() > 1.5 * grid.resolution, (
         'a re-centered point walked into or across the pillar')
@@ -434,15 +436,61 @@ def test_refine_centerline_does_not_cross_an_island():
     assert line[:, 1].min() < -2.0 and line[:, 1].max() > 2.0
 
 
-def test_refine_centerline_is_unchanged_on_a_track_without_islands():
-    # change-detector (not an oracle): refine_centerline on main bb09bf8 (no
-    # guard) for the plain ring above, saved with the same call. The guard
-    # must not move a single point on a track whose walls never close in.
-    ref = np.load(os.path.join(os.path.dirname(__file__), 'data', 'refine_ring_main_bb09bf8.npz'))
+def test_refine_centerline_is_unchanged_on_a_track_without_islands(monkeypatch):
+    # oracle: the unguarded computation (the guard replaced by "take every step"), which is
+    # what main computes. On a plain ring no step lands in or crosses a wall, so the guard must
+    # not change one point. (Earlier this compared a recording of main, bb09bf8; with the
+    # redesigned guard the equality holds exactly, so the recording was dropped.)
     grid = _ring_map(outer=3.0, inner=1.5)
-    line, width_left, width_right = opt.refine_centerline(
-        grid, circle_path(1.8, count=90), spacing=0.1, max_width=4.0, iterations=5)
-    assert line.shape == ref['centerline'].shape
-    assert np.allclose(line, ref['centerline'], atol=1e-9)  # m
-    assert np.allclose(width_left, ref['width_left'], atol=1e-9)  # m
-    assert np.allclose(width_right, ref['width_right'], atol=1e-9)  # m
+    seed = circle_path(1.8, count=90)
+    guarded = opt.refine_centerline(grid, seed, spacing=0.1, max_width=4.0, iterations=5)
+    monkeypatch.setattr(opt, '_guarded_move', lambda occ_map, field, old, new: np.asarray(new, dtype=np.float64))
+    plain = opt.refine_centerline(grid, seed, spacing=0.1, max_width=4.0, iterations=5)
+    for got, want in zip(guarded, plain):
+        assert got.shape == want.shape
+        assert np.allclose(got, want, atol=1e-12)  # m
+
+
+def _wall_map(resolution=0.05):
+    """A 4 m square, free except a one-cell-thick wall along x = 0 from y = -1 to y = 1."""
+    cells = int(4.0 / resolution)
+    grid = np.full((cells, cells), occ.FREE, dtype=np.int8)
+    axis = (np.arange(cells) + 0.5) * resolution - 2.0
+    wall_col = int(np.argmin(np.abs(axis - 0.0)))
+    grid[(np.abs(axis) <= 1.0), wall_col] = occ.OCCUPIED
+    return occ.OccupancyMap(grid, resolution, -2.0, -2.0)
+
+
+def test_guarded_move_takes_a_step_that_stays_clear_of_walls():
+    grid = _wall_map()
+    old = np.array([[-0.8, 0.0]])
+    new = np.array([[-0.3, 0.0]])        # 0.3 m from the wall: nearer than before, still clear
+    out = opt._guarded_move(grid, grid.clearance_field(), old, new)
+    assert np.allclose(out, new, atol=1e-12)  # m: the full step, no "clearance must not drop" rule
+
+
+def test_guarded_move_refuses_a_step_that_lands_in_the_wall():
+    grid = _wall_map()
+    old = np.array([[-0.5, 0.0]])
+    out = opt._guarded_move(grid, grid.clearance_field(), old, np.array([[0.0, 0.0]]))
+    # the full step lands in the wall, so the half step (-0.25, 0) is taken instead
+    assert np.allclose(out, [[-0.25, 0.0]], atol=1e-12)  # m: old + 0.5 * (new - old)
+    assert grid.clearance_at(out[:, 0], out[:, 1])[0] > 0.075
+
+
+def test_guarded_move_refuses_a_step_that_crosses_the_wall_to_free_space():
+    grid = _wall_map()
+    old = np.array([[-0.5, 0.0]])
+    new = np.array([[0.5, 0.0]])         # destination is free; the straight segment crosses the wall
+    assert grid.clearance_at(new[:, 0], new[:, 1])[0] > 0.3, 'precondition: destination is clear'
+    out = opt._guarded_move(grid, grid.clearance_field(), old, new)
+    assert out[0, 0] < 0.0               # never reaches the far side
+    assert grid.clearance_at(out[:, 0], out[:, 1])[0] > 0.075  # m, 1.5 cells
+
+
+def test_guarded_move_falls_back_to_half_then_quarter_of_the_step():
+    grid = _wall_map()
+    old = np.array([[-1.0, 0.0]])
+    # the full step ends 3 cm from the wall (clearance <= 1.5 cells = 7.5 cm): refused; half ends at -0.515: taken
+    out = opt._guarded_move(grid, grid.clearance_field(), old, np.array([[-0.03, 0.0]]))
+    assert out[0, 0] == pytest.approx(-0.515, abs=1e-9)  # m: old + 0.5 * (new - old)
