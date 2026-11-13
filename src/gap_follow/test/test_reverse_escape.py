@@ -252,3 +252,98 @@ def test_rule7_constructor_refuses_bad_arguments(kw, name):
 def test_rule7_the_boundary_values_are_accepted():
     ReverseEscape(speed=0.5, max_distance=0.6, wait_sec=0.5, max_attempts=1)
     ReverseEscape(speed=0.01, max_distance=0.01, max_attempts=3)
+
+
+# --- rear_quarter_clear (the sensing the node gives the machine) ----------------------------------------
+
+import numpy as np
+
+from gap_follow import gap_logic
+from gap_follow.reverse_escape import rear_quarter_clear
+
+GEOM = dict(car_width=0.31, car_length=0.58, wheelbase=0.36, laser_offset_x=0.26, laser_offset_y=0.0)
+N, SPAN = 1081, math.radians(270)
+ANGLE_MIN, INC = -SPAN / 2.0, SPAN / (N - 1)
+ANGLES = ANGLE_MIN + np.arange(N) * INC
+
+
+def rear_scan(fill=3.0):
+    return np.full(N, fill)
+
+
+def clear(ranges, **kw):
+    args = dict(GEOM, clearance=0.10)
+    args.update(kw)
+    return rear_quarter_clear(ranges, ANGLE_MIN, INC, 0.05, **args)[0]
+
+
+def boundary_at(deg):
+    return float(gap_logic.vehicle_boundary_distances(np.array([math.radians(deg)]), **GEOM)[0])
+
+
+def beam(deg):
+    return int(round((math.radians(deg) - ANGLE_MIN) / INC))
+
+
+def test_rear_quarters_open_are_clear():
+    assert clear(rear_scan())
+
+
+@pytest.mark.parametrize('deg', [100.0, 115.0, 129.0, -100.0, -115.0, -129.0])
+def test_a_return_within_the_clearance_of_the_body_in_either_band_is_not_clear(deg):
+    # oracle: closed form, clearance = range - the body's boundary distance along the beam (gap_logic's own geometry).
+    s = rear_scan()
+    s[beam(deg)] = boundary_at(deg) + 0.099
+    assert not clear(s)
+    s[beam(deg)] = boundary_at(deg) + 0.101
+    assert clear(s)
+
+
+def test_the_clearance_argument_is_used():
+    s = rear_scan()
+    s[beam(110.0)] = boundary_at(110.0) + 0.30
+    assert clear(s, clearance=0.10)
+    assert not clear(s, clearance=0.35)
+
+
+def test_beams_outside_the_band_are_ignored_the_self_return_of_car_2():
+    # recorded measurement: rb2 20261111-142254, left side 131.5-135 deg returns 0.02-0.04 m (the car's own mount)
+    s = rear_scan()
+    s[beam(133.0)] = 0.06
+    s[beam(93.0)] = 0.06
+    assert clear(s)
+    s[beam(129.5)] = 0.06
+    assert not clear(s)
+
+
+def test_blind_means_not_clear():
+    s = rear_scan()
+    left = [i for i in range(N) if math.radians(95) <= ANGLES[i] <= math.radians(130)]
+    keep = left[:4]
+    s2 = s.copy()
+    for i in left:
+        if i not in keep:
+            s2[i] = float('nan')
+    assert not clear(s2)                                   # 4 usable beams on the left
+    s2[left[4]] = 3.0
+    assert clear(s2)                                       # 5 usable beams
+    right = [i for i in range(N) if -math.radians(130) <= ANGLES[i] <= -math.radians(95)]
+    s3 = s.copy()
+    s3[right] = float('nan')
+    assert not clear(s3)                                   # a side with no returns at all
+
+
+def test_nothing_in_reach_is_free_not_blind():
+    s = rear_scan(float('inf'))
+    assert clear(s)
+
+
+def test_a_scan_that_does_not_reach_the_rear_quarters_is_not_clear():
+    n = 541
+    span = math.radians(180)
+    assert not rear_quarter_clear(np.full(n, 3.0), -span / 2, span / (n - 1), 0.05, clearance=0.10, **GEOM)[0]
+
+
+def test_non_finite_and_wrong_input_is_not_clear():
+    assert not clear(np.full(N, float('nan')))
+    assert not clear(np.array([]))

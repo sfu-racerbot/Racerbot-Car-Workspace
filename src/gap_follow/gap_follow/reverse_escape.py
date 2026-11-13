@@ -27,6 +27,10 @@ node's own deadman path commands zero. Rules (docs/gap-follow.md#reverse-escape)
 
 import math
 
+import numpy as np
+
+from gap_follow import gap_logic
+
 MIN_RECENT_FORWARD_M = 0.20     # m driven forward recently before a reverse is allowed (rule 2)
 STOPPED_SPEED = 0.1             # m/s (rule 1)
 
@@ -134,3 +138,39 @@ class ReverseEscape:
         if self._timer >= self.cooldown_sec:
             self.state = 'exhausted' if self.attempts >= self.max_attempts else 'idle'
         return None
+
+
+REAR_BAND_DEG = (95.0, 130.0)   # the rear quarters, up to where rb2's left side starts to see its own mount (131.5 deg)
+MIN_BEAMS = 5                   # usable beams a side must have in the band, else the car is blind there
+
+
+def rear_quarter_clear(ranges, angle_min, angle_increment, range_min, *, car_width, car_length, wheelbase,
+                       laser_offset_x, laser_offset_y, clearance, band_deg=REAR_BAND_DEG, min_beams=MIN_BEAMS):
+    """(clear, detail): no return closer than ``clearance`` to the body rectangle among the beams with |bearing| in
+    ``band_deg``, and at least ``min_beams`` usable beams on each side. A beam is usable when it is a valid return
+    or +inf (a real measurement of nothing in reach); NaN and sub-range_min beams are unknown, and a side with too
+    few usable beams is blind, which is not clear. Clearance is the range minus the body's boundary distance along
+    the beam (gap_logic.vehicle_boundary_distances, the footprint check's own geometry)."""
+    raw = np.asarray(ranges, dtype=float)
+    detail = dict(left_usable=0, right_usable=0, nearest=math.inf)
+    if raw.ndim != 1 or raw.size == 0 or not (math.isfinite(angle_min) and math.isfinite(angle_increment)
+                                               and angle_increment > 0.0):
+        return False, detail
+    angles = angle_min + np.arange(raw.size) * angle_increment
+    lo, hi = math.radians(band_deg[0]), math.radians(band_deg[1])
+    for side, key in ((1.0, 'left_usable'), (-1.0, 'right_usable')):
+        sel = (side * angles >= lo) & (side * angles <= hi)
+        r = raw[sel]
+        valid = np.isfinite(r) & (r >= range_min) & (r > 0.0)
+        usable = valid | np.isposinf(r)
+        detail[key] = int(usable.sum())
+        if usable.sum() < min_beams:
+            return False, detail
+        if valid.any():
+            boundary = gap_logic.vehicle_boundary_distances(
+                angles[sel][valid], car_width, car_length, wheelbase, laser_offset_x, laser_offset_y)
+            near = float(np.min(r[valid] - boundary))
+            detail['nearest'] = min(detail['nearest'], near)
+            if near < clearance:
+                return False, detail
+    return True, detail
