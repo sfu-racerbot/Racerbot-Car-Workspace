@@ -34,6 +34,7 @@ They were first driven on car 2 on 2026-10-19. That run had no contact, but car 
 21. [Impact stop (IMU)](#impact-stop-imu)
 22. [Launch boost](#launch-boost) — full speed off the start line, once per race
 23. [Speed on the real course (2026-10-30)](#speed-on-the-real-course-2026-10-30) — why it stopped mid-lap, the fix, and `time_trial:=true`
+24. [Reverse escape](#reverse-escape) — backing out of a nose-in stop; off by default
 
 ## Highlights
 
@@ -1648,3 +1649,47 @@ Every run of the day was located against the rebuilt map `data/racerbot_auto/202
 **`pure_pursuit` on this map** was also simulated: 28.6-30.5 s on the map's line, and 21.9-23.8 s on the cut line, where several runs failed. Its safety net caps it at 1 m/s on "avoid" ticks. It is not a shortcut to 15 s without more work, and that harness may differ from the real node.
 
 </details>
+
+## Reverse escape
+
+On race day rb2 drove nose-first at something and stopped 0.22 m from it (run `20261111-142254`, 104.6-118.2 s). It had more than 1 m free on both sides, but no forward arc clears something that close, so every command was zero and it sat for 13.6 s. No controller here has ever commanded a negative speed, so there was nothing to try. The reverse escape adds one very small, careful move: back straight up a few centimetres over ground the car has just driven across, then let the normal controller try again.
+
+It is **off**: `enable_reverse_escape` is `false` in the code and in `gap_follow.yaml`, and no car's configuration turns it on.
+
+### What it does
+
+When all of these hold, the car is "stuck nose-in":
+
+- LB is held, the odometry is fresh and the car is stopped (under 0.1 m/s);
+- the drive path ended at zero because the clearance (or forward-reserve creep) ceiling is zero, or because there is no safe gap, or because an emergency stop fired with the closest return ahead of the car. A zero from a TTC stop, a follow cap, a flank creep or a stale sensor does not count.
+
+After `reverse_escape_wait_sec` (1.0 s) of that, **if** the rear quarters read clear **and** the car drove forward at least 0.20 m in the last 3 s, it commands straight (steering 0.0) at `reverse_escape_speed` (0.30 m/s) for at most `min(reverse_escape_max_distance, ground driven)`, 0.35 m at most. The distance is the integral of the measured speed, so a car whose wheels do not turn stops at `reverse_escape_max_time` (1.6 s) having gone nowhere. Then it holds zero for 0.3 s, and the normal controller drives again at once; a new reverse has to wait 4 s. At most 2 reverses in a row: after the second the car stays stopped, as today, until it has made 3 m of forward progress.
+
+The reverse ends immediately, with a zero command, if:
+
+- LB is released or the `/joy` messages go stale (the node's own deadman path commands zero, and the machine goes idle);
+- the odometry is stale or not finite (it cannot measure the distance, so it does not move);
+- a rear quarter stops reading clear, or the IMU impact latch trips.
+
+It is a drive command like any other: it is published from the one `_publish_drive` every scan tick passes through, after the deadman check at the top of `_scan_step`, and the deadman is also passed to the state machine. `/drive_intent` shows state `reverse_escape` with the distance left.
+
+### What it cannot see
+
+The LiDAR sees plus and minus 135 degrees. It does **not** see the 90 degrees directly behind the car, only the two rear quarters. So it never reverses over unseen ground: only a short fixed distance, only over ground the odometry says the car just drove across, and only while 95-130 degrees each side shows at least 5 usable beams and nothing within 0.10 m of the body rectangle. A "usable" beam is a valid return or an infinite one (nothing in reach); a side with fewer than 5 is blind, and blind means no.
+
+The band stops at 130 degrees because rb2's LiDAR sees part of its own mount on the left from 131.5 degrees (returns of 0.02-0.04 m; measured in `20261111-142254` driving above 1.5 m/s). rb1 shows no self-return between 95 and 135 degrees (`20261111-155542`, nearest 0.26-0.31 m, the walls), so one band serves both. Something small low behind the car, or a person stepping behind it, can still be missed: the rear is not fully covered.
+
+### Does the drive chain accept a negative speed?
+
+Checked in the source, not changed: `ackermann_mux` forwards a command as it is, with no sign filter. `ackermann_to_vesc` computes `speed_to_erpm_gain * speed + offset` with a positive gain (4600 on rb1, 4614 on rb2), so -0.30 m/s is about -1380 eRPM; there is no clamp. The VESC driver clips to `speed_min`/`speed_max`, and the shared `vesc.yaml` sets -23250 and 23250 (neither car overrides them). `vesc_to_odom_node` carries the **negative** gain on both cars so that forward reads positive; reversing therefore reads negative on `/odom`. The reverse escape integrates the magnitude, so it does not depend on that sign. Not verified: what the VESC does when a speed command flips sign from rest (it should run its speed loop in reverse), and what the mux publishes if `/drive` goes quiet during a reverse (each input topic times out after 0.2 s).
+
+### Turning it on
+
+Not yet. When a car is cleared for it, set `enable_reverse_escape: true` in that car's tuning file with a `# why:` line. The other `reverse_escape_*` values are in `gap_follow.yaml`. The simulators never command a negative speed, so `gap_mirror` does not model it; the numbers in this document do not include it.
+
+### The floor-test order
+
+1. Wheels off the ground, full stack up, LB held, something held 0.2 m in front of the LiDAR bumper: the wheels should turn backwards slowly for about 1 s of travel, then stop. Release LB mid-reverse: the wheels stop at once.
+2. On the floor, in open space, against a cardboard box: drive at the box at low speed (`max_speed:=1.0`), let it stop. Expect 1 s of nothing, then it backs about 0.3 m and tries again. Keep a hand on LB.
+3. Put a second box behind the car's rear quarter at about 0.3 m: it must not reverse.
+
