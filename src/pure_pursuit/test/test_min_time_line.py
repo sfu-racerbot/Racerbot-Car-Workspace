@@ -565,3 +565,133 @@ def test_damped_projected_solution_is_close_to_the_sequential_solution(monkeypat
     # is no faster than the exact one beyond 0.2%, and within 1.0% of it.
     assert fast >= sequential * (1.0 - 0.002), (name, fast, sequential)
     assert abs(fast - sequential) <= 0.01 * sequential, (name, fast, sequential)
+
+
+# --- acceleration against speed (2026-11-13) ------------------------------------------------
+# A real car's acceleration falls as it gets faster. CarPhysics.accel_speeds / accel_values give the limit as a
+# table (linear between points, flat beyond the ends); empty means the constant a_accel, exactly.
+
+TABLE = ((0.0, 2.0, 5.0), (6.0, 6.0, 2.0))      # m/s, m/s^2: 6 up to 2 m/s, falling to 2 at 5
+
+
+def with_table(physics, table=TABLE):
+    return replace(physics, accel_speeds=table[0], accel_values=table[1])
+
+
+def table_ellipse_use(xy, physics):
+    """Acceleration steps only: (a_long / table(v at the station left))^2 + (lateral / grip)^2, plus the
+    braking ratio a_long / a_brake, and a mask of unpinned steps. Recomputed here from the profile."""
+    speed, kappa, seg = speed_profile(xy, physics)
+    grip = np.where(kappa >= 0.0, physics.a_lat_left, physics.a_lat_right)
+    w = speed ** 2
+    a_long = (np.roll(w, -1) - w) / (2.0 * seg)
+    limit = np.interp(speed, physics.accel_speeds, physics.accel_values)
+    lateral = w * np.abs(kappa) / grip
+    accelerating = a_long > 0.0
+    use = np.where(accelerating, (a_long / limit) ** 2 + lateral ** 2, 0.0)
+    braking = np.where(~accelerating, -a_long / physics.a_brake, 0.0)
+    pinned = np.zeros(len(speed), dtype=bool)
+    for edge in (physics.v_min, physics.v_max):
+        pinned |= (np.abs(speed - edge) < 1e-9) | (np.abs(np.roll(speed, -1) - edge) < 1e-9)
+    return use, braking, ~pinned, a_long, limit, accelerating
+
+
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_an_empty_table_is_exactly_todays_profile(name, xy, make):
+    # Oracle: at coupling 0 the unchanged closed form (_accel_brake_box) called directly; at 0.5 the profile built
+    # with the table fields never mentioned. Spec: empty = constant a_accel, exactly (2026-11-13 brief).
+    physics = make(0.0)
+    assert physics.accel_speeds == () and physics.accel_values == ()
+    kappa = signed_curvature(xy)
+    seg = min_time_line._segments(xy)
+    grip = np.where(kappa >= 0.0, physics.a_lat_left, physics.a_lat_right)
+    cap = np.minimum(np.sqrt(grip / np.maximum(np.abs(kappa), 1e-9)), physics.v_max)
+    assert np.array_equal(min_time_line._accel_brake(cap, seg, physics, kappa, grip),
+                          min_time_line._accel_brake_box(cap, seg, physics))
+    half = make(0.5)
+    explicit = replace(half, accel_speeds=(), accel_values=())
+    assert np.array_equal(speed_profile(xy, half)[0], speed_profile(xy, explicit)[0])
+
+
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_the_table_limit_is_obeyed_at_every_station_and_binds_somewhere(name, xy, make):
+    # Oracle: the invariant, recomputed from the profile (delays zero, c = 0): every acceleration step is at most
+    # the table's value at the speed it starts from; braking is at most a_brake. It must also bind.
+    physics = with_table(make(0.0))
+    _, braking, free, a_long, limit, accelerating = table_ellipse_use(xy, physics)
+    ratio = np.where(accelerating, a_long / limit, 0.0)
+    assert ratio[free].max() <= 1.0 + 1e-6, float(ratio[free].max())
+    assert braking[free].max() <= 1.0 + 1e-6, float(braking[free].max())
+    assert ratio[free].max() >= 0.98, ('the limit never binds, this tests nothing', float(ratio[free].max()))
+
+
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_the_table_with_coupling_stays_inside_the_ellipse(name, xy, make):
+    # Oracle: the ellipse with the table's limit at the station being left, recomputed here (5% for the
+    # discretisation of a step), plus the braking limit. c = 1.
+    physics = with_table(make(1.0))
+    use, braking, free, *_ = table_ellipse_use(xy, physics)
+    assert use[free].max() <= 1.0 + ELLIPSE_SLACK, float(use[free].max())
+    assert use[free].max() >= 0.8, 'no acceleration step near the ellipse, this tests nothing'
+
+
+@pytest.mark.parametrize('c', [0.0, 0.5])
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_a_constant_table_is_the_constant_limit(name, xy, make, c):
+    # Oracle: closed form. A table that is constant at a_accel is the constant limit; at c = 0 the solver's
+    # fixed point must reproduce the closed-form box, at c > 0 the same solver without a table.
+    base = make(c)
+    constant = replace(base, accel_speeds=(0.0, 10.0), accel_values=(base.a_accel, base.a_accel))
+    got = speed_profile(xy, constant)[0]
+    want = speed_profile(xy, base)[0]
+    np.testing.assert_allclose(got, want, rtol=0.0, atol=1e-9)         # m/s
+
+
+@pytest.mark.parametrize('c', [0.0, 1.0])
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_a_lower_table_never_shortens_the_lap(name, xy, make, c):
+    base = make(c)
+    full = with_table(base)
+    low = with_table(base, (TABLE[0], tuple(0.8 * v for v in TABLE[1])))
+    laps = [lap_time(xy, p) for p in (full, low)]
+    assert laps[1] >= laps[0] - 1e-9, laps               # s
+    assert laps[1] - laps[0] > 1e-3, laps                # and the limit is a real effect
+
+
+@pytest.mark.parametrize('c', [0.0, 0.7])
+@pytest.mark.parametrize('name,xy,make', FIXTURES)
+def test_batch_matches_the_single_path_with_a_table(name, xy, make, c):
+    physics = with_table(make(c))
+    kappa = signed_curvature(xy)
+    seg = min_time_line._segments(xy)
+    grip = np.where(kappa >= 0.0, physics.a_lat_left, physics.a_lat_right)
+    base = np.minimum(np.sqrt(grip / np.maximum(np.abs(kappa), 1e-9)), physics.v_max)
+    rng = np.random.default_rng(3)
+    caps = np.minimum(base * rng.uniform(0.6, 1.0, size=(4, len(base))), physics.v_max)
+    batch = min_time_line._batch_accel_brake(caps, np.tile(seg, (len(caps), 1)), physics, kappa, grip)
+    rows = np.stack([min_time_line._accel_brake(r, seg, physics, kappa, grip) for r in caps])
+    np.testing.assert_allclose(batch, rows, rtol=0.0, atol=1e-9)       # m/s
+
+
+@pytest.mark.parametrize('speeds,values,match', [
+    ((0.0, 2.0), (6.0,), 'accel_speeds and accel_values'),                  # unequal lengths
+    ((0.0,), (6.0,), 'at least 2'),
+    ((0.0, 2.0), (6.0, float('nan')), 'finite'),
+    ((0.0, float('inf')), (6.0, 2.0), 'finite'),
+    ((0.0, 2.0, 2.0), (6.0, 5.0, 4.0), 'strictly increasing'),
+    ((0.0, 3.0, 2.0), (6.0, 5.0, 4.0), 'strictly increasing'),
+    ((0.5, 2.0), (6.0, 5.0), 'start at 0'),
+    ((0.0, 2.0), (6.0, 0.0), 'positive'),
+    ((0.0, 2.0), (6.0, -1.0), 'positive'),
+    ((0.0, 2.0), (4.0, 6.0), 'non-increasing'),                          # a rising table is refused
+])
+def test_the_table_is_validated(speeds, values, match):
+    with pytest.raises(ValueError, match=match):
+        CarPhysics(accel_speeds=speeds, accel_values=values)
+
+
+def test_a_flat_or_falling_table_is_accepted():
+    p = CarPhysics(accel_speeds=(0.0, 2.0, 5.0), accel_values=(6.0, 6.0, 2.0))
+    assert p.accel_at(0.0) == 6.0 and p.accel_at(5.0) == 2.0 and p.accel_at(9.0) == 2.0
+    assert p.accel_at(3.5) == pytest.approx(4.0, abs=1e-12)               # m/s^2: halfway down 6 -> 2
+    assert CarPhysics(a_accel=4.0).accel_at(2.0) == 4.0

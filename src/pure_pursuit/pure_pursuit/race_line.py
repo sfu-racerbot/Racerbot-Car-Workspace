@@ -72,7 +72,10 @@ class RaceLineConfig:
         tight = values.get('race_line_body_floor_tight')   # optional: absent = constant floor
         # Optional, 0 (a box: braking and cornering independent) when absent: profile_grip_coupling.
         return cls(physics=CarPhysics(**{k: values[v] for k, v in physics_keys.items()},
-                                      grip_coupling=float(values.get('profile_grip_coupling', 0.0))),
+                                      grip_coupling=float(values.get('profile_grip_coupling', 0.0)),
+                                      # Optional, empty (the constant profile_max_accel) when absent.
+                                      accel_speeds=tuple(float(x) for x in values.get('profile_accel_speeds') or ()),
+                                      accel_values=tuple(float(x) for x in values.get('profile_accel_values') or ())),
                    body_floor_tight=None if tight is None else float(tight),
                    speed_floor_gain=float(values.get('race_line_speed_floor_gain', 0.0)),
                    speed_floor_from=float(values.get('race_line_speed_floor_from', 3.0)),

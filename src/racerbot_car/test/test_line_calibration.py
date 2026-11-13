@@ -50,3 +50,14 @@ def test_grip_coupling_is_shared_and_not_set_by_any_car(car):
     overlay = Path(__file__).resolve().parents[1] / 'cars' / car / 'calibration' / 'auto_map_race.yaml'
     if overlay.exists():
         assert 'profile_grip_coupling' not in overlay.read_text()
+
+
+@pytest.mark.parametrize('car', ['rb1', 'rb2'])
+def test_accel_table_is_shared_empty_and_not_set_by_any_car(car):
+    # oracle: spec (2026-11-13 brief): profile_accel_speeds/values are shared planner settings, default empty;
+    # no car's calibration sets them.
+    config = effective_config('auto_map_race.yaml', 'auto_map_race_node', car)
+    assert config['profile_accel_speeds'] == [] and config['profile_accel_values'] == []
+    overlay = Path(__file__).resolve().parents[1] / 'cars' / car / 'calibration' / 'auto_map_race.yaml'
+    if overlay.exists():
+        assert 'profile_accel_' not in overlay.read_text()

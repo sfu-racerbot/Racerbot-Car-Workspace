@@ -51,6 +51,12 @@ class CarPhysics:
     # there, 0 to 1: 0 is a box (the lateral and longitudinal limits independent, how every line was planned
     # until 2026-11-12), 1 the full friction ellipse. See _accel_brake.
     grip_coupling: float = 0.0
+    # Acceleration against speed, 2026-11-13: the limit at speed v is the linear interpolation of
+    # (accel_speeds, accel_values), flat beyond the ends (accel_at). Empty is the constant a_accel, exactly.
+    # Values must not rise with speed (a car's acceleration does not), which is what keeps the fixed point in
+    # _accel_brake_coupled antitone. Braking stays the constant a_brake.
+    accel_speeds: tuple = ()
+    accel_values: tuple = ()
 
     def __post_init__(self):
         for name in ('a_lat_left', 'a_lat_right', 'a_accel', 'a_brake', 'v_max', 'v_min', 'wheelbase',
@@ -66,6 +72,30 @@ class CarPhysics:
             raise ValueError('v_min cannot exceed v_max')
         if not (math.isfinite(self.grip_coupling) and 0.0 <= self.grip_coupling <= 1.0):
             raise ValueError(f'grip_coupling must be finite and in [0, 1], got {self.grip_coupling!r}')
+        speeds, values = tuple(self.accel_speeds), tuple(self.accel_values)
+        object.__setattr__(self, 'accel_speeds', speeds)
+        object.__setattr__(self, 'accel_values', values)
+        if speeds or values:
+            if len(speeds) != len(values):
+                raise ValueError(f'accel_speeds and accel_values must be the same length, got {len(speeds)} and {len(values)}')
+            if len(speeds) < 2:
+                raise ValueError('accel_speeds needs at least 2 points')
+            if not all(math.isfinite(x) for x in speeds + values):
+                raise ValueError('accel_speeds and accel_values must be finite')
+            if speeds[0] != 0.0:
+                raise ValueError(f'accel_speeds must start at 0.0, got {speeds[0]!r}')
+            if any(b <= a for a, b in zip(speeds, speeds[1:])):
+                raise ValueError('accel_speeds must be strictly increasing')
+            if any(v <= 0.0 for v in values):
+                raise ValueError('accel_values must be positive')
+            if any(b > a for a, b in zip(values, values[1:])):
+                raise ValueError('accel_values must be non-increasing (acceleration does not rise with speed)')
+
+    def accel_at(self, speed):
+        """The acceleration limit at ``speed`` (scalar or array), m/s^2: the table, else the constant a_accel."""
+        if not self.accel_speeds:
+            return self.a_accel
+        return np.interp(speed, self.accel_speeds, self.accel_values)
 
     @property
     def curvature_limit(self) -> float:
@@ -194,7 +224,7 @@ def _accel_brake_coupled(cap, seg, physics, kappa, grip, rounds=None):
 
         use = min(1, (v^2 |k| / g)^2),     a_eff = a * sqrt(max(0, 1 - coupling * use)),
 
-    an ellipse at coupling 1 (a box, _accel_brake_box, at 0: that planned full braking and full cornering at
+    an ellipse at coupling 1 (a box, _accel_brake_box, at 0 with no table: that planned full braking and full cornering at
     one station, 3.0 and 3.2 m/s^2 together being 4.4 m/s^2 on tyres that deliver about 3, 2026-11-12).
     The limit depends on the speed it limits, so there is no closed form; but for a FIXED station-dependent
     limit there is one, the running-minimum form of _accel_brake_box with A[j] = sum_{i<j} 2 a_acc[i] ds[i]
@@ -220,13 +250,16 @@ def _accel_brake_coupled(cap, seg, physics, kappa, grip, rounds=None):
     reps = [1] * (cap.ndim - 1) + [3]
     box = _accel_brake_box(cap, seg, physics) if cap.ndim == 1 else _batch_accel_brake_box(cap, seg, physics)
     cap2, ds = np.tile(cap ** 2, reps), np.tile(seg, reps)
-    k, g = np.abs(kappa), np.asarray(grip, dtype=float)
+    k, g = (np.abs(kappa), np.asarray(grip, dtype=float)) if kappa is not None else (np.zeros(n), np.ones(n))
+    tabled = bool(physics.accel_speeds)
 
     def F(w):
         f = np.sqrt(np.maximum(0.0, 1.0 - c * np.minimum(1.0, (w * k / g) ** 2)))
         f3 = np.tile(f, reps)
         f_next = np.concatenate([f3[..., 1:], f3[..., -1:]], axis=-1)
-        w3 = np.minimum(_envelope_forward(cap2, 2.0 * physics.a_accel * f3 * ds),
+        # the acceleration limit at the station being left, read from the squared speed w there
+        a_acc = np.tile(physics.accel_at(np.sqrt(w)), reps) if tabled else physics.a_accel
+        w3 = np.minimum(_envelope_forward(cap2, 2.0 * a_acc * f3 * ds),
                         _envelope_backward(cap2, 2.0 * physics.a_brake * f_next * ds))
         return w3[..., n:2 * n]
 
@@ -237,8 +270,8 @@ def _accel_brake_coupled(cap, seg, physics, kappa, grip, rounds=None):
 
 
 def _accel_brake(cap, seg, physics, kappa=None, grip=None):
-    """The box at coupling 0 (exactly _accel_brake_box), else _accel_brake_coupled."""
-    if physics.grip_coupling == 0.0 or kappa is None:
+    """The box at coupling 0 with no table (exactly _accel_brake_box), else _accel_brake_coupled."""
+    if physics.grip_coupling == 0.0 and not physics.accel_speeds:
         return _accel_brake_box(cap, seg, physics)
     return _accel_brake_coupled(cap, seg, physics, kappa, grip)
 
@@ -305,8 +338,8 @@ def _batch_accel_brake_box(cap, seg, physics):
 
 
 def _batch_accel_brake(cap, seg, physics, kappa=None, grip=None):
-    """_accel_brake for every row (B, n): the box closed form at coupling 0, else _accel_brake_coupled."""
-    if physics.grip_coupling == 0.0 or kappa is None:
+    """_accel_brake for every row (B, n): the box closed form at coupling 0 with no table, else _accel_brake_coupled."""
+    if physics.grip_coupling == 0.0 and not physics.accel_speeds:
         return _batch_accel_brake_box(cap, seg, physics)
     return _accel_brake_coupled(cap, seg, physics, kappa, grip)
 

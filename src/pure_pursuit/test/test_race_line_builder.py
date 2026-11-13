@@ -271,3 +271,21 @@ def test_profile_grip_coupling_parameter_never_shortens_the_estimated_lap(course
     coupled = build_race_line(grid, seed, coupled_cfg)
     assert box.ok and coupled.ok
     assert coupled.est_lap_s >= box.est_lap_s
+
+
+def test_profile_accel_table_parameter_never_shortens_the_estimated_lap(course):
+    # Oracle: invariant, an acceleration limit below the constant one everywhere can only slow a plan
+    # (2026-11-13); it arrives through the builder's parameter mapping, on the 2026-11-06 course of the others.
+    from pure_pursuit.race_line import load_params
+    grid, seed, _, _ = course
+    values = load_params('rb2')
+    plain = RaceLineConfig.from_params(values)
+    a = plain.physics.a_accel
+    values['profile_accel_speeds'] = [0.0, 2.0, 5.0]
+    values['profile_accel_values'] = [0.6 * a, 0.6 * a, 0.3 * a]
+    tabled_cfg = RaceLineConfig.from_params(values)
+    assert tabled_cfg.physics.accel_values[0] == pytest.approx(0.6 * a, abs=1e-12)        # m/s^2
+    plain_line = build_race_line(grid, seed, plain)
+    tabled = build_race_line(grid, seed, tabled_cfg)
+    assert plain_line.ok and tabled.ok
+    assert tabled.est_lap_s >= plain_line.est_lap_s

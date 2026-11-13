@@ -19,7 +19,7 @@ def test_car_physics_and_controller_stop(car, angle, grip, accel, gain, delay, m
     assert asdict(cfg.physics) == dict(
         a_lat_left=grip, a_lat_right=grip, a_accel=accel, a_brake=3.,
         v_max=5., v_min=.5, wheelbase=.36, max_steering_angle=angle,
-        linkage_gain=gain, steering_rate=1., steering_delay=.1, speed_delay=delay, grip_coupling=0.)
+        linkage_gain=gain, steering_rate=1., steering_delay=.1, speed_delay=delay, grip_coupling=0., accel_speeds=(), accel_values=())
     from racerbot_car.layers import effective_config
     assert cfg.emergency_stop_distance == effective_config(
         'pure_pursuit.yaml', 'pure_pursuit_node', car)['emergency_stop_distance']
@@ -82,3 +82,29 @@ def test_grip_coupling_parameter_reaches_the_physics_and_defaults_to_the_box():
     assert RaceLineConfig.from_params(values).physics.grip_coupling == 0.5
     del values['profile_grip_coupling']          # an older parameter set without the key keeps the box
     assert RaceLineConfig.from_params(values).physics.grip_coupling == 0.0
+
+
+def test_accel_table_parameters_reach_the_physics_and_default_to_the_constant():
+    values = load_params('rb1')
+    # oracle: the shared default is empty (the constant profile_max_accel, every line planned before 2026-11-13).
+    assert values['profile_accel_speeds'] == [] and values['profile_accel_values'] == []
+    physics = RaceLineConfig.from_params(values).physics
+    assert physics.accel_speeds == () and physics.accel_values == ()
+    values['profile_accel_speeds'] = [0.0, 3.0, 5.0]
+    values['profile_accel_values'] = [6.0, 5.0, 2.0]
+    physics = RaceLineConfig.from_params(values).physics
+    assert physics.accel_speeds == (0.0, 3.0, 5.0) and physics.accel_values == (6.0, 5.0, 2.0)
+    del values['profile_accel_speeds'], values['profile_accel_values']       # an older parameter set keeps the constant
+    assert RaceLineConfig.from_params(values).physics.accel_speeds == ()
+
+
+@pytest.mark.parametrize('speeds,values_,match', [
+    ([0.0, 3.0], [6.0], 'accel_speeds and accel_values'),
+    ([0.0, 3.0], [3.0, 5.0], 'non-increasing'),
+    ([1.0, 3.0], [5.0, 4.0], 'start at 0'),
+])
+def test_a_bad_accel_table_parameter_refuses_the_builder_config(speeds, values_, match):
+    values = load_params('rb1')
+    values['profile_accel_speeds'], values['profile_accel_values'] = speeds, values_
+    with pytest.raises(ValueError, match=match):
+        RaceLineConfig.from_params(values)

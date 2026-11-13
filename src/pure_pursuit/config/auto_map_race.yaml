@@ -200,6 +200,12 @@ auto_map_race_node:
     # with 3.2 lateral is 4.4 m/s^2 asked of tyres that deliver about 3, so the car ran wide at turn-in.
     # See min_time_line._accel_brake. Not set in any car's calibration.
     profile_grip_coupling: 0.0
+    # Acceleration against speed in the speed profile, 2026-11-13: profile_accel_values[i] m/s^2 at
+    # profile_accel_speeds[i] m/s (linear between, flat beyond). Empty is the constant profile_max_accel, every
+    # line planned until now. Speeds start at 0 and increase strictly; values are positive and must not rise.
+    # See min_time_line.CarPhysics.accel_at. Not set in any car's calibration.
+    profile_accel_speeds: []
+    profile_accel_values: []
     race_line_wall_margin: 0.15  # m
     race_line_cone_margin: 0.10  # m beyond the unchanged forward stop distance
     # Body clearance the racing line keeps from the walls (2026-11-07, was
