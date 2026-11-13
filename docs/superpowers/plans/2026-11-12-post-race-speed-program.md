@@ -274,7 +274,7 @@ Branch: `pp-grip`. One pull request per task group marked (PR).
 - Create: `src/pure_pursuit/test/data/course_20261111/` with the map, `raceline_raw.csv`, and `standing_start_rb2_20261111-152132.npz` (`scan_window_fixture.py --from 3.0 --to 8.6`)
 
 - [ ] **Finish draft PR #50 first** (`car2-guarded-recenter`): car 2's recovered `_guarded_move` edit to `raceline_optimizer.refine_centerline`, which the race-day map was built with. Add `test_refine_centerline_does_not_cross_an_island` to `src/pure_pursuit/test/test_raceline_optimizer.py`: an occupancy map of a 3 m wide ring track with a 0.5 m square pillar in the middle of one straight and a seed path passing 0.3 m beside it; assert every point of the refined line has `occ_map.clearance_at(x, y) > 1.5 * resolution` and that the line still closes. Prove it fails with `_guarded_move` stubbed to `return new`. Also assert the unobstructed-track result is unchanged (`np.allclose` against the same call on `main`'s function for a plain ring, `atol=1e-9  # m`). Run the pure_pursuit suite and the course suite's map-racer arm on that branch; zero contact and no course that built a line on `main` failing to build. Mark the PR ready and report.
-- [ ] Import the map, add it to the catalog and to the course suite's list.
+- [x] Import the map, add it to the catalog and to the course suite's list.
 - [ ] Baseline on `main`: run the map racer and gap follow (default and time trial) on it, 6 seeds. Record lap times in the pull request. **Acceptance for the import only:** the course builds, a lap closes, zero contact for gap follow default. The simulator's lap times versus section 1.1 are recorded, not gated, here; Phase 3 closes that gap.
 - [ ] Commit.
 
@@ -289,10 +289,10 @@ Branch: `pp-grip`. One pull request per task group marked (PR).
 
 Why both signals: in a slide the gyro keeps reading yaw while the path straightens, so speed times gyro overstates grip; the accelerometer does not. Agreement within 15% marks usable grip. Remove the accelerometer's bias and gravity leak with the median over straight samples (`|yaw_rate| < 0.05 rad/s`, speed above 1.5 m/s) of the same run.
 
-- [ ] Tests first (`tools/run_analysis/tests/` runs unsourced; keep the math importable without rclpy, bag reading in `main()` only): synthetic steady circle (`speed=3`, `yaw_rate=1`, `lateral_accel=3`) is all steady and bins to delivered 3.0 `abs=0.01`; a steering ramp of 0.1 rad over 0.3 s is rejected; a braking segment of 2 m/s² is rejected; an accelerometer bias of 0.4 m/s² on a run with straights is removed to within 0.05; a simulated slide (gyro says 5, accelerometer says 3) is excluded from `sustained_limit`; empty input returns an empty curve and `sustained_limit` NaN; NaN samples are dropped, not propagated.
-- [ ] Implement; run on rb2 `152132`, `142604`, `135934` and rb1 `153721`, `155542`. Save the two JSON files under `tools/f1tenth_sim/sim_fidelity/` as `sfu_course_2026_11_11_grip_rb1.json` and `..._rb2.json`.
+- [x] Tests first (`tools/run_analysis/tests/` runs unsourced; keep the math importable without rclpy, bag reading in `main()` only): synthetic steady circle (`speed=3`, `yaw_rate=1`, `lateral_accel=3`) is all steady and bins to delivered 3.0 `abs=0.01`; a steering ramp of 0.1 rad over 0.3 s is rejected; a braking segment of 2 m/s² is rejected; an accelerometer bias of 0.4 m/s² on a run with straights is removed to within 0.05; a simulated slide (gyro says 5, accelerometer says 3) is excluded from `sustained_limit`; empty input returns an empty curve and `sustained_limit` NaN; NaN samples are dropped, not propagated.
+- [x] Implement; run on rb2 `152132`, `142604`, `135934` and rb1 `153721`, `155542`. Save the two JSON files under `tools/f1tenth_sim/sim_fidelity/` as `sfu_course_2026_11_11_grip_rb1.json` and `..._rb2.json`.
 - [ ] **Advisor checkpoint 2:** send Fable the two tables. Outcome is one number per car, `sustained_limit`, and a decision whether floor test F2 (steady circles, section 9) is needed before Task 8.
-- [ ] Commit.
+- [x] Commit.
 
 ### Task 6: understeer compensation in the steering command (PR)
 

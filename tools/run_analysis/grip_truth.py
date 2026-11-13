@@ -228,6 +228,8 @@ def main(argv=None) -> int:
         car = args.car or next((p for p in Path(args.runs[0]).resolve().parts if p in ("rb1", "rb2")), "unknown")
         Path(args.json).write_text(json.dumps(dict(
             car=car, runs=[Path(r).name for r in args.runs], imu_topic=args.imu_topic,
+            criteria=dict(window=args.window, max_steering_change=args.max_steering_change,
+                          max_long_accel=args.max_long_accel),
             curve=[dict(asked=r["asked"], delivered=r["acc_median"], n=r["n"]) for r in result["rows"]],
             sustained_limit=result["sustained_limit"] if math.isfinite(result["sustained_limit"]) else None),
             indent=2))
