@@ -306,8 +306,6 @@ def test_launch_scale_of_one_leaves_the_follower_alone(monkeypatch):
 def test_launch_scale_multiplies_the_profiled_speed_for_the_distance_then_restores_it(monkeypatch):
     # Oracle: closed form. 2.0 m/s x 0.85 = 1.7 while metres remain; 0.15 m at 2.0 m/s x 0.025 s = 0.05 m a tick,
     # counted before the factor is read: 0.10 m and 0.05 m left (scaled), then 0 (unscaled).
-    pytest.importorskip('pure_pursuit.launch_scale', reason='LaunchScale lands with the launch-lap-scale PR; '
-                        'remove this skip when that is merged into this branch')
     _stub_follower(monkeypatch)
     follower = _StubFollower()
     state = np.array([0.0, 0.0, 0.0, 2.0, 0.0])
