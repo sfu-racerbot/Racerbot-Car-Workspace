@@ -166,6 +166,71 @@ def static_confirmed_series(rows, track_id, k, S):
     return med < S, med
 
 
+MOVING_M, STATIC_M, LOOKBACK, LOOK_TOL = 0.10, 0.06, 0.2, 0.03
+
+
+def _world_of(row, track_id):
+    """World position of ``track_id`` on this row (from the row's pose and the track's body-frame position), or None."""
+    if "x" not in row:
+        return None
+    for tr in row["tracks"]:
+        if tr[6] == track_id:
+            c, s_ = math.cos(row["yaw"]), math.sin(row["yaw"])
+            return (row["x"] + c * tr[0] - s_ * tr[1], row["y"] + s_ * tr[0] + c * tr[1])
+    return None
+
+
+def track_truth(rows, k, track_id):
+    """'moving' when the same track was more than 0.10 m away in the world 0.2 s earlier (> 0.5 m/s), 'static' when
+    within 0.06 m, else 'unknown' (including no earlier sample within 0.03 s of t - 0.2 s). Independent of the radial residual."""
+    now = _world_of(rows[k], track_id)
+    if now is None:
+        return "unknown"
+    target = rows[k]["t"] - LOOKBACK
+    j = k
+    while j > 0 and rows[j]["t"] > target:
+        j -= 1
+    if abs(rows[j]["t"] - target) > LOOK_TOL:
+        return "unknown"
+    before = _world_of(rows[j], track_id)
+    if before is None:
+        return "unknown"
+    d = math.hypot(now[0] - before[0], now[1] - before[1])
+    return "moving" if d > MOVING_M else "static" if d <= STATIC_M else "unknown"
+
+
+def truth_gate(rows, eps, S):
+    """Over every real-episode tick: truly-moving ticks confirmed / truly-moving ticks, the longest confirmed run of
+    consecutive truly-moving ticks (s), and the same for truly-static ticks (how many are confirmed)."""
+    _, real = classify(eps)
+    mv = mv_conf = st = st_conf = 0
+    longest = run = 0
+    bad = []
+    for e in real:
+        a, b = e["tick_idx"]
+        run = 0
+        for k in range(a, b + 1):
+            o = rows[k]["obj"]
+            if o is None:
+                run = 0
+                continue
+            conf = static_confirmed_series(rows, o["track"], k, S)[0]
+            kind = track_truth(rows, k, o["track"])
+            if kind == "moving":
+                mv += 1
+                mv_conf += conf
+                run = run + 1 if conf else 0
+                longest = max(longest, run)
+                if conf:
+                    bad.append((e["start"], k, o["track"], rows[k]["t"]))
+            else:
+                run = 0
+                if kind == "static":
+                    st += 1
+                    st_conf += conf
+    return dict(moving=mv, moving_confirmed=mv_conf, longest_s=longest * DT_TICK, static=st, static_confirmed=st_conf, bad=bad)
+
+
 def gate_report(rows, eps, label, S_values=(0.5, 0.35)):
     wall, real = classify(eps)
     out = {}
@@ -200,7 +265,12 @@ def gate_report(rows, eps, label, S_values=(0.5, 0.35)):
                 run = run + 1 if conf else 0
                 longest = max(longest, run)
             real_rows.append((e["start"], n, c, longest * DT_TICK, min(mins) if mins else math.nan))
-        out[S] = (wt, wc, wall_rows, real_rows)
+        tg = truth_gate(rows, eps, S)
+        print(f"   TRUTH S={S}: truly-moving ticks confirmed {tg['moving_confirmed']}/{tg['moving']}, longest confirmed truly-moving run "
+              f"{tg['longest_s']:.3f}s; truly-static ticks confirmed {tg['static_confirmed']}/{tg['static']}")
+        for bad in tg["bad"]:
+            print(f"      offending tick: episode {bad[0]:.2f} row {bad[1]} track {bad[2]} t {bad[3]:.3f}")
+        out[S] = (wt, wc, wall_rows, real_rows, tg)
         print(f"== GATE {label} S={S}: wall ticks confirmed {wc}/{wt} = {wc / max(wt, 1):.3f}")
         for st, n, c in wall_rows:
             print(f"   wall {st:8.2f}  {c:3d}/{n:3d} = {c / n:.2f}")
