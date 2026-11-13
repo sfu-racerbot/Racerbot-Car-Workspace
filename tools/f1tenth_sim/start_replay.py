@@ -98,6 +98,35 @@ def cap_binding_counter():
 
 
 @contextlib.contextmanager
+def launch_lap_scale(scale, distance, line_length, driven=0.0):
+    """pure_pursuit_node's launch-lap speed scale (pure_pursuit.launch_scale.LaunchScale) in the math-level
+    controller: a press from standstill at the start of the run arms it; every tick counts the distance driven
+    (the plant's true speed times CONTROL_DT) and the profiled speed PathFollower returns, which the command
+    shaper then caps, is multiplied by its factor, as the node multiplies before its clip and caps. ``driven``
+    metres are taken off the distance first, for a run that starts partway through the launch. scale 1.0
+    changes nothing."""
+    if scale == 1.0:
+        yield None
+        return
+    from pure_pursuit.launch_scale import LaunchScale
+    ls = LaunchScale(float(scale), float(distance))
+    ls.on_deadman(True, 0.0, line_length)
+    ls.remaining = max(0.0, ls.remaining - float(driven))
+    original_command = rv.PathFollower.command
+
+    def command(self, state, *a, **k):
+        steering, speed, *rest = original_command(self, state, *a, **k)
+        ls.step(abs(float(state[3])), rv.CONTROL_DT)
+        return (steering, speed * ls.factor, *rest)
+
+    rv.PathFollower.command = command
+    try:
+        yield ls
+    finally:
+        rv.PathFollower.command = original_command
+
+
+@contextlib.contextmanager
 def understeer_compensation(table):
     """The node's understeer compensation (off unless a table is given) in the math-level controller:
     ``racing_math.understeer_steering`` on the tracking law's steering at the measured speed, and the online cap
@@ -151,7 +180,8 @@ def solo_arguments(law, speed, lateral, laps, steering_limit, safety="map"):
 
 
 def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit, speed, lateral, law,
-              grip_scale=None, grip_coupling=None, start_wheel_speed=None, understeer=None):
+              grip_scale=None, grip_coupling=None, start_wheel_speed=None, understeer=None,
+              launch=None):
     from pure_pursuit import racing_math
     cal = floor_calibration(floor, grip_scale, grip_coupling)
     rv.RACELINE_SOURCE = "plan"
@@ -181,7 +211,9 @@ def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit
         return plant
     rv.make_plant, rv.plan_initial_pose = wrapped, spawn
     try:
-        with understeer_compensation(understeer), cap_binding_counter() as cap:
+        launch = launch or dict(scale=1.0, distance=0.0, driven=0.0)
+        with understeer_compensation(understeer), cap_binding_counter() as cap, launch_lap_scale(
+                launch['scale'], launch['distance'], float(plan.seg_len.sum()), launch['driven']):
             result = rv.run_pure_solo(eval_gap.track_path(track), seed, seconds, calibration=cal, plan=plan,
                                       **solo_arguments(law, speed, lateral, laps, steering_limit))
         result["cap_binding_ticks"], result["command_ticks"] = cap["binding"], cap["ticks"]
@@ -281,6 +313,11 @@ def parse_args(argv=None):
     ap.add_argument("--grip-coupling", type=float, default=None,
                     help="share of longitudinal acceleration that competes with cornering, 0 to 1 "
                          "(default: the floor's, 0)")
+    ap.add_argument("--launch-scale", type=float, default=1.0,
+                    help="pure_pursuit launch_speed_scale for the run (1.0 = off); armed by a press at the start")
+    ap.add_argument("--launch-distance", type=float, default=0.0, help="launch_scale_distance, m (0 = one line length)")
+    ap.add_argument("--launch-driven", type=float, default=0.0,
+                    help="metres of the launch distance already driven when the run starts (a run that starts partway)")
     ap.add_argument("--law", default="delay_lqr")
     ap.add_argument("--arcs", default=",".join(str(a) for a in DEFAULT_ARCS))
     ap.add_argument("--check-profile-alone", action="store_true",
@@ -318,7 +355,9 @@ def main(argv=None) -> int:
     for k in range(args.seeds):
         cal, plan, trace, result = trace_run(args.track, args.floor, args.line, start, args.first_seed + k,
                                              args.seconds, args.laps, args.steering_limit, args.speed,
-                                             args.lateral, args.law, args.grip_scale, args.grip_coupling, start_wheel_speed)
+                                             args.lateral, args.law, args.grip_scale, args.grip_coupling, start_wheel_speed,
+                                             launch=dict(scale=args.launch_scale, distance=args.launch_distance,
+                                                         driven=args.launch_driven))
         row = summarise(cal, plan, trace, result, arcs)
         row["seed"] = args.first_seed + k
         rows.append(row)

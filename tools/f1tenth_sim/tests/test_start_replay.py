@@ -280,3 +280,40 @@ def test_understeer_compensation_steers_harder_and_caps_speed_by_the_delivered_c
     assert (rv.PathFollower.command, rv.racing_math.curvature_speed_limit) == original
     with sr.understeer_compensation(None):
         assert (rv.PathFollower.command, rv.racing_math.curvature_speed_limit) == original
+
+
+# --- launch_lap_scale (2026-11-13) ----------------------------------------------------------
+
+class _StubFollower:
+    """Stands for run_validation.PathFollower: a fixed profiled speed of 2.0 m/s at any state."""
+    def command(self, state, *a, **k):
+        return 0.0, 2.0, 0, 0, 0.0
+
+
+def _stub_follower(monkeypatch):
+    monkeypatch.setattr(sr.rv, 'PathFollower', _StubFollower)
+    monkeypatch.setattr(sr.rv, 'CONTROL_DT', 0.025)         # s, 40 Hz
+
+
+def test_launch_scale_of_one_leaves_the_follower_alone(monkeypatch):
+    _stub_follower(monkeypatch)
+    before = _StubFollower.command
+    with sr.launch_lap_scale(1.0, 5.0, 40.0) as ls:
+        assert ls is None and _StubFollower.command is before
+    assert _StubFollower.command is before
+
+
+def test_launch_scale_multiplies_the_profiled_speed_for_the_distance_then_restores_it(monkeypatch):
+    # Oracle: closed form. 2.0 m/s x 0.85 = 1.7 while metres remain; 0.15 m at 2.0 m/s x 0.025 s = 0.05 m a tick,
+    # counted before the factor is read: 0.10 m and 0.05 m left (scaled), then 0 (unscaled).
+    pytest.importorskip('pure_pursuit.launch_scale', reason='LaunchScale lands with the launch-lap-scale PR; '
+                        'remove this skip when that is merged into this branch')
+    _stub_follower(monkeypatch)
+    follower = _StubFollower()
+    state = np.array([0.0, 0.0, 0.0, 2.0, 0.0])
+    with sr.launch_lap_scale(0.85, 0.15, 40.0) as ls:
+        speeds = [follower.command(state)[1] for _ in range(3)]
+        assert ls.remaining == 0.0
+    assert speeds[0] == pytest.approx(1.7, abs=1e-12) and speeds[1] == pytest.approx(1.7, abs=1e-12)    # m/s
+    assert speeds[2] == pytest.approx(2.0, abs=1e-12)
+    assert follower.command(state)[1] == 2.0                  # restored on exit as well
