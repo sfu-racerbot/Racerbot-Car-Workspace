@@ -393,6 +393,19 @@ gap_follow_node:
     # max(min_speed, 0.5), checked at startup), a pure config change with
     # no code implication.
     escape_creep_speed: 0.40
+    # Crawl away from a wall alongside the body, while the road ahead is open.
+    # Added 2026-11-12: rb1 20261111-155542 sat 8.3 s (87.6-95.9 s) with the
+    # left wall 0.20 m from the LiDAR (4-5 cm off the body), 0.82 m free ahead
+    # and the rack pointing away; swept_path_clearance read 0.00 for every
+    # steering angle because a return inside its band beside the body gives
+    # along < 0, and the forward cone read clear, so no creep. rb2
+    # 20261111-142254 lost 13.6 s the same way (plan section 1.2). With this
+    # on, the crawl (escape_creep_speed) is allowed when the body rectangle,
+    # widened by flank_creep_margin a side and driven along the arc the rack
+    # will drive this tick, meets no scan return within flank_creep_length (m).
+    # A wall touching the body, or steering into it, still stops. 0 = off.
+    flank_creep_length: 0.50
+    flank_creep_margin: 0.02
 
     # --- Cornering anticipation ---
     # An extra speed cap from how much the chosen gap's near-only bearing

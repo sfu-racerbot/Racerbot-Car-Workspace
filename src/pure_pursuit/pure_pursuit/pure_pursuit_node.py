@@ -294,6 +294,12 @@ class PurePursuitNode(Node):
         # Empty default is a byte array in rclpy, so typing is dynamic; real values are double arrays.
         self.declare_parameter('understeer_curve_asked', [], ParameterDescriptor(dynamic_typing=True))
         self.declare_parameter('understeer_curve_delivered', [], ParameterDescriptor(dynamic_typing=True))
+        # Crawl along the racing line away from a wall alongside the body
+        # when the body's own arc is clear (racing_math.body_arc_free_distance);
+        # 0 = off. See _reactive_override Tier 0 and
+        # docs/superpowers/plans/2026-11-12-post-race-speed-program.md.
+        self.declare_parameter('flank_creep_length', 0.0)
+        self.declare_parameter('flank_creep_margin', 0.01)
         self.declare_parameter('scan_timeout_sec', 0.5)
         # --- Deadman button (workspace policy, see docs/architecture.md) ---
         self.declare_parameter('enable_deadman', True)
@@ -547,6 +553,10 @@ class PurePursuitNode(Node):
                 list(self.get_parameter('understeer_curve_delivered').value))
         except (ValueError, TypeError) as exc:
             raise RuntimeError(f'pure_pursuit_node: understeer_curve parameters refused: {exc}') from exc
+        self.flank_creep_length = float(
+            self.get_parameter('flank_creep_length').value)
+        self.flank_creep_margin = float(
+            self.get_parameter('flank_creep_margin').value)
         self.scan_timeout_sec = float(self.get_parameter('scan_timeout_sec').value)
         self.enable_deadman = bool(self.get_parameter('enable_deadman').value)
         self.joy_topic = self.get_parameter('joy_topic').value
@@ -702,6 +712,16 @@ class PurePursuitNode(Node):
                 and self.emergency_stop_clearance >= 0.0):
             raise RuntimeError(
                 'pure_pursuit_node: emergency_stop_clearance must be finite and non-negative.')
+        if not (math.isfinite(self.flank_creep_length)
+                and 0.0 <= self.flank_creep_length <= 2.0):
+            raise RuntimeError(
+                'pure_pursuit_node: flank_creep_length must be finite and within '
+                '[0, 2] m (0 turns the flank creep off).')
+        if not (math.isfinite(self.flank_creep_margin)
+                and 0.0 <= self.flank_creep_margin <= 0.10):
+            raise RuntimeError(
+                'pure_pursuit_node: flank_creep_margin must be finite and within '
+                '[0, 0.10] m.')
         # The arc horizon must be positive: swept_path_clearance raises for
         # max_length <= 0, and that would surface inside the control loop.
         if not (math.isfinite(self.emergency_arc_length) and self.emergency_arc_length > 0.0):
@@ -2440,6 +2460,39 @@ class PurePursuitNode(Node):
                 )
                 if escape is not None:
                     return escape
+            # Flank creep: a wall alongside the body that the body is not
+            # touching (body_clearance > 0), with the body's own rectangle
+            # clear along the arc being steered for flank_creep_length, is
+            # crawled away from at the escape crawl speed, steering left to
+            # the tracking law. rb2 20261111-152132 stopped for 30.5 s this
+            # way (19.0-49.5 s). Touching, or steering into the wall, still
+            # stops: the arc check sees the body reach it.
+            if (not directional and self.flank_creep_length > 0.0
+                    and self.emergency_escape_speed > 0.0
+                    and body_clearance > 0.0):
+                lo_idx, hi_idx = self._fov_indices(scan, self.body_clearance_fov_deg)
+                window = self._sanitized_window(scan, lo_idx, hi_idx)
+                if window.size > 0:
+                    angles = scan.angle_min + np.arange(lo_idx, hi_idx + 1) * scan.angle_increment
+                    raw = np.asarray(scan.ranges[lo_idx:hi_idx + 1], dtype=np.float64)
+                    valid = np.isfinite(raw) & (raw > 0.0) & (raw >= scan.range_min)
+                    free = racing_math.body_arc_free_distance(
+                        window, valid, angles,
+                        math.tan(desired_steering) / self.wheelbase,
+                        self.car_width / 2.0 + self.flank_creep_margin,
+                        self.car_length, self.wheelbase,
+                        self.laser_offset_x, self.laser_offset_y,
+                        max_length=self.flank_creep_length)
+                    if free == math.inf:
+                        return (
+                            None,
+                            self.emergency_escape_speed,
+                            'flank_creep',
+                            f"{body_contact_detail}, but the body is not touching "
+                            f"({body_clearance:.3f}m) and its own arc is clear for "
+                            f"{self.flank_creep_length:.2f}m -- crawling away at "
+                            f"{self.emergency_escape_speed:.2f}m/s rather than latching stopped",
+                        )
             return (None, 0.0, 'body_contact', body_contact_detail)
 
         # Tier 1 (2026-11-07): the body's swept path, or the raw cone backstop.

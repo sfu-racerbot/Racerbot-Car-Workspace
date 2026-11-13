@@ -1324,6 +1324,72 @@ def detect_dynamic_cluster(measured: np.ndarray, expected: np.ndarray,
     return best
 
 
+def body_arc_free_distance(clean: np.ndarray, valid: np.ndarray, angles: np.ndarray,
+                           curvature: float, half_width: float, car_length: float,
+                           wheelbase: float, laser_offset_x: float,
+                           laser_offset_y: float = 0.0,
+                           max_length: float = 1.0, step: float = 0.02) -> float:
+    """Distance base_link can travel along a constant-curvature arc before any
+    valid scan point lies inside the body rectangle. inf if none within
+    max_length. 0.0 only if a point is inside the rectangle at the start.
+
+    The rectangle is x in [rear, front], |y| <= half_width in base_link, with
+    front = wheelbase/2 + car_length/2 and rear = wheelbase/2 - car_length/2
+    (the model ``swept_path_clearance`` uses). Scan points are fixed in the
+    starting base_link frame and the body moves. Unlike
+    ``swept_path_clearance``, a point alongside the body but outside the
+    rectangle is not an obstacle unless the body moves into it. REP-103:
+    positive curvature turns left.
+    """
+    ranges = np.asarray(clean, dtype=np.float64)
+    validity = np.asarray(valid, dtype=bool)
+    beam_angles = np.asarray(angles, dtype=np.float64)
+    if not (ranges.shape == validity.shape == beam_angles.shape):
+        raise ValueError('ranges, validity, and angles must have matching shapes')
+    for name, value in (('curvature', curvature), ('half_width', half_width),
+                        ('car_length', car_length), ('wheelbase', wheelbase),
+                        ('laser_offset_x', laser_offset_x),
+                        ('laser_offset_y', laser_offset_y),
+                        ('max_length', max_length), ('step', step)):
+        if not math.isfinite(value):
+            raise ValueError(f'{name} must be finite')
+    for name, value in (('half_width', half_width), ('car_length', car_length),
+                        ('wheelbase', wheelbase), ('max_length', max_length),
+                        ('step', step)):
+        if value <= 0.0:
+            raise ValueError(f'{name} must be positive')
+
+    front = wheelbase / 2.0 + car_length / 2.0
+    rear = wheelbase / 2.0 - car_length / 2.0
+
+    usable = validity & (ranges > 0.0) & np.isfinite(ranges) & np.isfinite(beam_angles)
+    if not np.any(usable):
+        return math.inf
+    px = ranges[usable] * np.cos(beam_angles[usable]) + laser_offset_x
+    py = ranges[usable] * np.sin(beam_angles[usable]) + laser_offset_y
+
+    travel = np.arange(0.0, max_length + 0.5 * step, step)
+    travel = travel[travel <= max_length + 1e-12]
+    if abs(curvature) < 1e-6:
+        bx = travel
+        by = np.zeros_like(travel)
+        heading = np.zeros_like(travel)
+    else:
+        heading = curvature * travel
+        bx = np.sin(heading) / curvature
+        by = (1.0 - np.cos(heading)) / curvature
+    cos_h = np.cos(heading)[:, None]
+    sin_h = np.sin(heading)[:, None]
+    dx = px[None, :] - bx[:, None]
+    dy = py[None, :] - by[:, None]
+    local_x = cos_h * dx + sin_h * dy
+    local_y = -sin_h * dx + cos_h * dy
+    hit = ((local_x >= rear) & (local_x <= front) & (np.abs(local_y) <= half_width)).any(axis=1)
+    if not hit.any():
+        return math.inf
+    return float(travel[int(np.argmax(hit))])
+
+
 def vehicle_boundary_distances(angles: np.ndarray, car_width: float,
                                car_length: float, wheelbase: float,
                                laser_offset_x: float,
