@@ -1774,12 +1774,11 @@ class GapFollowNode(Node):
         # no_safe_gap stop below. The alongside-abort ceiling is added after the
         # memory, so it binds only on scans that see the alongside car.
         if self.opponents is not None:
-            if follow_cap == math.inf and self.opponents.static_skipped:
-                # What this tick's follow cap would have followed is static (radial residual): the cap it
-                # set a few ticks ago, before the confirmation, is not held either.
-                self.opponents.follow_memory.clear()
+            # A cap set by a track that has since been confirmed static is not held (a wall is not a car).
+            self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())
             follow_cap, held = self.opponents.follow_memory.update(
-                follow_cap, self.opponent_last_stamp)
+                follow_cap, self.opponent_last_stamp,
+                self.opponents.follow_cap_track if follow_cap != math.inf else None)
             if held:
                 self.opponent_mode = ('follow_memory' if alongside_cap == math.inf
                                       else 'follow')

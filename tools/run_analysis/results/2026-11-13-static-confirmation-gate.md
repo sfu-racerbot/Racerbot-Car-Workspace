@@ -39,3 +39,41 @@ Truth label per tick (`track_truth`, independent of the residual): the same trac
 PASS at S = 0.35 (wall >= 0.80 on both runs; moving confirmed <= 5%, no run > 0.15 s). The one offending tick at 0.35 is row 744, track 100,
 the static object's first tick, whose 0.2 s look-back lands on track 99's neighbouring position. S = 0.5 also passes by this rule (3 ticks: that
 one and two of track 27 at 97.60 s), but S = 0.35 is shipped.
+
+## Tangential channel (2026-11-13, controller ruling 2)
+
+A crossing car has radial residual about 0, so confirmation now needs BOTH medians below their limits. Tangential residual =
+range * d(bearing)/dt - v sin b + omega (laser_x cos b + range) (zero for a static point; same window and sample rules).
+Window median |tangential| (m/s), run 155542 + 153721, S = 0.35:
+
+| set | n | p50 | p75 | p90 | p95 |
+|---|---|---|---|---|---|
+| wall ticks, 155542 | 566 | 0.89 | 1.16 | 1.41 | 1.70 |
+| truly-moving ticks, 155542 | 159 | 1.59 | 2.57 | 3.65 | 3.95 |
+| wall ticks, 153721 | 457 | 0.80 | 0.99 | 1.20 | 1.30 |
+
+| T | wall confirmed 155542 | wall confirmed 153721 | truly-moving confirmed 155542 (longest run) |
+|---|---|---|---|
+| 0.6 | 137/638 = 0.215 | 110/488 = 0.225 | 0/159 (0 s) |
+| 0.8 | 221/638 = 0.346 | 208/488 = 0.426 | 0/159 (0 s) |
+| 1.0 | 315/638 = 0.494 | 323/488 = 0.662 | 1/159 (0.025 s) |
+| 1.2 | 415/638 = 0.650 | 377/488 = 0.773 | 1/159 (0.025 s) |
+| 1.5 | 487/638 = 0.763 | 416/488 = 0.852 | 1/159 (0.025 s) |
+
+The smallest T with wall >= 0.75 on both runs is 1.5 (the nearest-beam bearing is quantised at 0.25 deg, which is why the wall
+median is as high as 0.9 m/s). Truly-moving confirmed 1/159 (0.6%), longest run 0.025 s: PASS. Shipped T = 1.5.
+
+## Closed loop and the stopped-car hold (2026-11-13)
+
+eval_gap rb1 car2_course_2026_11_11, 1 lap, gate 0 vs gate S 0.35 / T 1.5 (held bodies exempt from the gate, the four stopped-car
+tests pass unedited). Follow-bound ticks by source (live law, live alongside ceiling, held body, FollowCapMemory):
+
+| seed | gate off: follow | sources | gate on: follow | sources | lap off -> on (s) | min clearance off -> on (m) |
+|---|---|---|---|---|---|---|
+| 12345 | 252 | 3 / 15 / 66 / 168 | 82 | 0 / 12 / 45 / 25 | 17.3 -> 13.5 | 0.150 -> 0.172 |
+| 12346 | 126 | 8 / 14 / 46 / 58 | 132 | 1 / 10 / 53 / 68 | 14.7 -> 14.9 | 0.171 -> 0.170 |
+| 12347 | 123 | 2 / 17 / 43 / 61 | 48 | 0 / 12 / 33 / 3 | 14.2 -> 12.8 | 0.168 -> 0.178 |
+| 12348 | 199 | 13 / 12 / 61 / 113 | 159 | 1 / 12 / 49 / 97 | 16.1 -> 15.1 | 0.141 -> 0.161 |
+
+Acceptance (< 20 follow ticks per seed) is not met: the hold and the memory keep 48-159. Replay fixture wall_rb1_20261111-155542.npz
+(episode 22.24 s, pure wall): follow-bound ticks 56 off, 46 on with the hold exempt, 6 with the hold also gated.

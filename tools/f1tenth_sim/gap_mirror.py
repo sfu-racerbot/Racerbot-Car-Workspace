@@ -255,6 +255,9 @@ LEGACY_VALUES = {
     "enable_opponent_awareness": False,
     **{f"opponent_{name}": getattr(opponent_tracking.OpponentParams(), name)
        for name in opponent_tracking.OpponentParams.__dataclass_fields__},
+    # Static confirmation (2026-11-13) did not exist: 0.0 never confirms, the old behaviour.
+    "opponent_follow_static_radial_speed": 0.0,
+    "opponent_follow_static_tangential_speed": 0.0,
     # The follow-cap memory (2026-10-28) did not exist: 0 is no hold, the old behaviour.
     "opponent_follow_memory_sec": 0.0,
     # The launch boost (2026-10-30) did not exist: off. Its limits are inert
@@ -549,10 +552,10 @@ class GapController:
         # gap_follow_node: speed only, on the same tick, before the no_safe_gap stop.
         # The alongside-abort ceiling is added after the memory, never held by it.
         if self.opponents is not None:
-            if follow_cap == math.inf and self.opponents.static_skipped:
-                self.opponents.follow_memory.clear()      # as in gap_follow_node
+            self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())   # as in gap_follow_node
             follow_cap, held = self.opponents.follow_memory.update(
-                follow_cap, step * CONTROL_DT)
+                follow_cap, step * CONTROL_DT,
+                self.opponents.follow_cap_track if follow_cap != math.inf else None)
             follow_cap = min(follow_cap, alongside_cap)
             if held:
                 self.opponent_mode = ("follow_memory" if alongside_cap == math.inf

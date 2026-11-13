@@ -61,7 +61,7 @@ def make_extra(run, wheelbase, laser_x):
             seg = np.asarray(run.scan[si][det.lo:det.hi + 1], dtype=float)
             seg = np.where(np.isfinite(seg) & (seg >= run.range_min), seg, np.inf)
             b = float(angles[det.lo + int(np.argmin(seg))])
-            st = state.setdefault(tr.track_id, dict(prev=None, bg=[], bs=[]))
+            st = state.setdefault(tr.track_id, dict(prev=None, bg=[], bs=[], pb=None))
             v = row["speed"]
             omega_g = row["yaw_rate"] if math.isfinite(row["yaw_rate"]) else None
             omega_s = v * math.tan(opp.steer.angle) / wheelbase
@@ -74,7 +74,13 @@ def make_extra(run, wheelbase, laser_x):
                         buf.append(rate + v * math.cos(b) + om * laser_x * math.sin(b))
                         del buf[:-WINDOW]
                         res[key] = (buf[-1], float(np.median(buf)) if len(buf) >= MIN_SAMPLES else math.nan)
+            if st["prev"] is not None and st["pb"] is not None:
+                dt = row["t"] - st["prev"][0]
+                if 0.0 < dt <= DT_MAX:
+                    dbeta = math.atan2(math.sin(b - st["pb"]), math.cos(b - st["pb"]))
+                    res["tan"] = det.near_range * dbeta / dt - v * math.sin(b) + omega_s * (laser_x * math.cos(b) + det.near_range)
             st["prev"] = (row["t"], det.near_range)
+            st["pb"] = b
             out[tr.track_id] = dict(res=res, bearing=b)
         row["rr"] = out
     return extra
@@ -149,21 +155,36 @@ def report(rows, eps, label):
     return verdict
 
 
-def static_confirmed_series(rows, track_id, k, S):
-    """Static-confirmed at tick k for ``track_id``: >= NEED raw steering-model residual samples among the newest NEWEST
-    no older than EXPIRY s, median |residual| < S. Anything else is False (not confirmed). Also the window median."""
+def _window(rows, track_id, k, pick):
     t_now = rows[k]["t"]
     samples = []
     j = k
     while j >= 0 and rows[j]["t"] >= t_now - EXPIRY and len(samples) < NEWEST:
-        r = rows[j]["rr"].get(track_id, {}).get("res", {}).get("s")
-        if r is not None and math.isfinite(r[0]):
-            samples.append(r[0])
+        r = pick(rows[j]["rr"].get(track_id, {}).get("res", {}))
+        if r is not None and math.isfinite(r):
+            samples.append(r)
         j -= 1
-    if len(samples) < NEED:
+    return samples
+
+
+def window_medians(rows, track_id, k):
+    """(median |radial|, median |tangential|) of the track's window at tick k; nan where fewer than NEED samples."""
+    out = []
+    for pick in (lambda d: d["s"][0] if "s" in d else None, lambda d: d.get("tan")):
+        w = _window(rows, track_id, k, pick)
+        out.append(float(np.median(np.abs(w))) if len(w) >= NEED else math.nan)
+    return tuple(out)
+
+
+def static_confirmed_series(rows, track_id, k, S, T=math.inf):
+    """Static-confirmed at tick k: median |radial| < S and median |tangential| < T (T = inf: radial only), each from >= NEED
+    samples among the newest NEWEST no older than EXPIRY s. Anything else is False. Also the radial window median."""
+    rad, tang = window_medians(rows, track_id, k)
+    if not math.isfinite(rad):
         return False, math.nan
-    med = float(np.median(np.abs(samples)))
-    return med < S, med
+    if T != math.inf and not math.isfinite(tang):
+        return False, rad
+    return rad < S and (T == math.inf or tang < T), rad
 
 
 MOVING_M, STATIC_M, LOOKBACK, LOOK_TOL = 0.10, 0.06, 0.2, 0.03
@@ -199,7 +220,7 @@ def track_truth(rows, k, track_id):
     return "moving" if d > MOVING_M else "static" if d <= STATIC_M else "unknown"
 
 
-def truth_gate(rows, eps, S):
+def truth_gate(rows, eps, S, T=math.inf):
     """Over every real-episode tick: truly-moving ticks confirmed / truly-moving ticks, the longest confirmed run of
     consecutive truly-moving ticks (s), and the same for truly-static ticks (how many are confirmed)."""
     _, real = classify(eps)
@@ -214,7 +235,7 @@ def truth_gate(rows, eps, S):
             if o is None:
                 run = 0
                 continue
-            conf = static_confirmed_series(rows, o["track"], k, S)[0]
+            conf = static_confirmed_series(rows, o["track"], k, S, T)[0]
             kind = track_truth(rows, k, o["track"])
             if kind == "moving":
                 mv += 1
@@ -282,6 +303,44 @@ def gate_report(rows, eps, label, S_values=(0.5, 0.35)):
 DT_TICK = 0.025
 
 
+TANGENTIAL_T = (0.6, 0.8, 1.0, 1.2, 1.5)
+
+
+def tangential_report(rows, eps, label, S=0.35):
+    """Both channels: percentiles of the window median |tangential| on wall ticks and truly-moving ticks, and for each T the
+    wall-ticks-confirmed and truly-moving-confirmed fractions (radial < S and tangential < T)."""
+    wall, real = classify(eps)
+    wall_tan, move_tan = [], []
+    for e in wall:
+        for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1):
+            o = rows[k]["obj"]
+            if o is not None:
+                wall_tan.append(window_medians(rows, o["track"], k)[1])
+    for e in real:
+        for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1):
+            o = rows[k]["obj"]
+            if o is not None and track_truth(rows, k, o["track"]) == "moving":
+                move_tan.append(window_medians(rows, o["track"], k)[1])
+    print(f"== TANGENTIAL {label}: window median |tangential| (m/s); wall ticks n={len(wall_tan)}, truly-moving ticks n={len(move_tan)}")
+    for name, v in (("wall", wall_tan), ("moving", move_tan)):
+        a = np.array([x for x in v if math.isfinite(x)])
+        pc = np.percentile(a, [50, 75, 90, 95]) if a.size else [math.nan] * 4
+        print(f"   {name:6s} valid {a.size:4d}/{len(v)}  p50 {pc[0]:.2f}  p75 {pc[1]:.2f}  p90 {pc[2]:.2f}  p95 {pc[3]:.2f}")
+    result = {}
+    for T in TANGENTIAL_T:
+        wt = wc = 0
+        for e in wall:
+            for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1):
+                o = rows[k]["obj"]
+                wt += 1
+                wc += bool(o is not None and static_confirmed_series(rows, o["track"], k, S, T)[0])
+        tg = truth_gate(rows, eps, S, T)
+        result[T] = (wc / max(wt, 1), tg)
+        print(f"   T={T}: wall confirmed {wc}/{wt} = {wc / max(wt, 1):.3f}; truly-moving confirmed {tg['moving_confirmed']}/{tg['moving']}, "
+              f"longest run {tg['longest_s']:.3f}s")
+    return result
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run")
@@ -292,6 +351,7 @@ def main(argv=None) -> int:
     rows, eps = study(args.run, args.loc, args.map, args.line)
     report(rows, eps, Path(args.run).name)
     gate_report(rows, eps, Path(args.run).name)
+    tangential_report(rows, eps, Path(args.run).name)
     return 0
 
 
