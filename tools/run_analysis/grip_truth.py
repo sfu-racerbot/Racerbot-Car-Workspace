@@ -204,6 +204,15 @@ def per_run_samples(run, loc_dir, topic):
     return (v[keep], a[keep, COL["gyro_z"]], lat, a[keep, COL["steer_cmd"]], t[keep], bias, count)
 
 
+def curves_for_json(rows) -> dict:
+    """The curve as the JSON carries it, on both bases: ``curve`` (accelerometer median, kept for
+    reference) and ``gyro_curve`` (true speed times gyro, the centripetal acceleration, which is
+    what the simulator's grip model uses)."""
+    return dict(
+        curve=[dict(asked=r["asked"], delivered=r["acc_median"], n=r["n"]) for r in rows],
+        gyro_curve=[dict(asked=r["asked"], delivered=r["gyro_median"], n=r["n"]) for r in rows])
+
+
 def _finite(x):
     return float(x) if math.isfinite(x) else None
 
@@ -249,7 +258,7 @@ def main(argv=None) -> int:
             car=car, runs=[Path(r).name for r in args.runs], imu_topic=args.imu_topic,
             criteria=dict(window=args.window, max_steering_change=args.max_steering_change,
                           max_long_accel=args.max_long_accel),
-            curve=[dict(asked=r["asked"], delivered=r["acc_median"], n=r["n"]) for r in result["rows"]],
+            **curves_for_json(result["rows"]),
             sustained_limit=_finite(result["sustained_limit"]), peak_asked=_finite(result["peak_asked"]),
             accel_over_gyro=_finite(result["accel_over_gyro"])),
             indent=2))

@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .actuation import SteeringServo, TransportDelay, speed_loop_accel_ceiling
+from .actuation import SteeringServo, TransportDelay, accel_table_ceiling, speed_loop_accel_ceiling
 from .calibration import CarCalibration, calibration_for_car
 from .grip import GripEnvelope, ProgressiveGrip, longitudinal_accel
 from .sensing import OdomSensor, PoseSensor, ScanSensor
@@ -250,7 +250,9 @@ class FidelityPlant:
         self.degrade_agents = degrade_agents
 
         self.grip = [
-            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase)
+            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase,
+                            falling=calibration.grip_curve_falls,
+                            longitudinal_coupling=calibration.longitudinal_grip_coupling)
             if calibration.grip_curve is not None
             else GripEnvelope(
                 friction_accel_limit=calibration.friction_accel_limit,
@@ -359,9 +361,18 @@ class FidelityPlant:
         if self.profile.body_collisions:
             self.env.unwrapped.sim.ttc_threshold = -math.inf
 
-    def reset(self, poses: np.ndarray):
+    def reset(self, poses: np.ndarray, speeds=None):
+        """Place the cars at ``poses`` (x, y, yaw); ``speeds`` (true, m/s) puts them there already moving."""
         self._disable_gym_collision_response()
-        obs, info = self.env.reset(options={"poses": poses})
+        options = {"poses": poses}
+        if speeds is not None:
+            poses = np.asarray(poses, dtype=float)
+            states = np.zeros((len(poses), self.env.unwrapped.model.state_dim))
+            states[:, 0:2] = poses[:, 0:2]           # gym's single-track state: x, y, steering, v, yaw, yaw rate, slip
+            states[:, 3] = np.asarray(speeds, dtype=float)
+            states[:, 4] = poses[:, 2]
+            options = {"states": states}
+        obs, info = self.env.reset(options=options)
         self._contacted = set()
         self.chassis_contact_steps = 0
         for index in range(self.num_agents):
@@ -441,8 +452,11 @@ class FidelityPlant:
         if measured <= 0.0 and command <= 0.0:
             return command
         if diff >= 0.0:
-            ceiling = speed_loop_accel_ceiling(cal.speed_loop_accel_max, cal.speed_loop_accel_fade_from,
-                                               cal.speed_loop_accel_no_load, measured)
+            if cal.accel_by_speed:
+                ceiling = accel_table_ceiling(cal.accel_by_speed, measured * cal.odom_speed_scale)
+            else:
+                ceiling = speed_loop_accel_ceiling(cal.speed_loop_accel_max, cal.speed_loop_accel_fade_from,
+                                                   cal.speed_loop_accel_no_load, measured)
             accel = min(cal.speed_loop_accel_gain * diff, ceiling)
             gym_gain = 10.0 * self.params.a_max / self.params.v_max
         else:
