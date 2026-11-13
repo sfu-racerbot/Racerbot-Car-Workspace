@@ -82,7 +82,7 @@ def raw_min(scan, angles, lo_deg, hi_deg, range_min, max_range):
     return float(r.min()) if r.size else math.inf
 
 
-def replay_window(run, params, t_from, t_to, gyro, imu_timeout=0.1, loc=None, hook=None):
+def replay_window(run, params, t_from, t_to, gyro, imu_timeout=0.1, loc=None, hook=None, pre_hook=None):
     """Rows for the scans in (t_from, t_to) absolute, replayed from the start of the LB hold that contains t_from."""
     press = max((a for a, b in run.lb_windows(min_duration=0.0) if a <= t_from < b), default=None)
     if press is None:
@@ -100,6 +100,8 @@ def replay_window(run, params, t_from, t_to, gyro, imu_timeout=0.1, loc=None, ho
         k = int(np.searchsorted(gyro[0], t, side="right")) - 1
         yaw = float(gyro[1][k]) if k >= 0 and t - gyro[0][k] <= imu_timeout else None
         scan = run.scan[i].astype(np.float64)
+        if pre_hook is not None:
+            pre_hook(ctrl, t, yaw, v)      # before the controller sees this scan
         steer_basis_before = ctrl.steering_basis
         last_speed_before = ctrl.last_commanded_speed
         steer, speed = ctrl.command(scan, v, (t - press) / DT, yaw_rate=yaw)
