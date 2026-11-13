@@ -51,7 +51,7 @@ Pure pursuit was the fastest and most consistent thing run that day. Its planner
 
 ### 1.4 Other findings
 
-- **Pure pursuit's standing-start lap ran wide.** `rb2 20261111-152132`, 3.3 to 8.4 s: from rest it reached 4.9 m/s, entered a left-hander, the reactive layer cut in at 8.1 s and it stopped against the right wall at 8.4 s. The 13 flying laps after it were clean.
+- **Pure pursuit's standing-start lap ran wide.** `rb2 20261111-152132`, 0.05 to 5.5 s on the common-origin clock (origin = receive time of the first `/scan`, 1794439298.762; every time in this plan for that run uses it, never "seconds from the first message of a topic", which differs by topic: the PF's first message is 1.737 s earlier): LB pressed at 0.05 s, from rest it reached 4.7 m/s (command 4.9) by 1.25 s, ran 4.9-5.1 m/s at 3.75-4.0 s where the profile says 4.1-4.7, entered the left-hander at about 4.25 s half a metre right of the line, the reactive layer cut in at 5.0 s and it stopped against the right wall at 5.3 s (course position 15.3 m of 27.9). The 13 flying laps after it were clean.
 - **rb1's final race:** `follow cap` (opponent awareness) bound the speed 19% of the time and `curve cap` 49%. rb1 ran the default profile (`max_lateral_accel: 2.5`, steering limit 0.33 rad), rb2 ran `time_trial:=true` (3.0, 0.42 rad).
 - **gap follow, rb2 time trial:** `clearance cap` (the swept-path braking ceiling) bound 27 to 36% of the time, `curve cap` 41 to 49%. The disparity extender has no braking ceiling and ran with `safety_node enable_ttc:=false`.
 - **Measured response** (`car_measure.py`): rb2 servo 3 ticks delay, gain 15/s, rate 1.75 rad/s; speed loop 5 ticks delay, accel max 4.0, brake max 3.0 m/s². rb1 servo 3 ticks, gain 12/s, rate 1.75; speed loop 5 ticks, accel max 5.0, brake max 4.0. Wheel speed over true: rb2 1.019, rb1 1.042.
@@ -272,7 +272,7 @@ Branch: `pp-grip`. One pull request per task group marked (PR).
 
 **Files:**
 - Create: `tools/f1tenth_sim/maps/car2_course_2026_11_11_*` via `rb python3 tools/f1tenth_sim/track_import.py` (read its `--help`; follow how `car2_course_2026_11_06a` was imported and registered in `maps/catalog.yaml` and the course suite)
-- Create: `src/pure_pursuit/test/data/course_20261111/` with the map, `raceline_raw.csv`, and `standing_start_rb2_20261111-152132.npz` (`scan_window_fixture.py --from 3.0 --to 8.6`)
+- Create: `src/pure_pursuit/test/data/course_20261111/` with the map, `raceline_raw.csv`, and `standing_start_rb2_20261111-152132.npz` (`scan_window_fixture.py --from 0.0 --to 6.5`, common-origin clock: LB press to the stop)
 
 - [ ] **Finish draft PR #50 first** (`car2-guarded-recenter`): car 2's recovered `_guarded_move` edit to `raceline_optimizer.refine_centerline`, which the race-day map was built with. Add `test_refine_centerline_does_not_cross_an_island` to `src/pure_pursuit/test/test_raceline_optimizer.py`: an occupancy map of a 3 m wide ring track with a 0.5 m square pillar in the middle of one straight and a seed path passing 0.3 m beside it; assert every point of the refined line has `occ_map.clearance_at(x, y) > 1.5 * resolution` and that the line still closes. Prove it fails with `_guarded_move` stubbed to `return new`. Also assert the unobstructed-track result is unchanged (`np.allclose` against the same call on `main`'s function for a plain ring, `atol=1e-9  # m`). Run the pure_pursuit suite and the course suite's map-racer arm on that branch; zero contact and no course that built a line on `main` failing to build. Mark the PR ready and report.
 - [x] Import the map, add it to the catalog and to the course suite's list.
@@ -354,7 +354,7 @@ def understeer_steering(steering: float, speed: float, wheelbase: float,
 
 ### Task 9: the standing-start lap
 
-- [ ] Diagnose, on `rb2 20261111-152132` from 3.0 to 8.6 s: (a) particle-filter pose (`/pf/viz/inferred_pose`) against `loc.py`'s pose, position and heading error over time; (b) commanded speed against the profile and against true speed; (c) cross-track error from `/drive_intent`'s detail text. Write the finding (which of localization, speed lead from rest, or line entry) in the pull request.
+- [ ] Diagnose, on `rb2 20261111-152132` from 0.0 to 6.5 s (common-origin clock, see section 1.4; first checked 2026-11-12: the PF pose is NOT stale, mean position error 0.23 m with lateral 0.05 m and heading 2 degrees in the failed start, the good start and the flying laps alike): (a) particle-filter pose (`/pf/viz/inferred_pose`) against `loc.py`'s pose, position and heading error over time; (b) commanded speed against the profile and against true speed; (c) cross-track error from `/drive_intent`'s detail text. Write the finding (which of localization, speed lead from rest, or line entry) in the pull request.
 - [ ] **Advisor checkpoint:** send Fable the three traces before choosing the fix.
 - [ ] Reproduce in the simulator on `car2_course_2026_11_11` starting at rest at the recorded start pose; write the test that fails; fix; the test passes. **Acceptance:** from rest at 5 start poses spread round the course, 6 seeds, the first lap has zero contact and is within 1.5 s of a flying lap.
 
