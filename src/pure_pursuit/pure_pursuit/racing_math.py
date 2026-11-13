@@ -241,9 +241,11 @@ def understeer_steering(steering: float, speed: float, wheelbase: float, curve,
                         max_steering_angle: float, min_speed: float = 1.0) -> float:
     """The steering that makes the car follow the curvature ``steering`` asks for kinematically.
 
-    Unchanged (clipped) when ``curve`` is None, ``speed`` is below ``min_speed`` or not finite, or
-    the lateral acceleration wanted is more than the curve ever delivers (the car cannot deliver it
-    and steering harder loses grip; the speed cap handles that case). Sign preserved; clipped to
+    Unchanged (clipped) when ``curve`` is None or ``speed`` is below ``min_speed`` or not finite.
+    Past the curve's last delivered value the output holds the steering for the last asked value
+    (``ask_for`` caps there) until the kinematic ask exceeds it, then equals the clipped input, so
+    the output is continuous across the grip limit and never steers less than the input; the
+    speed cap handles the car being too fast. Sign preserved; clipped to
     +/- ``max_steering_angle``. A non-finite ``steering`` returns 0.0, never NaN.
     """
     if not math.isfinite(steering):
@@ -252,9 +254,9 @@ def understeer_steering(steering: float, speed: float, wheelbase: float, curve,
     if curve is None or not math.isfinite(speed) or speed < min_speed:
         return clipped
     wanted = speed * speed * abs(math.tan(steering)) / wheelbase
-    if wanted <= 0.0 or wanted > curve.delivered[-1]:
+    if wanted <= 0.0:
         return clipped
-    asked = curve.ask_for(wanted)
+    asked = max(wanted, curve.ask_for(wanted))
     compensated = math.copysign(math.atan(asked * wheelbase / (speed * speed)), steering)
     return float(np.clip(compensated, -max_steering_angle, max_steering_angle))
 
