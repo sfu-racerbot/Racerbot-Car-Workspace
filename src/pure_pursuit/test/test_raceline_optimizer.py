@@ -373,3 +373,76 @@ def _rounded_rectangle(half_length=6.0, half_width=3.0, radius=1.5, spacing=0.1)
         straight((-half_length, inner_y), (-half_length, -inner_y)),
         arc(-inner_x, -inner_y, 180.0),
     ])
+
+
+# ============================================================================
+# refine_centerline: an island in the track (PR #50, race-day map 2026-11-11)
+# ============================================================================
+
+def _loop_track_with_pillar(resolution=0.05):
+    """A 3 m wide rounded-rectangle loop track (centerline half extents
+    6 x 3, corner radius 1.5), with a 0.5 m square pillar standing in the
+    middle of the bottom straight."""
+    half_x, half_y = 7.5, 4.5           # outer wall: centerline + 1.5 m
+
+    def rounded_box_sdf(px, py, hx, hy, r):
+        qx = np.abs(px) - (hx - r)
+        qy = np.abs(py) - (hy - r)
+        return (np.hypot(np.maximum(qx, 0.0), np.maximum(qy, 0.0))
+                + np.minimum(np.maximum(qx, qy), 0.0) - r)
+
+    span_x, span_y = half_x + 0.5, half_y + 0.5
+    xs = (np.arange(int(2 * span_x / resolution)) + 0.5) * resolution - span_x
+    ys = (np.arange(int(2 * span_y / resolution)) + 0.5) * resolution - span_y
+    gx, gy = np.meshgrid(xs, ys)
+    free = ((rounded_box_sdf(gx, gy, half_x, half_y, 3.0) < 0.0)
+            & (rounded_box_sdf(gx, gy, 4.5, 1.5, 0.05) > 0.0))
+    free &= ~((np.abs(gx) <= 0.25) & (np.abs(gy + 3.0) <= 0.25))   # the pillar
+    grid = np.where(free, occ.FREE, occ.OCCUPIED).astype(np.int8)
+    return occ.OccupancyMap(grid, resolution, -span_x, -span_y)
+
+
+def _seed_passing_the_pillar(offset=0.5):
+    """The loop's centerline, bent to pass 0.3 m from the pillar's face on
+    the inside of the track (y = -3 + 0.25 + `offset`).
+
+    The plan asks for 0.3 m. Measured on this map (5 passes, 2026-11-12) the
+    guard does NOT hold at 0.3 m: the refined line ends inside the pillar with
+    or without `_guarded_move` (clearance 0.0 both ways); at 0.4 m it is 0.18
+    with the guard and 0.158 without; from 0.5 m the guard keeps it clear
+    (0.30 against 0.0 stubbed). 0.5 m is the nearest offset where the guard is
+    the thing under test."""
+    seed = _rounded_rectangle(6.0, 3.0, 1.5, spacing=0.1)
+    bottom = (seed[:, 1] < -2.99) & (np.abs(seed[:, 0]) < 2.0)
+    blend = np.clip(2.0 - np.abs(seed[bottom, 0]), 0.0, 1.0)   # 1 within 1 m of the pillar
+    seed[bottom, 1] = -3.0 + blend * (0.25 + offset)
+    return seed
+
+
+def test_refine_centerline_does_not_cross_an_island():
+    grid = _loop_track_with_pillar()
+    seed = _seed_passing_the_pillar()
+    # precondition, from the map itself: the seed is clear of the pillar
+    assert grid.clearance_at(seed[:, 0], seed[:, 1]).min() > 0.2, 'seed must start clear'
+    line, _, _ = opt.refine_centerline(grid, seed, spacing=0.1, max_width=4.0, iterations=5)
+    clearance = grid.clearance_at(line[:, 0], line[:, 1])
+    assert clearance.min() > 1.5 * grid.resolution, (
+        'a re-centered point walked into or across the pillar')
+    assert math.dist(line[0], line[-1]) < 0.3, 'the line must still close'
+    # it still goes round the whole loop once
+    assert line[:, 0].min() < -5.0 and line[:, 0].max() > 5.0
+    assert line[:, 1].min() < -2.0 and line[:, 1].max() > 2.0
+
+
+def test_refine_centerline_is_unchanged_on_a_track_without_islands():
+    # change-detector (not an oracle): refine_centerline on main bb09bf8 (no
+    # guard) for the plain ring above, saved with the same call. The guard
+    # must not move a single point on a track whose walls never close in.
+    ref = np.load(os.path.join(os.path.dirname(__file__), 'data', 'refine_ring_main_bb09bf8.npz'))
+    grid = _ring_map(outer=3.0, inner=1.5)
+    line, width_left, width_right = opt.refine_centerline(
+        grid, circle_path(1.8, count=90), spacing=0.1, max_width=4.0, iterations=5)
+    assert line.shape == ref['centerline'].shape
+    assert np.allclose(line, ref['centerline'], atol=1e-9)  # m
+    assert np.allclose(width_left, ref['width_left'], atol=1e-9)  # m
+    assert np.allclose(width_right, ref['width_right'], atol=1e-9)  # m
