@@ -287,6 +287,19 @@ class PurePursuitNode(Node):
         # enough to consider an escape"; set negative to disable body_contact
         # escapes entirely while keeping tier 1's.
         self.declare_parameter('body_contact_escape_clearance', 0.0)
+        # Understeer compensation (OFF by default): what the car delivers against what the steering
+        # asks for, in lateral acceleration (m/s^2), two equal-length lists, strictly increasing from
+        # (0, 0), delivered <= asked. Measured by tools/run_analysis/grip_truth.py. See
+        # racing_math.GripCurve and docs/superpowers/plans/2026-11-12-post-race-speed-program.md Task 6.
+        # Empty default is a byte array in rclpy, so typing is dynamic; real values are double arrays.
+        self.declare_parameter('understeer_curve_asked', [], ParameterDescriptor(dynamic_typing=True))
+        self.declare_parameter('understeer_curve_delivered', [], ParameterDescriptor(dynamic_typing=True))
+        # Crawl along the racing line away from a wall alongside the body
+        # when the body's own arc is clear (racing_math.body_arc_free_distance);
+        # 0 = off. See _reactive_override Tier 0 and
+        # docs/superpowers/plans/2026-11-12-post-race-speed-program.md.
+        self.declare_parameter('flank_creep_length', 0.0)
+        self.declare_parameter('flank_creep_margin', 0.01)
         self.declare_parameter('scan_timeout_sec', 0.5)
         # --- Deadman button (workspace policy, see docs/architecture.md) ---
         self.declare_parameter('enable_deadman', True)
@@ -534,6 +547,16 @@ class PurePursuitNode(Node):
             self.get_parameter('emergency_escape_clearance').value)
         self.body_contact_escape_clearance = float(
             self.get_parameter('body_contact_escape_clearance').value)
+        try:
+            self.grip_curve = racing_math.grip_curve_from_params(
+                list(self.get_parameter('understeer_curve_asked').value),
+                list(self.get_parameter('understeer_curve_delivered').value))
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(f'pure_pursuit_node: understeer_curve parameters refused: {exc}') from exc
+        self.flank_creep_length = float(
+            self.get_parameter('flank_creep_length').value)
+        self.flank_creep_margin = float(
+            self.get_parameter('flank_creep_margin').value)
         self.scan_timeout_sec = float(self.get_parameter('scan_timeout_sec').value)
         self.enable_deadman = bool(self.get_parameter('enable_deadman').value)
         self.joy_topic = self.get_parameter('joy_topic').value
@@ -689,6 +712,16 @@ class PurePursuitNode(Node):
                 and self.emergency_stop_clearance >= 0.0):
             raise RuntimeError(
                 'pure_pursuit_node: emergency_stop_clearance must be finite and non-negative.')
+        if not (math.isfinite(self.flank_creep_length)
+                and 0.0 <= self.flank_creep_length <= 2.0):
+            raise RuntimeError(
+                'pure_pursuit_node: flank_creep_length must be finite and within '
+                '[0, 2] m (0 turns the flank creep off).')
+        if not (math.isfinite(self.flank_creep_margin)
+                and 0.0 <= self.flank_creep_margin <= 0.10):
+            raise RuntimeError(
+                'pure_pursuit_node: flank_creep_margin must be finite and within '
+                '[0, 0.10] m.')
         # The arc horizon must be positive: swept_path_clearance raises for
         # max_length <= 0, and that would surface inside the control loop.
         if not (math.isfinite(self.emergency_arc_length) and self.emergency_arc_length > 0.0):
@@ -1697,6 +1730,7 @@ class PurePursuitNode(Node):
         # as before -- recovery and overtaking keep pure-pursuit geometry
         # whatever law is selected. ---
         law_detail = ''
+        understeer_delta = 0.0
         if recovering:
             steering_unclipped = racing_math.steering_from_curvature(kappa, self.wheelbase)
             steering_angle = float(np.clip(
@@ -1729,6 +1763,16 @@ class PurePursuitNode(Node):
             steering_unclipped = result.unclipped
             law_detail = result.detail
             self._last_law_predicted = result.predicted
+            # Understeer compensation (off unless a curve is set): steer for the curvature the car
+            # will really follow. Applied to the tracking law's steering only, here, before the
+            # reactive override and the command shaping; the uncompensated value is what the intent
+            # reports as the desired steering.
+            if self.grip_curve is not None:
+                compensated = racing_math.understeer_steering(
+                    steering_angle, lookahead_speed, self.wheelbase, self.grip_curve,
+                    self.max_steering_angle)
+                understeer_delta = compensated - steering_angle
+                steering_angle = compensated
 
         # --- Speed: the profiled speed for where the car is right now --
         # or, while recovering, a fixed cautious crawl. The profile speed
@@ -1785,6 +1829,7 @@ class PurePursuitNode(Node):
                 steering_unclipped = racing_math.steering_from_curvature(kappa, self.wheelbase)
                 steering_angle = steering_unclipped
                 steering_angle = float(np.clip(steering_angle, -self.max_steering_angle, self.max_steering_angle))
+                understeer_delta = 0.0   # the overtake aims anew; nothing of the law's steering remains
                 decision_state = (
                     'overtake_left' if self.overtake_side > 0 else 'overtake_right')
 
@@ -1821,6 +1866,7 @@ class PurePursuitNode(Node):
                 desired_steering=steering_angle)
             if steering_override is not None:
                 steering_angle = steering_override
+                understeer_delta = 0.0   # a reactive steering is not compensated or reported as such
             if speed_override is not None:
                 speed_cmd = min(speed_cmd, speed_override) if reactive_state is None else speed_override
                 hard_speed_cap = min(hard_speed_cap, speed_override)
@@ -1834,6 +1880,8 @@ class PurePursuitNode(Node):
         if self.follow_speed_cap is not None:
             speed_cmd = min(speed_cmd, self.follow_speed_cap)
             hard_speed_cap = min(hard_speed_cap, self.follow_speed_cap)
+        if understeer_delta != 0.0:
+            decision_detail += f"; understeer {understeer_delta:+.3f}rad"
         desired_steering = steering_angle
         desired_speed = speed_cmd
         if desired_speed <= 0.0 or hard_speed_cap <= 0.0:
@@ -1894,7 +1942,7 @@ class PurePursuitNode(Node):
         self._publish_intent(
             decision_state,
             decision_detail,
-            desired_steering=desired_steering,
+            desired_steering=desired_steering - understeer_delta,
             desired_speed=desired_speed,
             commanded_steering=steering_angle,
             commanded_speed=speed_cmd,
@@ -2412,6 +2460,39 @@ class PurePursuitNode(Node):
                 )
                 if escape is not None:
                     return escape
+            # Flank creep: a wall alongside the body that the body is not
+            # touching (body_clearance > 0), with the body's own rectangle
+            # clear along the arc being steered for flank_creep_length, is
+            # crawled away from at the escape crawl speed, steering left to
+            # the tracking law. rb2 20261111-152132 stopped for 30.5 s this
+            # way (19.0-49.5 s). Touching, or steering into the wall, still
+            # stops: the arc check sees the body reach it.
+            if (not directional and self.flank_creep_length > 0.0
+                    and self.emergency_escape_speed > 0.0
+                    and body_clearance > 0.0):
+                lo_idx, hi_idx = self._fov_indices(scan, self.body_clearance_fov_deg)
+                window = self._sanitized_window(scan, lo_idx, hi_idx)
+                if window.size > 0:
+                    angles = scan.angle_min + np.arange(lo_idx, hi_idx + 1) * scan.angle_increment
+                    raw = np.asarray(scan.ranges[lo_idx:hi_idx + 1], dtype=np.float64)
+                    valid = np.isfinite(raw) & (raw > 0.0) & (raw >= scan.range_min)
+                    free = racing_math.body_arc_free_distance(
+                        window, valid, angles,
+                        math.tan(desired_steering) / self.wheelbase,
+                        self.car_width / 2.0 + self.flank_creep_margin,
+                        self.car_length, self.wheelbase,
+                        self.laser_offset_x, self.laser_offset_y,
+                        max_length=self.flank_creep_length)
+                    if free == math.inf:
+                        return (
+                            None,
+                            self.emergency_escape_speed,
+                            'flank_creep',
+                            f"{body_contact_detail}, but the body is not touching "
+                            f"({body_clearance:.3f}m) and its own arc is clear for "
+                            f"{self.flank_creep_length:.2f}m -- crawling away at "
+                            f"{self.emergency_escape_speed:.2f}m/s rather than latching stopped",
+                        )
             return (None, 0.0, 'body_contact', body_contact_detail)
 
         # Tier 1 (2026-11-07): the body's swept path, or the raw cone backstop.
@@ -3379,8 +3460,8 @@ class PurePursuitNode(Node):
         desired_curvature = math.tan(desired_steering) / self.wheelbase
         commanded_curvature = math.tan(steering) / self.wheelbase
         online_curvature = max(abs(desired_curvature), abs(commanded_curvature))
-        curve_speed = racing_math.curvature_speed_limit(
-            online_curvature, self.max_lateral_accel, self.max_speed)
+        curve_speed = racing_math.delivered_curvature_speed_limit(
+            online_curvature, self.max_lateral_accel, self.max_speed, self.grip_curve)
         speed_target = min(desired_speed, curve_speed, hard_speed_cap)
         # Ramp from where the car actually *is*, not from the last command.
         # A ceiling (avoidance, curvature) drops the command instantly while

@@ -24,7 +24,7 @@ WS = Path(os.environ.get("WS", Path.cwd()))
 SUITE = Path(os.environ.get("SUITE_TRACKS", Path(__file__).resolve().parents[3] / ".sim" / "course_suite" / "tracks"))
 MR = Path(__file__).resolve().parent
 FLOOR = "sfu_course_2026_11_06"
-OURS = ["car2_course_2026_11_06a_scans", "car2_course_2026_11_06b_scans", "course_2026_10_30_scans",
+OURS = ["car2_course_2026_11_11", "car2_course_2026_11_06a_scans", "car2_course_2026_11_06b_scans", "course_2026_10_30_scans",
         "car1_course_2026_10_26", "room_2026_07_27", "levine_obs", "levine_blocked", "circular_obs"]
 INDOOR = ["indoor_oval", "indoor_tight", "indoor_wide", "asb_10000", "asb_sharp", "narrow_1p2", "narrow_1p0"]
 GF_CONFIGS = {

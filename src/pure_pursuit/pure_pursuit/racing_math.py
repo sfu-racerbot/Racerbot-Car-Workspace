@@ -189,6 +189,101 @@ def curvature_speed_limit(curvature: float, max_lateral_accel: float,
     return min(max_speed, math.sqrt(max_lateral_accel / abs(curvature)))
 
 
+@dataclass(frozen=True)
+class GripCurve:
+    """What the car delivers against what the steering asks for, in lateral acceleration.
+
+    ``asked`` is the kinematic lateral acceleration (v^2 * tan(delta) / wheelbase), strictly
+    increasing from 0; ``delivered`` is what the car achieves (measured by
+    tools/run_analysis/grip_truth.py), strictly increasing from 0 and never above ``asked``.
+    Past the last point the tyre is beyond its peak: ``deliver`` is flat there and ``ask_for``
+    never returns more than the last ``asked``.
+    """
+    asked: tuple
+    delivered: tuple
+
+    def deliver(self, asked: float) -> float:
+        """Delivered lateral acceleration for an asked one: piecewise linear, flat beyond the last point."""
+        return float(np.interp(asked, self.asked, self.delivered))
+
+    def ask_for(self, wanted: float) -> float:
+        """The asked lateral acceleration that delivers ``wanted``; the last asked value beyond the
+        last delivered one."""
+        if wanted >= self.delivered[-1]:
+            return float(self.asked[-1])
+        return float(np.interp(wanted, self.delivered, self.asked))
+
+
+def grip_curve_from_params(asked, delivered):
+    """A GripCurve from two parameter lists. None for two empty lists (compensation off).
+    ValueError, naming the rule broken, for unequal lengths, fewer than 2 points, a non-finite
+    value, non-increasing values, a first point other than (0, 0), or delivered > asked."""
+    asked, delivered = [float(v) for v in asked], [float(v) for v in delivered]
+    if not asked and not delivered:
+        return None
+    if len(asked) != len(delivered):
+        raise ValueError('understeer curve: asked and delivered must have equal length')
+    if len(asked) < 2:
+        raise ValueError('understeer curve: needs at least 2 points')
+    if not all(math.isfinite(v) for v in asked + delivered):
+        raise ValueError('understeer curve: every value must be finite')
+    for name, values in (('asked', asked), ('delivered', delivered)):
+        if any(b <= a for a, b in zip(values, values[1:])):
+            raise ValueError(f'understeer curve: {name} must be strictly increasing')
+    if asked[0] != 0.0 or delivered[0] != 0.0:
+        raise ValueError('understeer curve: must start at (0, 0)')
+    if any(d > a + 1e-12 for a, d in zip(asked, delivered)):
+        raise ValueError('understeer curve: delivered must not exceed asked')
+    return GripCurve(tuple(asked), tuple(delivered))
+
+
+def understeer_steering(steering: float, speed: float, wheelbase: float, curve,
+                        max_steering_angle: float, min_speed: float = 1.0) -> float:
+    """The steering that makes the car follow the curvature ``steering`` asks for kinematically.
+
+    Unchanged (clipped) when ``curve`` is None or ``speed`` is below ``min_speed`` or not finite.
+    Past the curve's last delivered value the output holds the steering for the last asked value
+    (``ask_for`` caps there) until the kinematic ask exceeds it, then equals the clipped input, so
+    the output is continuous across the grip limit and never steers less than the input; the
+    speed cap handles the car being too fast. Sign preserved; clipped to
+    +/- ``max_steering_angle``. A non-finite ``steering`` returns 0.0, never NaN.
+    """
+    if not math.isfinite(steering):
+        return 0.0 if math.isnan(steering) else math.copysign(max_steering_angle, steering)
+    clipped = float(np.clip(steering, -max_steering_angle, max_steering_angle))
+    if curve is None or not math.isfinite(speed) or speed < min_speed:
+        return clipped
+    wanted = speed * speed * abs(math.tan(steering)) / wheelbase
+    if wanted <= 0.0:
+        return clipped
+    asked = max(wanted, curve.ask_for(wanted))
+    compensated = math.copysign(math.atan(asked * wheelbase / (speed * speed)), steering)
+    return float(np.clip(compensated, -max_steering_angle, max_steering_angle))
+
+
+def delivered_curvature_speed_limit(curvature: float, max_lateral_accel: float, max_speed: float,
+                                    curve) -> float:
+    """Online speed ceiling from the curvature the car must follow, using what it delivers.
+
+    The largest speed v <= max_speed with curve.deliver(v^2 * |curvature|) <= max_lateral_accel,
+    in closed form: v = sqrt(curve.ask_for(max_lateral_accel) / |curvature|). If the curve never
+    delivers max_lateral_accel the asked lateral is limited at the curve's last asked value, so
+    speed is still bounded. With ``curve`` None it is exactly curvature_speed_limit. NaN curvature
+    returns 0.0 (command zero).
+    """
+    if not math.isfinite(curvature):
+        return 0.0
+    if curve is None:
+        return curvature_speed_limit(curvature, max_lateral_accel, max_speed)
+    if not all(math.isfinite(v) for v in (max_lateral_accel, max_speed)):
+        raise ValueError('curvature speed-limit inputs must be finite')
+    if max_lateral_accel <= 0.0 or max_speed < 0.0:
+        raise ValueError('max_lateral_accel must be positive and max_speed non-negative')
+    if abs(curvature) < 1e-9:
+        return max_speed
+    return min(max_speed, math.sqrt(curve.ask_for(max_lateral_accel) / abs(curvature)))
+
+
 def slew_rate_limit(target: float, previous: float, dt: float,
                     increase_rate: float, decrease_rate: float = None) -> float:
     """Limit a normal command's rise and fall per second.
@@ -1227,6 +1322,72 @@ def detect_dynamic_cluster(measured: np.ndarray, expected: np.ndarray,
                 best = (start, end, centroid_range, centroid_angle)
             start = i if split else None
     return best
+
+
+def body_arc_free_distance(clean: np.ndarray, valid: np.ndarray, angles: np.ndarray,
+                           curvature: float, half_width: float, car_length: float,
+                           wheelbase: float, laser_offset_x: float,
+                           laser_offset_y: float = 0.0,
+                           max_length: float = 1.0, step: float = 0.02) -> float:
+    """Distance base_link can travel along a constant-curvature arc before any
+    valid scan point lies inside the body rectangle. inf if none within
+    max_length. 0.0 only if a point is inside the rectangle at the start.
+
+    The rectangle is x in [rear, front], |y| <= half_width in base_link, with
+    front = wheelbase/2 + car_length/2 and rear = wheelbase/2 - car_length/2
+    (the model ``swept_path_clearance`` uses). Scan points are fixed in the
+    starting base_link frame and the body moves. Unlike
+    ``swept_path_clearance``, a point alongside the body but outside the
+    rectangle is not an obstacle unless the body moves into it. REP-103:
+    positive curvature turns left.
+    """
+    ranges = np.asarray(clean, dtype=np.float64)
+    validity = np.asarray(valid, dtype=bool)
+    beam_angles = np.asarray(angles, dtype=np.float64)
+    if not (ranges.shape == validity.shape == beam_angles.shape):
+        raise ValueError('ranges, validity, and angles must have matching shapes')
+    for name, value in (('curvature', curvature), ('half_width', half_width),
+                        ('car_length', car_length), ('wheelbase', wheelbase),
+                        ('laser_offset_x', laser_offset_x),
+                        ('laser_offset_y', laser_offset_y),
+                        ('max_length', max_length), ('step', step)):
+        if not math.isfinite(value):
+            raise ValueError(f'{name} must be finite')
+    for name, value in (('half_width', half_width), ('car_length', car_length),
+                        ('wheelbase', wheelbase), ('max_length', max_length),
+                        ('step', step)):
+        if value <= 0.0:
+            raise ValueError(f'{name} must be positive')
+
+    front = wheelbase / 2.0 + car_length / 2.0
+    rear = wheelbase / 2.0 - car_length / 2.0
+
+    usable = validity & (ranges > 0.0) & np.isfinite(ranges) & np.isfinite(beam_angles)
+    if not np.any(usable):
+        return math.inf
+    px = ranges[usable] * np.cos(beam_angles[usable]) + laser_offset_x
+    py = ranges[usable] * np.sin(beam_angles[usable]) + laser_offset_y
+
+    travel = np.arange(0.0, max_length + 0.5 * step, step)
+    travel = travel[travel <= max_length + 1e-12]
+    if abs(curvature) < 1e-6:
+        bx = travel
+        by = np.zeros_like(travel)
+        heading = np.zeros_like(travel)
+    else:
+        heading = curvature * travel
+        bx = np.sin(heading) / curvature
+        by = (1.0 - np.cos(heading)) / curvature
+    cos_h = np.cos(heading)[:, None]
+    sin_h = np.sin(heading)[:, None]
+    dx = px[None, :] - bx[:, None]
+    dy = py[None, :] - by[:, None]
+    local_x = cos_h * dx + sin_h * dy
+    local_y = -sin_h * dx + cos_h * dy
+    hit = ((local_x >= rear) & (local_x <= front) & (np.abs(local_y) <= half_width)).any(axis=1)
+    if not hit.any():
+        return math.inf
+    return float(travel[int(np.argmax(hit))])
 
 
 def vehicle_boundary_distances(angles: np.ndarray, car_width: float,
