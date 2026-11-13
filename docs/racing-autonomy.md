@@ -1861,6 +1861,8 @@ All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that fi
 | `max_speed` / `min_speed` | `4.0` / `0.5` | Hard safety ceiling/floor, independent of the `.csv` |
 | `max_lateral_accel` | `2.5` | m/s²; online cornering ceiling on the *commanded* curvature, see [Speed](#speed-the-profile-then-two-online-ceilings) |
 | `speed_lead_time` | `0.0` | s, 0-1; command the profile speed this far ahead when it is higher, so a lagging speed loop accelerates earlier. Never brakes early. Car 2: 0.25 |
+| `launch_speed_scale` | `1.0` | (0.5, 1.0], 1.0 = off. After LB is pressed from standstill (measured speed below 0.5 m/s, stale odometry counts as standing) the profiled speed is multiplied by this for the next `launch_scale_distance` metres driven, then back to 1. Applied before the speed clip and every cap, so it can only lower a command; not applied while recovering. Counted per fresh-odometry tick; a press while rolling neither arms nor clears it. Simulator-validated only (`launch_scale.py`) |
+| `launch_scale_distance` | `0.0` | m, >= 0; 0 = one line length |
 | `max_acceleration` | `6.0` | m/s²; cap on how fast a speed command may *rise*. Deliberately loose — too tight and the car cannot recover from a safety stop |
 | `max_braking_decel` | `8.0` | m/s²; cap on how fast a *normal* command may fall. Emergency stops are never rate-limited |
 | `max_steering_rate` | `1.0` | rad/s; steering slew limit between commands |
