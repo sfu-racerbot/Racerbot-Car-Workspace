@@ -227,6 +227,26 @@ def ranking(out, arms, courses):
     return "\n".join(lines), eligible
 
 
+def extras_table(out, arms):
+    rows = load_results(out)
+    extras = {r["arm"]: r for r in rows if r["stage"] == "extras"}
+    failed = {r["arm"]: r for r in rows if r["stage"] == "failedpose"}
+    lines = ["| arm | profile alone (race-day, cap off) | worst right / left offset, m | contacts (run, seed, s) | "
+             "failed-pose start, cap on: contact seeds | right@14, m |", "|---|---|---|---|---|---|"]
+    for arm in arms:
+        e, f = extras.get(arm), failed.get(arm)
+        if e is None:
+            continue
+        runs = e["alone_contacts"]
+        where = "; ".join(sorted({f"{r[0].replace('standing start at ', '')} s={r[2]}" for r in runs}))[:90]
+        fp = f["failed_pose"] if f else []
+        right = [x["right14"] for x in fp if x["right14"] is not None]
+        lines.append(f"| {arm} | {'pass' if e['alone_pass'] else 'FAIL'} | {e['alone_worst_right']:.2f} / "
+                     f"{e['alone_worst_left']:.2f} | {len(runs)} of 18 runs; {where} | "
+                     f"{sum(x['contact'] for x in fp)}/{len(fp)} | {', '.join(f'{x:.2f}' for x in right) or '-'} |")
+    return "\n".join(lines)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out")
@@ -286,7 +306,7 @@ def main(argv=None) -> int:
         every = arms + [a + "+U" for a in understeer]
         table, *_ = report(out, every, courses)
         ranks, _ = ranking(out, every, courses)
-        (out / "table.md").write_text(table + "\n\n" + ranks + "\n")
+        (out / "table.md").write_text(table + "\n\n" + ranks + "\n\n" + extras_table(out, arms) + "\n")
         print(table)
         print(ranks)
     return 0
