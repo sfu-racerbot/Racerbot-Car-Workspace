@@ -37,6 +37,8 @@ from run_analysis.steer_stages import bag_origin, gyro_series, recorded_params  
 
 WINDOW, MIN_SAMPLES = 8, 4
 THRESHOLDS = (0.8, 0.5)
+DT_MAX = 0.25            # s, a larger gap between two sightings is no sample (the shipped gate's rule)
+EXPIRY, NEWEST, NEED = 0.6, 8, 4
 
 
 def make_extra(run, wheelbase, laser_x):
@@ -66,7 +68,7 @@ def make_extra(run, wheelbase, laser_x):
             res = {}
             if st["prev"] is not None:
                 dt = row["t"] - st["prev"][0]
-                if 0.0 < dt <= 0.1:
+                if 0.0 < dt <= DT_MAX:
                     rate = (det.near_range - st["prev"][1]) / dt
                     for key, buf, om in (("g", st["bg"], omega_g if omega_g is not None else omega_s), ("s", st["bs"], omega_s)):
                         buf.append(rate + v * math.cos(b) + om * laser_x * math.sin(b))
@@ -147,6 +149,69 @@ def report(rows, eps, label):
     return verdict
 
 
+def static_confirmed_series(rows, track_id, k, S):
+    """Static-confirmed at tick k for ``track_id``: >= NEED raw steering-model residual samples among the newest NEWEST
+    no older than EXPIRY s, median |residual| < S. Anything else is False (not confirmed). Also the window median."""
+    t_now = rows[k]["t"]
+    samples = []
+    j = k
+    while j >= 0 and rows[j]["t"] >= t_now - EXPIRY and len(samples) < NEWEST:
+        r = rows[j]["rr"].get(track_id, {}).get("res", {}).get("s")
+        if r is not None and math.isfinite(r[0]):
+            samples.append(r[0])
+        j -= 1
+    if len(samples) < NEED:
+        return False, math.nan
+    med = float(np.median(np.abs(samples)))
+    return med < S, med
+
+
+def gate_report(rows, eps, label, S_values=(0.5, 0.35)):
+    wall, real = classify(eps)
+    out = {}
+    for S in S_values:
+        wt = wc = 0
+        wall_rows = []
+        for e in wall:
+            a, b = e["tick_idx"]
+            n = c = 0
+            for k in range(a, b + 1):
+                o = rows[k]["obj"]
+                n += 1
+                if o is not None and static_confirmed_series(rows, o["track"], k, S)[0]:
+                    c += 1
+            wt += n
+            wc += c
+            wall_rows.append((e["start"], n, c))
+        real_rows = []
+        for e in real:
+            a, b = e["tick_idx"]
+            n = c = longest = run = 0
+            mins = []
+            for k in range(a, b + 1):
+                o = rows[k]["obj"]
+                n += 1
+                conf = False
+                if o is not None:
+                    conf, med = static_confirmed_series(rows, o["track"], k, S)
+                    if math.isfinite(med):
+                        mins.append(med)
+                c += conf
+                run = run + 1 if conf else 0
+                longest = max(longest, run)
+            real_rows.append((e["start"], n, c, longest * DT_TICK, min(mins) if mins else math.nan))
+        out[S] = (wt, wc, wall_rows, real_rows)
+        print(f"== GATE {label} S={S}: wall ticks confirmed {wc}/{wt} = {wc / max(wt, 1):.3f}")
+        for st, n, c in wall_rows:
+            print(f"   wall {st:8.2f}  {c:3d}/{n:3d} = {c / n:.2f}")
+        for st, n, c, lng, mn in real_rows:
+            print(f"   REAL {st:8.2f}  confirmed {c:3d}/{n:3d} = {c / n:.3f}  longest run {lng:.3f}s  min full-window median {mn:.2f}")
+    return out
+
+
+DT_TICK = 0.025
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run")
@@ -156,6 +221,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     rows, eps = study(args.run, args.loc, args.map, args.line)
     report(rows, eps, Path(args.run).name)
+    gate_report(rows, eps, Path(args.run).name)
     return 0
 
 
