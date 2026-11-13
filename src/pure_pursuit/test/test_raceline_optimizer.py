@@ -446,3 +446,96 @@ def test_refine_centerline_is_unchanged_on_a_track_without_islands():
     assert np.allclose(line, ref['centerline'], atol=1e-9)  # m
     assert np.allclose(width_left, ref['width_left'], atol=1e-9)  # m
     assert np.allclose(width_right, ref['width_right'], atol=1e-9)  # m
+
+
+# ============================================================================
+# _guarded_move: the rule itself (PR #50, ruled by the tech lead 2026-11-12)
+# ============================================================================
+#
+# The rule (recomputed independently below with occ_map.clearance_at): a point's step toward `new` is
+# taken at fraction 1, else 1/2, else 1/4, the first at which BOTH hold: the destination's clearance is at
+# least the old clearance minus 1.5 cells, and the points at 0.25, 0.5 and 0.75 of the way there are more
+# than 1.5 cells from any wall. If no fraction qualifies the point stays.
+
+def _wall_map(resolution=0.05):
+    """A 4 m square, free except a one-cell-thick wall along x = 0 from y = -1 to y = 1."""
+    cells = int(4.0 / resolution)
+    grid = np.full((cells, cells), occ.FREE, dtype=np.int8)
+    axis = (np.arange(cells) + 0.5) * resolution - 2.0
+    wall_col = int(np.argmin(np.abs(axis - 0.0)))
+    grid[(np.abs(axis) <= 1.0), wall_col] = occ.OCCUPIED
+    return occ.OccupancyMap(grid, resolution, -2.0, -2.0)
+
+
+def _rule(grid, old, new):
+    """The guard's rule, written out in the test from clearance_at alone."""
+    tol = 1.5 * grid.resolution
+    before = grid.clearance_at(old[:, 0], old[:, 1])[0]
+    for fraction in (1.0, 0.5, 0.25):
+        trial = old + fraction * (new - old)
+        if grid.clearance_at(trial[:, 0], trial[:, 1])[0] < before - tol:
+            continue
+        mids = [old + t * (trial - old) for t in (0.25, 0.5, 0.75)]
+        if all(grid.clearance_at(m[:, 0], m[:, 1])[0] > tol for m in mids):
+            return trial
+    return old
+
+
+def test_guarded_move_takes_a_step_that_raises_clearance_in_full():
+    grid = _wall_map()
+    old = np.array([[-0.5, 0.0]])
+    new = np.array([[-0.9, 0.0]])        # away from the wall
+    assert grid.clearance_at(new[:, 0], new[:, 1])[0] > grid.clearance_at(old[:, 0], old[:, 1])[0]
+    out = opt._guarded_move(grid, grid.clearance_field(), old, new)
+    assert np.allclose(out, new, atol=1e-12)  # m: the whole step
+
+
+@pytest.mark.parametrize('step, taken', [(0.20, 0.25), (0.10, 0.5), (0.02, 1.0)])
+def test_guarded_move_halves_then_quarters_a_step_that_loses_more_than_one_and_a_half_cells(step, taken):
+    # A point 0.30 m from the wall steps toward it by 0.20, 0.10, 0.02 m. The allowed loss is 1.5 cells =
+    # 0.075 m, so: 0.20 and 0.10 lose too much at full and 0.20 at half (0.10), leaving the quarter
+    # (0.05 m) for the first and the half (0.05 m) for the second; 0.02 m is taken in full.
+    grid = _wall_map()
+    old = np.array([[-0.30, 0.0]])
+    new = np.array([[-0.30 + step, 0.0]])
+    out = opt._guarded_move(grid, grid.clearance_field(), old, new)
+    assert np.allclose(out, _rule(grid, old, new), atol=1e-12)           # the rule recomputed here
+    assert np.allclose(out, old + taken * (new - old), atol=1e-12)       # m, the fraction worked out above
+
+
+def test_guarded_move_drops_a_step_none_of_whose_fractions_qualify():
+    grid = _wall_map()
+    old = np.array([[-0.12, 0.0]])        # 0.12 m from the wall; every fraction's midpoints come within 1.5 cells
+    new = np.array([[0.0, 0.0]])
+    out = opt._guarded_move(grid, grid.clearance_field(), old, new)
+    assert np.allclose(out, _rule(grid, old, new), atol=1e-12)
+    assert np.allclose(out, old, atol=1e-12)
+
+
+def test_guarded_move_refuses_a_step_across_a_thin_wall_even_if_the_destination_is_clear():
+    grid = _wall_map()
+    old = np.array([[-0.5, 0.0]])
+    new = np.array([[0.5, 0.0]])          # free on the far side; the 0.25/0.5/0.75 samples touch the wall
+    assert grid.clearance_at(new[:, 0], new[:, 1])[0] > 0.3, 'precondition: destination is clear'
+    out = opt._guarded_move(grid, grid.clearance_field(), old, new)
+    assert np.allclose(out, _rule(grid, old, new), atol=1e-12)
+    assert out[0, 0] < 0.0                # never reaches the far side
+    assert grid.clearance_at(out[:, 0], out[:, 1])[0] > 1.5 * grid.resolution
+
+
+def test_refine_centerline_never_loses_clearance_by_more_than_one_and_a_half_cells():
+    # The guard's own invariant, checked independently on the plain ring: each refinement step may lower
+    # a point's clearance by at most 1.5 cells, and the line still closes with the same number of points.
+    grid = _ring_map(outer=3.0, inner=1.5)
+    seed = circle_path(1.8, count=90)
+    before = grid.clearance_at(seed[:, 0], seed[:, 1])
+    line, _, _ = opt.refine_centerline(grid, seed, spacing=0.1, max_width=4.0, iterations=5)
+    after = grid.clearance_at(line[:, 0], line[:, 1])
+    ref = np.load(os.path.join(os.path.dirname(__file__), 'data', 'refine_ring_main_bb09bf8.npz'))
+    assert line.shape == ref['centerline'].shape                  # same number of points
+    assert math.dist(line[0], line[-1]) < 0.3                      # and it closes
+    # per point, against the nearest seed point it came from (a refined point never sits where its clearance
+    # fell by more than the guard's 1.5 cells; on this ring the line moves AWAY from the walls, so the
+    # bound is loose, and what it proves is that no point was walked toward a wall)
+    nearest = np.argmin(np.hypot(line[:, None, 0] - seed[None, :, 0], line[:, None, 1] - seed[None, :, 1]), axis=1)
+    assert np.all(after >= before[nearest] - 1.5 * grid.resolution)
