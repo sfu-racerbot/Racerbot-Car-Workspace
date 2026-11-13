@@ -526,6 +526,7 @@ def refine_centerline(occ_map, seed_path: np.ndarray, spacing: float,
     from pure_pursuit import occupancy_map as occ
 
     line = resample_closed_path(seed_path, spacing)
+    field = occ_map.clearance_field()
     for _ in range(max(1, iterations)):
         _, normals = path_frames(line)
         width_left, width_right, found_left, found_right = occ.measure_track_widths(
@@ -535,7 +536,8 @@ def refine_centerline(occ_map, seed_path: np.ndarray, spacing: float,
         shift = _interpolate_over(shift, found_left & found_right)
         shift = _smooth_circular(shift, half_window=2)
         np.clip(shift, -max_width / 2.0, max_width / 2.0, out=shift)
-        line = resample_closed_path(line + shift[:, None] * normals, spacing)
+        line = resample_closed_path(
+            _guarded_move(occ_map, field, line, line + shift[:, None] * normals), spacing)
 
     # Every ray cast is quantised to the cell size, so the re-centred line
     # carries a cell-scale wiggle. That is invisible on a plot and loud to a
@@ -546,7 +548,8 @@ def refine_centerline(occ_map, seed_path: np.ndarray, spacing: float,
     # recorded lap. Smooth first, then measure the widths, so the widths
     # belong to the line actually being returned.
     line = resample_closed_path(
-        racing_math.smooth_path(line, smoothing_window), spacing)
+        _guarded_move(occ_map, field, line, racing_math.smooth_path(line, smoothing_window)),
+        spacing)
 
     _, normals = path_frames(line)
     width_left, width_right, found_left, found_right = occ.measure_track_widths(
@@ -556,6 +559,34 @@ def refine_centerline(occ_map, seed_path: np.ndarray, spacing: float,
         width_left = np.where(found_left, width_left, clearance)
         width_right = np.where(found_right, width_right, clearance)
     return line, width_left, width_right
+
+
+def _guarded_move(occ_map, field, old: np.ndarray, new: np.ndarray) -> np.ndarray:
+    """Take each point's step only where it does not walk into or across a wall.
+
+    Re-centering is meant to move a point *away* from the nearest wall, so its
+    clearance should not drop. Where it would -- an island in the track (a
+    pillar, a cone) whose far side a ray slipped past, or smoothing pulling a
+    point across one -- the step is halved until it is safe, else dropped.
+    Without this the centerline was dragged straight through a 0.5 m pillar,
+    leaving a "corridor" of a few centimetres and failing the whole race line.
+    """
+    old = np.asarray(old, dtype=np.float64)
+    new = np.asarray(new, dtype=np.float64)
+    tol = 1.5 * occ_map.resolution
+    before = occ_map.clearance_at(old[:, 0], old[:, 1], field)
+    out = old.copy()
+    pending = np.ones(len(old), dtype=bool)
+    for fraction in (1.0, 0.5, 0.25):
+        trial = old + fraction * (new - old)
+        ok = occ_map.clearance_at(trial[:, 0], trial[:, 1], field) >= before - tol
+        for t in (0.25, 0.5, 0.75):
+            mid = old + t * (trial - old)
+            ok &= occ_map.clearance_at(mid[:, 0], mid[:, 1], field) > tol
+        take = pending & ok
+        out[take] = trial[take]
+        pending &= ~take
+    return out
 
 
 def _interpolate_over(values: np.ndarray, trusted: np.ndarray) -> np.ndarray:
