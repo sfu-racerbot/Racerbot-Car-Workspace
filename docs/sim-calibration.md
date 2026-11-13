@@ -399,6 +399,16 @@ RB_NO_QUEUE=1 RB_WS=$(pwd) rb python3 -m pytest tools/f1tenth_sim/tests/ -q -p n
 
 </details>
 
+## The 2026-11-11 race-day floor (car 2)
+
+`sfu_course_2026_11_11_rb2` is measured from the race-day runs `20261111-152132`, `-135934` and `-142254` (`car_measure.py`, `grip_truth.py`, `fit-plant`); the evidence sits beside it as `sfu_course_2026_11_11_rb2_{measurement,replay}.json` and `sfu_course_2026_11_11_grip_rb2_vesc.json`. Three things differ from the 11-06 floor.
+
+- **The grip curve falls past its peak.** On the gyro basis the car delivers 2.94 m/s^2 at 3.75 asked and 2.71 at 4.38. `ProgressiveGrip` refuses a falling table by default; the floor sets `grip_curve_falls=True`. The curve is the gyro-basis median per asked bin (bins of 10 or more samples, never above the request), times the replay-selected scale 1.25, because the plant's own tyres understeer on top of it. The scale was chosen by yaw RMS on 150 s of `152132`; the 60 s default window straddles the failed start and cannot tell scales 1.0 to 1.15 apart.
+- **The speed loop** is `car_measure.py`'s fit on the three runs: accel gain 10, accel max 4, brake gain 5, brake max 4, 4 ticks.
+- **Braking lag.** `tools/run_analysis/braking_lag.py` measures the delay that best aligns `/drive` speed with wheel speed on rising and on falling commands, and the deceleration in the hardest braking zones. On `152132` the real car gives 0.2375 s and 0.2375 s, and 2.98, 2.90, 2.79 m/s^2. `tests/test_floor_2026_11_11_rb2.py` replays the run's commands (fixture `sfu_course_2026_11_11_rb2_braking.npz`) and holds the floor within 0.05 s and 0.3 m/s^2 of those.
+
+`tools/f1tenth_sim/start_replay.py` starts the map racer at rest at a recorded pose and prints speed and cross-track at chosen arc lengths, per seed.
+
 ## Speed on the calibrated floor
 
 Run on 2026-10-31, after validation passed. Each row is 30 seeds in both directions: 60 laps from a standing start, on `course_2026_10_30_scans` with the floor profile.
