@@ -277,7 +277,7 @@ Branch: `pp-grip`. One pull request per task group marked (PR).
 - [ ] **Finish draft PR #50 first** (`car2-guarded-recenter`): car 2's recovered `_guarded_move` edit to `raceline_optimizer.refine_centerline`, which the race-day map was built with. Add `test_refine_centerline_does_not_cross_an_island` to `src/pure_pursuit/test/test_raceline_optimizer.py`: an occupancy map of a 3 m wide ring track with a 0.5 m square pillar in the middle of one straight and a seed path passing 0.3 m beside it; assert every point of the refined line has `occ_map.clearance_at(x, y) > 1.5 * resolution` and that the line still closes. Prove it fails with `_guarded_move` stubbed to `return new`. Also assert the unobstructed-track result is unchanged (`np.allclose` against the same call on `main`'s function for a plain ring, `atol=1e-9  # m`). Run the pure_pursuit suite and the course suite's map-racer arm on that branch; zero contact and no course that built a line on `main` failing to build. Mark the PR ready and report.
 - [x] Import the map, add it to the catalog and to the course suite's list.
 - [ ] Baseline on `main`: run the map racer and gap follow (default and time trial) on it, 6 seeds. Record lap times in the pull request. **Acceptance for the import only:** the course builds, a lap closes, zero contact for gap follow default. The simulator's lap times versus section 1.1 are recorded, not gated, here; Phase 3 closes that gap.
-- [ ] Commit.
+- [x] Commit.
 
 ### Task 5: measure the sustained grip of each car (PR with Task 4)
 
@@ -328,9 +328,9 @@ def understeer_steering(steering: float, speed: float, wheelbase: float,
 
 - Node parameters: `understeer_curve_asked`, `understeer_curve_delivered` (double arrays, default `[]`). Applied to the tracking law's steering, before the reactive override and before `_shape_normal_command`, only in the normal driving state (not while recovering, not to a reactive or escape steering). The uncompensated value is what `/drive_intent` reports as desired steering; add factor-free detail text `understeer +0.031rad`.
 
-- [ ] Pure tests (closed forms): identity curve `((0, 10), (0, 10))` returns the input steering (`abs=1e-12`); with `asked=(0, 2.5, 10)`, `delivered=(0, 2.5, 5.5)`, speed 3, wheelbase 0.36, a steering whose kinematic lateral is 4.0 comes back as the steering whose kinematic lateral is `2.5 + (4.0-2.5) * 7.5/3.0 = 6.25` (`abs=1e-6 rad`); below 2.5 unchanged; negative steering mirrors; result clips at 0.42; speed 0.5 returns input; `deliver(ask_for(a)) == a` over 50 values inside the curve (`abs=1e-9`); `ask_for` beyond the last delivered value returns the last asked value; each invalid curve raises `ValueError` with `match=` its rule; NaN steering or speed returns the clipped input, never NaN.
-- [ ] Node tests: empty arrays publish exactly the same steering as `main` on a fixed pose and line (compare two nodes); a curve makes the published steering larger in magnitude in a corner above 2.5 m/s² and identical on a straight; an invalid curve refuses to start (`match='understeer_curve'`); the four deadman deny-path tests on this node construction with the curve set.
-- [ ] Mutations: swap `asked` and `delivered` in `ask_for`; drop the clip; apply below `min_speed`.
+- [x] Pure tests (closed forms): identity curve `((0, 10), (0, 10))` returns the input steering (`abs=1e-12`); with `asked=(0, 2.5, 10)`, `delivered=(0, 2.5, 5.5)`, speed 3, wheelbase 0.36, a steering whose kinematic lateral is 4.0 comes back as the steering whose kinematic lateral is `2.5 + (4.0-2.5) * 7.5/3.0 = 6.25` (`abs=1e-6 rad`); below 2.5 unchanged; negative steering mirrors; result clips at 0.42; speed 0.5 returns input; `deliver(ask_for(a)) == a` over 50 values inside the curve (`abs=1e-9`); `ask_for` beyond the last delivered value returns the last asked value; each invalid curve raises `ValueError` with `match=` its rule; NaN steering or speed returns the clipped input, never NaN.
+- [x] Node tests: empty arrays publish exactly the same steering as `main` on a fixed pose and line (compare two nodes); a curve makes the published steering larger in magnitude in a corner above 2.5 m/s² and identical on a straight; an invalid curve refuses to start (`match='understeer_curve'`); the four deadman deny-path tests on this node construction with the curve set.
+- [x] Mutations: swap `asked` and `delivered` in `ask_for`; drop the clip; apply below `min_speed`.
 - [ ] Commit.
 
 ### Task 7: the online curve cap uses delivered, not commanded, curvature (PR with Task 6)
@@ -339,7 +339,7 @@ def understeer_steering(steering: float, speed: float, wheelbase: float,
 
 **Behaviour:** with a `GripCurve` set, `curve_speed` is the largest speed `v <= max_speed` with `curve.deliver(v² * online_curvature) <= max_lateral_accel`. Add `racing_math.delivered_curvature_speed_limit(curvature, max_lateral_accel, max_speed, curve) -> float`; with `curve=None` it returns exactly `curvature_speed_limit(...)`. Solve in closed form per linear segment (no iteration).
 
-- [ ] Tests: `curve=None` equals `curvature_speed_limit` over 100 seeded inputs (`==`); identity curve likewise (`abs=1e-9`); with the Task 6 example curve and `max_lateral_accel=3.1`, curvature 0.5/m: expected speed is `sqrt(ask_for(3.1)/0.5)` (`abs=1e-6`); zero curvature returns `max_speed`; curvature so large the limit is below any segment returns the kinematic answer of the first segment; NaN curvature returns 0.0 (command zero, the specified edge for driving code).
+- [x] Tests: `curve=None` equals `curvature_speed_limit` over 100 seeded inputs (`==`); identity curve likewise (`abs=1e-9`); with the Task 6 example curve and `max_lateral_accel=3.1`, curvature 0.5/m: expected speed is `sqrt(ask_for(3.1)/0.5)` (`abs=1e-6`); zero curvature returns `max_speed`; curvature so large the limit is below any segment returns the kinematic answer of the first segment; NaN curvature returns 0.0 (command zero, the specified edge for driving code).
 - [ ] Commit; open the pull request for Tasks 6 and 7 with both features **off by default**.
 
 ### Task 8: choose rb2's curve and lateral limits in the simulator (PR)
