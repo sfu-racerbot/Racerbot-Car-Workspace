@@ -26,6 +26,8 @@ of the limit cycle, and free in run time.
 from __future__ import annotations
 
 import math
+
+import numpy as np
 from collections import deque
 from dataclasses import dataclass
 
@@ -95,3 +97,19 @@ def speed_loop_accel_ceiling(accel_max: float, fade_from: float, no_load: float,
     if not (math.isfinite(no_load) and no_load > fade_from):
         raise ValueError("no_load must be finite and above fade_from")
     return accel_max * max(no_load - speed, 0.0) / (no_load - fade_from)
+
+
+def accel_table_ceiling(table, speed: float) -> float:
+    """The speed loop's acceleration ceiling at wheel ``speed`` from a measured table ((speed, accel), ...):
+    linear between points, flat beyond the ends. Speeds strictly ascending, accelerations finite and positive,
+    at least two points (opt-in per floor: ``Calibration.accel_by_speed``)."""
+    rows = [tuple(row) for row in table]
+    if len(rows) < 2:
+        raise ValueError("an acceleration table needs at least two points")
+    if not all(math.isfinite(x) for row in rows for x in row):
+        raise ValueError("an acceleration table must be finite")
+    if any(b[0] <= a[0] for a, b in zip(rows, rows[1:])):
+        raise ValueError("acceleration table speeds must be strictly ascending")
+    if any(row[1] <= 0.0 for row in rows):
+        raise ValueError("acceleration table values must be positive")
+    return float(np.interp(speed, [row[0] for row in rows], [row[1] for row in rows]))

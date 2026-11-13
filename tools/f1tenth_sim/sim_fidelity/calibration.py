@@ -156,6 +156,9 @@ class CarCalibration:
     # motor's force falls with speed (actuation.speed_loop_accel_ceiling). inf = no fall-off.
     speed_loop_accel_fade_from: float = math.inf
     speed_loop_accel_no_load: float = math.inf
+    # Opt-in: ((wheel speed, acceleration ceiling), ...), linear between points, flat beyond. When set it replaces
+    # speed_loop_accel_max and its fade-off as the loop's acceleration ceiling (actuation.accel_table_ceiling).
+    accel_by_speed: tuple = ()
 
     # --- Speed envelope -------------------------------------------------
     speed_max: float = None
@@ -372,6 +375,7 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     "speed_loop_brake_gain": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_accel_fade_from": (Provenance.ESTIMATED, "inf by default (no fall-off); a floor profile sets it where the measured, traction-limited speed range ends"),
+    "accel_by_speed": (Provenance.ESTIMATED, "empty: the loop's ceiling is speed_loop_accel_max with its fade-off. A floor may set a measured table (accel_by_speed.py). See FLOORS"),
     "speed_loop_accel_no_load": (Provenance.ESTIMATED, "inf by default; a floor profile sets an estimated motor no-load speed (actuation.speed_loop_accel_ceiling)"),
     "speed_max": (
         Provenance.DERIVED,
