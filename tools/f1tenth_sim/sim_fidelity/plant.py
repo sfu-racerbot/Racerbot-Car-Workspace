@@ -251,7 +251,8 @@ class FidelityPlant:
 
         self.grip = [
             ProgressiveGrip(calibration.grip_curve, calibration.wheelbase,
-                            falling=calibration.grip_curve_falls)
+                            falling=calibration.grip_curve_falls,
+                            longitudinal_coupling=calibration.longitudinal_grip_coupling)
             if calibration.grip_curve is not None
             else GripEnvelope(
                 friction_accel_limit=calibration.friction_accel_limit,

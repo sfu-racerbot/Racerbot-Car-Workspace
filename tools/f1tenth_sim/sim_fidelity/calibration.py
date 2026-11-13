@@ -518,6 +518,30 @@ SFU_COURSE_2026_11_06_HELD_OUT_RUNS = ("20261106-171030", "20261106-184753")
 SFU_COURSE_2026_11_11_RB2_FIT_RUNS = ("20261111-152132", "20261111-135934", "20261111-142254")
 
 
+# Gyro-basis median delivered lateral acceleration per asked bin on car 2, 2026-11-11 (bins of 10 or more
+# samples; grip_truth.py --json gyro_curve of runs 20261111-152132, -135934, -142254). Falls past its peak.
+SFU_2026_11_11_RB2_GYRO_CURVE = (
+                (0.0, 0.0),
+                (0.24780840442007881, 0.24780840442007881),
+                (0.7974440280734391, 0.7974440280734391),
+                (1.2715557017298433, 1.2715557017298433),
+                (1.767423331714832, 1.767423331714832),
+                (2.2756500555012367, 2.2756500555012367),
+                (2.7375241827844983, 2.7098528689465846),
+                (3.217853000236789, 2.8809540690061866),
+                (3.7081195959524607, 2.93841069556196),
+                (4.3847966706921095, 2.7063512860611474),
+                (5.279196169155968, 2.7998427458681205),
+)
+# Times which the plant's own tyres' understeer is made up in the plant (replay-selected, see FLOORS).
+SFU_2026_11_11_RB2_GRIP_SCALE = 1.25
+
+
+def sfu_2026_11_11_rb2_grip_curve(scale: float) -> tuple:
+    """The floor's grip table at ``scale``: the measured curve times the scale, never above the request."""
+    return tuple((asked, min(asked, achieved * scale)) for asked, achieved in SFU_2026_11_11_RB2_GYRO_CURVE)
+
+
 @dataclass(frozen=True)
 class Floor:
     """One floor with one set of tyres, and how it was measured."""
@@ -617,18 +641,7 @@ FLOORS: dict[str, Floor] = {
             # Gyro-basis median delivered lateral acceleration per asked bin, bins of 10 or more
             # samples, never above the request (grip_truth.py --json gyro_curve), times the replay-selected 1.25
             # (the plant's own tyres understeer on top). Falls past the peak.
-            grip_curve=tuple((asked, min(asked, achieved * 1.25)) for asked, achieved in (
-                (0.0, 0.0),
-                (0.24780840442007881, 0.24780840442007881),
-                (0.7974440280734391, 0.7974440280734391),
-                (1.2715557017298433, 1.2715557017298433),
-                (1.767423331714832, 1.767423331714832),
-                (2.2756500555012367, 2.2756500555012367),
-                (2.7375241827844983, 2.7098528689465846),
-                (3.217853000236789, 2.8809540690061866),
-                (3.7081195959524607, 2.93841069556196),
-                (4.3847966706921095, 2.7063512860611474),
-                (5.279196169155968, 2.7998427458681205))),
+            grip_curve=sfu_2026_11_11_rb2_grip_curve(SFU_2026_11_11_RB2_GRIP_SCALE),
             grip_curve_falls=True,
             steering_delay_ticks=2,
             steering_rate_max=2.5,

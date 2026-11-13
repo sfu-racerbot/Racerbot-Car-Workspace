@@ -255,3 +255,45 @@ def test_plant_top_speed_is_the_vesc_clamp(eval_gap):
     speed, _ = simulate_commands(np.column_stack([np.zeros(400), np.full(400, 8.0)]), cal)
     top = vesc['speed_max'] / abs(vesc['speed_to_erpm_gain'])
     assert speed[-1] == pytest.approx(top * cal.speed_command_scale, abs=0.01)   # m/s
+
+
+# --- longitudinal coupling for the progressive grip (2026-11-12) -----------------------------
+
+def test_progressive_grip_ignores_longitudinal_accel_by_default():
+    # Default 0: the behaviour every floor was calibrated with (grip_by_long_accel: braking cost nothing).
+    g = ProgressiveGrip(CURVE, L)
+    steering = math.atan(3.5 * L / 9.0)             # asks 3.5 m/s^2 at 3 m/s
+    assert g.apply(steering, 3.0, -4.0) == pytest.approx(g.apply(steering, 3.0, 0.0), abs=1e-12)
+
+
+def test_progressive_grip_coupling_takes_the_friction_ellipse_from_the_delivered_peak():
+    # Oracle: GripEnvelope.lateral_budget's closed form on the curve's peak (4.0 m/s^2 here):
+    # lateral <= sqrt(peak^2 - (c * a_long)^2). 3 m/s^2 of braking at c = 1 leaves sqrt(16 - 9) = 2.6458.
+    g = ProgressiveGrip(CURVE, L, longitudinal_coupling=1.0)
+    v = 3.0
+    steering = math.atan(3.9 * L / (v * v))         # asks 3.9, the curve delivers 2.9 + ... (< 4.0 peak)
+    allowed = g.deliver(3.9)
+    out = g.apply(steering, v, -3.0)
+    expected = min(allowed, math.sqrt(16.0 - 9.0))
+    assert v * v * math.tan(out) / L == pytest.approx(expected, abs=1e-9)    # m/s^2
+    # half coupling leaves sqrt(16 - 2.25) = 3.708, above what the curve delivers: no change
+    h = ProgressiveGrip(CURVE, L, longitudinal_coupling=0.5)
+    assert v * v * math.tan(h.apply(steering, v, -3.0)) / L == pytest.approx(min(allowed, math.sqrt(16.0 - 2.25)), abs=1e-9)
+    # accelerating costs the same as braking
+    assert g.apply(steering, v, 3.0) == pytest.approx(out, abs=1e-12)
+
+
+def test_progressive_grip_rejects_a_coupling_outside_zero_to_one():
+    for bad in (-0.1, 1.1, float('nan')):
+        with pytest.raises(ValueError, match='longitudinal_coupling'):
+            ProgressiveGrip(CURVE, L, longitudinal_coupling=bad)
+
+
+def test_the_plant_gives_the_floors_coupling_to_its_progressive_grip():
+    import eval_gap
+    cal = replace(with_floor('sfu_course_2026_11_06', calibration_for_car('rb2')), longitudinal_grip_coupling=0.5)
+    plant = eval_gap.make_plant('car2_course_2026_11_06a_scans', 12345, cal)
+    try:
+        assert plant.grip[0].longitudinal_coupling == 0.5
+    finally:
+        plant.close()

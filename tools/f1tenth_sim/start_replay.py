@@ -49,9 +49,32 @@ def lap_times(times, arcs, length):
     return [b - a for a, b in zip(crossings, crossings[1:])]
 
 
-def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit, speed, lateral, law):
-    from pure_pursuit import racing_math
+def floor_calibration(floor, grip_scale=None, grip_coupling=None):
+    """The floor, with its grip scale and longitudinal coupling overridden only where given."""
+    from dataclasses import replace
+    from sim_fidelity.calibration import sfu_2026_11_11_rb2_grip_curve
     cal = with_floor(floor)
+    if grip_scale is not None:
+        if floor != "sfu_course_2026_11_11_rb2":
+            raise ValueError(f"--grip-scale needs a floor with a scalable curve (sfu_course_2026_11_11_rb2), not {floor}")
+        cal = replace(cal, grip_curve=sfu_2026_11_11_rb2_grip_curve(float(grip_scale)))
+    if grip_coupling is not None:
+        if not (math.isfinite(grip_coupling) and 0.0 <= grip_coupling <= 1.0):
+            raise ValueError(f"--grip-coupling must be in [0, 1], got {grip_coupling!r}")
+        cal = replace(cal, longitudinal_grip_coupling=float(grip_coupling))
+    return cal
+
+
+def solo_arguments(law, speed, lateral, laps, steering_limit, safety="map"):
+    """What run_pure_solo is called with, the online lateral limit included."""
+    return dict(law_name=law, max_speed=float(speed), max_lateral_accel=float(lateral), safety=safety, laps=laps,
+                steering_limit=steering_limit)
+
+
+def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit, speed, lateral, law,
+              grip_scale=None, grip_coupling=None):
+    from pure_pursuit import racing_math
+    cal = floor_calibration(floor, grip_scale, grip_coupling)
     rv.RACELINE_SOURCE = "plan"
     xy, profiled = racing_math.load_profiled_csv(line_csv)
     plan = rv.PathPlan(xy=np.asarray(xy, float), seg_len=racing_math.compute_segment_lengths(xy, closed=True),
@@ -77,8 +100,7 @@ def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit
     rv.make_plant, rv.plan_initial_pose = wrapped, spawn
     try:
         result = rv.run_pure_solo(eval_gap.track_path(track), seed, seconds, calibration=cal, plan=plan,
-                                  law_name=law, max_speed=speed, max_lateral_accel=lateral, safety="map",
-                                  laps=laps, steering_limit=steering_limit)
+                                  **solo_arguments(law, speed, lateral, laps, steering_limit))
     finally:
         rv.make_plant, rv.plan_initial_pose = make_plant, plan_pose
     return cal, plan, np.array(trace, float), result
@@ -99,12 +121,13 @@ def summarise(cal, plan, trace, result, arcs_wanted):
                               t=float(t[k]))
     return dict(seed_result=dict(contact=int(result.get("contact_steps", 0) or 0), collision=bool(result["collision"]),
                                  passed=bool(result["passed"]), max_cross_track=result["max_cross_track_m"],
-                                 laps=float(result["laps"]), end_t=float(t[-1])),
+                                 laps=float(result["laps"]), end_t=float(t[-1]), end_arc=float(s[-1]),
+                                 end_offset_left=float(off[-1])),
                 at=at, laps_s=lap_times(t, s, length), profile_at={a: float(np.interp(a, np.r_[arc, length],
                 np.r_[plan.speed, plan.speed[0]])) for a in arcs_wanted}, start_arc=float(s[0]), start_offset=float(off[0]))
 
 
-def main(argv=None) -> int:
+def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--track", required=True)
     ap.add_argument("--floor", required=True, choices=sorted(FLOORS))
@@ -116,18 +139,29 @@ def main(argv=None) -> int:
     ap.add_argument("--laps", type=int, default=3)
     ap.add_argument("--steering-limit", type=float, default=0.42)
     ap.add_argument("--speed", type=float, default=5.0)
-    ap.add_argument("--lateral", type=float, default=3.1, help="online curvature ceiling, m/s^2")
+    ap.add_argument("--lateral", "--online-lateral", dest="lateral", type=float, default=3.1,
+                    help="the controller's online curvature ceiling (max_lateral_accel), m/s^2; "
+                         "99 turns it effectively off, so the planned profile is driven unprotected")
+    ap.add_argument("--grip-scale", type=float, default=None,
+                    help="scale of the sfu_course_2026_11_11_rb2 floor's measured grip curve (default: the floor's 1.25)")
+    ap.add_argument("--grip-coupling", type=float, default=None,
+                    help="share of longitudinal acceleration that competes with cornering, 0 to 1 "
+                         "(default: the floor's, 0)")
     ap.add_argument("--law", default="delay_lqr")
     ap.add_argument("--arcs", default=",".join(str(a) for a in DEFAULT_ARCS))
     ap.add_argument("--out", required=True)
-    args = ap.parse_args(argv)
+    return ap.parse_args(argv)
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
     start = tuple(float(v) for v in args.start.split(","))
     arcs = [float(a) for a in args.arcs.split(",")]
     rows = []
     for k in range(args.seeds):
         cal, plan, trace, result = trace_run(args.track, args.floor, args.line, start, args.first_seed + k,
                                              args.seconds, args.laps, args.steering_limit, args.speed,
-                                             args.lateral, args.law)
+                                             args.lateral, args.law, args.grip_scale, args.grip_coupling)
         row = summarise(cal, plan, trace, result, arcs)
         row["seed"] = args.first_seed + k
         rows.append(row)

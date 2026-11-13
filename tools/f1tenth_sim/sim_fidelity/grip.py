@@ -161,8 +161,14 @@ class ProgressiveGrip:
     # 2.94 m/s^2 at 3.75 asked, 2.7 beyond). The default still refuses one, so a typo in a
     # table cannot make the tyres weaker as they are pushed harder unnoticed.
     falling: bool = False
+    # How much of the longitudinal demand competes for grip, 0 to 1, as GripEnvelope's: lateral is
+    # limited to sqrt(peak^2 - (coupling * a_long)^2), peak the curve's largest delivered value. 0 (the
+    # default, and every floor so far) takes no share: grip_by_long_accel measured braking costing nothing.
+    longitudinal_coupling: float = 0.0
 
     def __post_init__(self):
+        if not (math.isfinite(self.longitudinal_coupling) and 0.0 <= self.longitudinal_coupling <= 1.0):
+            raise ValueError(f"longitudinal_coupling must be in [0, 1], got {self.longitudinal_coupling!r}")
         asked = [row[0] for row in self.curve]
         delivered = [row[1] for row in self.curve]
         if len(asked) < 2 or asked != sorted(asked) or (not self.falling and delivered != sorted(delivered)):
@@ -181,6 +187,9 @@ class ProgressiveGrip:
             return steering
         demanded = abs(math.tan(steering)) * speed * speed / self.wheelbase
         allowed = self.deliver(demanded)
+        if self.longitudinal_coupling > 0.0:
+            used = self.longitudinal_coupling * longitudinal_accel
+            allowed = min(allowed, math.sqrt(max(0.0, max(self._delivered) ** 2 - used * used)))
         self.max_demanded_lateral = max(self.max_demanded_lateral, demanded)
         self.max_allowed_lateral = max(self.max_allowed_lateral, allowed)
         if allowed < demanded:
