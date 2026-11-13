@@ -47,7 +47,9 @@ class TuningOverlayError(RuntimeError):
 SAFETY_TRUE = {'enable_deadman', 'enable_ttc', 'enable_swept_clearance'}
 SAFETY_FIXED = {'deadman_button'}
 SAFETY_CEILING = {'max_speed', 'profile_max_speed', 'profile_max_brake',
-                  'ttc_min_closing_speed'}
+                  'ttc_min_closing_speed',
+                  # Launch-lap scale (2026-11-13): a lower value slows the first lap; the node refuses above 1.0.
+                  'launch_speed_scale'}
 SAFETY_FLOOR = {
     'ttc_threshold_sec', 'ttc_path_margin', 'car_width', 'car_length',
     'optimize_car_width', 'emergency_stop_clearance', 'forward_stop_clearance',

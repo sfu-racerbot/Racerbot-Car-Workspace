@@ -17,3 +17,9 @@ pure_pursuit_node:
     # rising profile by ~0.4-0.6 m/s out of every corner (2026-11-09 traces).
     # why: car 2's measured speed-loop lag; leading acceleration by 0.25 s cut 06a 11.42 -> 11.31 s with no contact
     speed_lead_time: 0.25
+    # Launch-lap speed scale (launch_scale.py): after LB is pressed from standstill the profiled speed is
+    # multiplied by this for one lap (launch_scale_distance 0 = one line length), then back to 1. The real
+    # first lap from a standing start (rb2, 2026-11-11, 20261111-152132) carried 4.94 m/s at s=12 m and ran
+    # wide at s=12-15 m into the wall, where its flying laps carry 4.40 m/s there.
+    # why: rb2's first lap from a standing start ran wide into the wall at s=12-15 m (run 20261111-152132): 4.94 m/s where its flying laps carry 4.40; 0.88 of the planned peak there (4.88) is 4.29
+    launch_speed_scale: 0.88

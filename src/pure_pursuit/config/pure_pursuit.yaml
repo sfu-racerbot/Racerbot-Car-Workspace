@@ -209,6 +209,11 @@ pure_pursuit_node:
     # ceiling and every safety stage still apply. 0 = the profile speed at the
     # car. Per-car values belong in the car's tuning overlay.
     speed_lead_time: 0.0
+    # Launch-lap speed scale: after LB is pressed from standstill (below 0.5 m/s) the profiled speed is
+    # multiplied by launch_speed_scale for the next launch_scale_distance metres driven (0 = one line
+    # length), then back to 1. 1.0 = off; refused outside (0.5, 1.0]. launch_scale.py.
+    launch_speed_scale: 1.0
+    launch_scale_distance: 0.0
 
     # Frozen-localization watchdog. pose_timeout_sec above cannot catch a
     # pose that keeps *arriving* on time while no longer *tracking* the car
