@@ -661,9 +661,6 @@ gap_follow_node:
     # limit. 1.5 is the smallest T with >= 0.75 of wall ticks confirmed on both rb1 runs (0.763 / 0.852;
     # T=1.2: 0.650 / 0.773), tools/run_analysis/results/2026-11-13-static-confirmation-gate.md. 0 never confirms.
     opponent_follow_static_tangential_speed: 1.5  # m/s
-    # With the gate on, a stopped car is held and a lost car's follow cap remembered only after the track has spent
-    # this many scans as a live, non-static mover (0 = every track, as before the gate).
-    opponent_follow_hold_min_mover_ticks: 8
     opponent_follow_lateral: 0.45    # m, |y| within which a car ahead is "in the path"
     opponent_relevant_lateral: 1.0   # m, |y| beyond which a moving car is ignored
     # Steering limit for starting a pass. 0.10 rad is shipped, chosen by the R4

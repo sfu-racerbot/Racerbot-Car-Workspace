@@ -118,3 +118,32 @@ Run 153721 (10 wall tracks, mover_ticks 3-29): N = 4..16 -> 2/321 = 0.006.
 (the shipped-config-defaults test only because the yaml is 8): every behavioural test's car has at least 16 mover_ticks.
 
 Wall tracks are live movers for 13-57 scans, the same range as real cars (6-91), so a duration rule cannot reach 85% with N <= 16.
+
+## Rule M (clear the memory while its source track is seen and not a live mover), round 5: FAIL
+
+`hold_mass.py` classes of the memory source on each memory-bound tick (G gone, C coasting, S seen-not-moving, X seen-static-confirmed,
+M seen and a live mover). Gate on (S 0.35, T 1.5).
+
+| set | memory-bound ticks | G | C | S | X | M | rule M would clear (S+X) |
+|---|---|---|---|---|---|---|---|
+| 155542 wall tracks | 1171 | 1123 | 14 | 5 | 0 | 29 | 0.4% |
+| 155542 real tracks | 956 | 774 | 46 | 80 | 0 | 56 | 8.4% |
+| 153721 wall tracks | 7 | 0 | 0 | 0 | 0 | 7 | 0% |
+| sim seed 12345 | 6 | 0 | 0 | 0 | 0 | 6 | 0% |
+| sim seed 12346 | 453 | 427 | 0 | 16 | 0 | 10 | 3.5% |
+| sim seed 12347 | 0 | - | - | - | - | - | - |
+| sim seed 12348 | 405 | 405 | 0 | 0 | 0 | 0 | 0% |
+
+Per track (155542 wall): 193: 476 ticks, G 464, C 7, S 5; 133: 296, G 296; 60: 272, G 246, C 6, M 20; 305: 122, G 117, C 1, M 4.
+Real: 128: 287, G 264, C 9, S 14; 99: 187, G 181, C 6. Sim 12346 track 14: 453, G 427, S 16, M 10; 12348 track 14: 405, G 405.
+
+The wall tracks that fill the memory are GONE when the memory holds (the tracker dropped them after 6 missed scans), exactly like a
+car that goes out of view. Rule M clears at most 3.5% of the wall mass (needs >= 80%): not implemented.
+
+## Rejected
+
+- Residual proof of a mover (P1-P4): every wall-episode track is also proven, because the steering-model yaw rate lags in a turn and
+  makes a wall's residual nonzero (replay track 20: radial 0.63-0.77, tangential 2.2-2.9 m/s).
+- Duration rule (mover_ticks >= N, N <= 16): wall tracks are live movers for 13-57 scans, real cars for 6-91; N = 16 removes 22% of
+  the wall hold+memory mass on 155542 and 0.6% on 153721.
+- Rule M (clear while the source is seen and not moving): the wall tracks are gone, not seen, when the memory holds.

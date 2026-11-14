@@ -1778,8 +1778,7 @@ class GapFollowNode(Node):
             self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())
             follow_cap, held = self.opponents.follow_memory.update(
                 follow_cap, self.opponent_last_stamp,
-                self.opponents.follow_cap_track if follow_cap != math.inf else None,
-                self.opponents.follow_cap_remember)
+                self.opponents.follow_cap_track if follow_cap != math.inf else None)
             if held:
                 self.opponent_mode = ('follow_memory' if alongside_cap == math.inf
                                       else 'follow')

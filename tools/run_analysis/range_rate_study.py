@@ -400,35 +400,30 @@ def proof_report(rows, eps, label):
     return out
 
 
-def hold_mass_report(run_dir, loc_dir, map_yaml, line_csv, ns=(4, 6, 8, 10, 12, 16)):
-    """Step A.1: gate on, hold/memory unrestricted. Per-track events split wall-episode tracks vs real tracks, and what each N removes."""
+def hold_mass_report(run_dir, loc_dir, map_yaml, line_csv):
+    """Memory-bound ticks by source-track class (hold_mass.py), wall-episode tracks vs real tracks, per-track rows."""
     import hold_mass
-    events, last = [], {}
+    events = []
 
     def hook(ctrl, row):
-        for tid, kind, mv in hold_mass.collect(ctrl, last):
-            events.append((row["t"], tid, kind, mv))
+        for tid, cls in hold_mass.collect(ctrl):
+            events.append((row["t"], tid, cls))
     rows, eps = study(run_dir, loc_dir, map_yaml, line_csv, hook=hook,
-                      overrides=dict(opponent_follow_static_radial_speed=0.35, opponent_follow_static_tangential_speed=1.5,
-                                     opponent_follow_hold_min_mover_ticks=0))
+                      overrides=dict(opponent_follow_static_radial_speed=0.35, opponent_follow_static_tangential_speed=1.5))
     wall, real = classify(eps)
     wall_ids = {rows[k]["obj"]["track"] for e in wall for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1) if rows[k]["obj"]}
     real_ids = {rows[k]["obj"]["track"] for e in real for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1) if rows[k]["obj"]
                 and track_truth(rows, k, rows[k]["obj"]["track"]) == "moving"}
-    print(f"== HOLD MASS {Path(run_dir).name}: wall-episode tracks {len(wall_ids)}, real tracks {len(real_ids)}")
+    print(f"== MEMORY CLASSES {Path(run_dir).name}: wall-episode tracks {len(wall_ids)}, real tracks {len(real_ids)}")
     by = {}
-    for t, tid, kind, mv in events:
-        by.setdefault(tid, []).append((kind, mv))
-    for label, ids in (("wall", wall_ids), ("real", real_ids)):
-        print(f"-- {label} tracks with hold/memory ticks: track, held ticks, memory ticks, mover_ticks (min..max)")
-        for tid in sorted(ids & set(by), key=lambda x: -len(by[x])):
-            ev = by[tid]
-            mvs = [m for _k, m in ev]
-            print(f"   {tid:5d} held {sum(k == 'held' for k, _ in ev):4d} memory {sum(k == 'memory' for k, _ in ev):4d} mover_ticks {min(mvs)}..{max(mvs)}")
-    wall_events = [(tid, k, mv) for _t, tid, k, mv in events if tid in wall_ids and tid not in real_ids]
-    for n in ns:
-        frac, gone, total = hold_mass.removed(wall_events, n)
-        print(f"   N={n}: wall hold+memory tick mass removed {gone}/{total} = {frac:.3f}")
+    for _t, tid, cls in events:
+        by.setdefault(tid, []).append(cls)
+    for label, ids in (("wall", wall_ids - real_ids), ("real", real_ids)):
+        ev = [(tid, c) for tid in ids for c in by.get(tid, [])]
+        print(f"-- {label}: memory-bound ticks {len(ev)} by class {hold_mass.table(ev)}; rule M clears {hold_mass.removed_fraction(ev):.3f}")
+        for tid in sorted(ids & set(by), key=lambda x: -len(by[x]))[:6]:
+            cl = by[tid]
+            print(f"   track {tid:4d}: {len(cl):4d} ticks  " + "  ".join(f"{c} {cl.count(c)}" for c in "GCSXM" if c in cl))
     return events, wall_ids, real_ids
 
 

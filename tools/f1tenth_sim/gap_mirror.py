@@ -258,7 +258,6 @@ LEGACY_VALUES = {
     # Static confirmation (2026-11-13) did not exist: 0.0 never confirms, the old behaviour.
     "opponent_follow_static_radial_speed": 0.0,
     "opponent_follow_static_tangential_speed": 0.0,
-    "opponent_follow_hold_min_mover_ticks": 0,
     # The follow-cap memory (2026-10-28) did not exist: 0 is no hold, the old behaviour.
     "opponent_follow_memory_sec": 0.0,
     # The launch boost (2026-10-30) did not exist: off. Its limits are inert
@@ -556,8 +555,7 @@ class GapController:
             self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())   # as in gap_follow_node
             follow_cap, held = self.opponents.follow_memory.update(
                 follow_cap, step * CONTROL_DT,
-                self.opponents.follow_cap_track if follow_cap != math.inf else None,
-                self.opponents.follow_cap_remember)
+                self.opponents.follow_cap_track if follow_cap != math.inf else None)
             follow_cap = min(follow_cap, alongside_cap)
             if held:
                 self.opponent_mode = ("follow_memory" if alongside_cap == math.inf

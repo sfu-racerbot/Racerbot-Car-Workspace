@@ -84,10 +84,6 @@ class OpponentParams:
     # ...and the same for the across-the-line-of-sight residual (a car crossing in front has radial ~0):
     # confirmed only when BOTH medians are below their limit. 0 never confirms.
     follow_static_tangential_speed: float = 1.5  # m/s
-    # With the gate on, a stopped car is held (stopped_release_sec) and a lost car's follow cap remembered
-    # (follow_memory_sec) only after it has spent this many scans as a live, non-static mover: wall glitches
-    # are movers for a handful of scans, followed cars for tens. 0 = every track, as before the gate.
-    follow_hold_min_mover_ticks: int = 8
     follow_time_gap: float = 1.0     # s
     abort_speed_margin: float = 0.5  # m/s, drop behind an alongside car on refusal
     follow_lateral: float = 0.45     # m, |y| within which a car is "in path"
@@ -133,10 +129,6 @@ class OpponentParams:
         if not (math.isfinite(value) and 0.0 <= value <= 1.0):
             raise ValueError(
                 f'opponent_follow_static_radial_speed must be finite and in [0, 1] m/s, got {value!r}')
-        value = self.follow_hold_min_mover_ticks
-        if not (isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 40):
-            raise ValueError(
-                f'opponent_follow_hold_min_mover_ticks must be an integer in [0, 40], got {value!r}')
         value = self.follow_static_tangential_speed
         if not (math.isfinite(value) and 0.0 <= value <= 2.0):
             raise ValueError(
@@ -314,7 +306,6 @@ class Track:
     prev_bearing: float = math.nan  # nearest-beam bearing at that sighting
     samples: list = field(default_factory=list)   # (clock, radial residual, tangential residual) m/s, newest last
     _confirmed: bool = False
-    mover_ticks: int = 0         # scans spent moving and not static-confirmed; never decremented
     static_residual: float = math.nan  # median |radial residual| of the window when it was last evaluated
     static_tangential: float = math.nan  # median |tangential residual| likewise
 
@@ -478,8 +469,6 @@ class OpponentTracker:
                 t.moving = t.speed >= 0.5 * p.moving_speed
             else:
                 t.moving = t.streak >= p.min_hits and t.speed >= p.moving_speed
-            if t.moving and not t._confirmed:
-                t.mover_ticks += 1
             if t.moving:
                 t.confirmed_car = True
                 t.stopped_sec = 0.0
@@ -677,7 +666,7 @@ class FollowCapMemory:
         if self._source is not None and self._source in static_ids:
             self._cap, self._cap_t, self._source = math.inf, None, None
 
-    def update(self, follow_cap: float, t_s: float, source=None, remember: bool = True) -> tuple:
+    def update(self, follow_cap: float, t_s: float, source=None) -> tuple:
         if self.memory_sec == 0.0:
             return follow_cap, False
         if not math.isfinite(t_s):
@@ -692,7 +681,7 @@ class FollowCapMemory:
         if follow_cap != math.inf:
             # A finite cap is stored. -inf is not a cap at all and is passed
             # through untouched: the memory must never raise a speed.
-            if math.isfinite(follow_cap) and remember:
+            if math.isfinite(follow_cap):
                 self._cap, self._cap_t, self._source = follow_cap, t_s, source
             return follow_cap, False
         if self._cap_t is not None and t_s - self._cap_t <= self.memory_sec + _HOLD_TOLERANCE_SEC:
@@ -729,7 +718,6 @@ class OpponentAwareness:
         # Median |radial residual| (m/s) of each static-confirmed track this tick's follow cap skipped.
         self.static_skipped = []
         self.follow_cap_track = None     # id of the track that set the last follow_law_cap (None: none/unknown)
-        self.follow_cap_remember = True  # False: the gate is on and that track has not earned a memory
         self._over_src = None
         self.follow_memory = FollowCapMemory(params.follow_memory_sec)
 
@@ -760,7 +748,6 @@ class OpponentAwareness:
             world.append((wx, wy, d.near_x - d.x, d.near_range, d.near_bearing))
         self.static_skipped = []
         self.follow_cap_track = None
-        self.follow_cap_remember = True
         if dt is None:
             for wx, wy, near_dx, near_range, _bearing in world:
                 self.tracker.tracks.append(Track(wx, wy, near_dx=near_dx,
@@ -816,12 +803,6 @@ class OpponentAwareness:
         """
         return self.moving_body() + self._held_body()
 
-    def _hold_needs_earning(self) -> bool:
-        return self._gate_on() and self.params.follow_hold_min_mover_ticks > 0
-
-    def _gate_on(self) -> bool:
-        return self.params.follow_static_radial_speed > 0.0 and self.params.follow_static_tangential_speed > 0.0
-
     def _skip_static(self, t) -> bool:
         """A static-confirmed track is not followed: only the follow cap ignores it. It stays an obstacle
         for gap selection, clearance, TTC and the braking ceiling, which read the scan."""
@@ -840,8 +821,6 @@ class OpponentAwareness:
             if (t.moving or not t.confirmed_car
                     or t.stopped_sec > p.stopped_release_sec + 1e-12):
                 continue
-            if self._hold_needs_earning() and t.mover_ticks < self.params.follow_hold_min_mover_ticks:
-                continue          # not a live mover for long enough: a static obstacle, not a car to hold
             bx, by = self.ego.to_body(t.x, t.y)
             if (bx <= -p.radius or abs(by) > p.relevant_lateral
                     or math.hypot(bx, by) > p.max_range):
@@ -911,9 +890,6 @@ class OpponentAwareness:
         moving_src = self._over_src
         held_cap = self._follow_over(self._held_body(True), self.params.relevant_lateral, True)
         self.follow_cap_track = self._track_id_of(moving_src if moving_cap <= held_cap else self._over_src)
-        self.follow_cap_remember = (not self._hold_needs_earning()) or any(
-            t.track_id == self.follow_cap_track and t.mover_ticks >= self.params.follow_hold_min_mover_ticks
-            for t in self.tracker.tracks)
         return min(moving_cap, held_cap)
 
     def _track_id_of(self, body):
