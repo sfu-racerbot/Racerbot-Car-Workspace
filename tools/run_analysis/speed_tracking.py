@@ -179,6 +179,15 @@ def run_segments(run_dir):
     return segs
 
 
+def trace_segments(paths, speed_key="v_meas"):
+    """Segments from eval_gap --trace files: one per run, the controller's command against the measured speed."""
+    segs = []
+    for path in paths:
+        z = np.load(path)
+        segs.append((z["t"], z["cmd_speed"], z["t"], z[speed_key]))
+    return segs
+
+
 def print_summary(name, s):
     print(f"== {name}")
     print("a. braking dv/dt (m/s^2) by e = v - cmd:")
@@ -196,11 +205,16 @@ def print_summary(name, s):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("run")
+    ap.add_argument("run", nargs="+", help="a run directory, or with --trace the eval_gap --trace .npz files")
     ap.add_argument("--json")
+    ap.add_argument("--trace", action="store_true", help="the arguments are eval_gap --trace files (simulator), pooled")
     args = ap.parse_args(argv)
-    s = summarise(run_segments(args.run))
-    print_summary(Path(args.run).name, s)
+    if args.trace:
+        s = summarise(trace_segments(args.run))
+        print_summary(f"simulator ({len(args.run)} runs)", s)
+    else:
+        s = summarise(run_segments(args.run[0]))
+        print_summary(Path(args.run[0]).name, s)
     if args.json:
         Path(args.json).write_text(json.dumps(s, indent=1, default=float))
     return 0

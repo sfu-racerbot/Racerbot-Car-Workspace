@@ -101,3 +101,15 @@ def test_jitter_counts_only_fast_ticks():
     fast = st.jitter(cmd_t, cmd, v_t, np.array([2.0, 2.0]))
     slow = st.jitter(cmd_t, cmd, v_t, np.array([1.0, 1.0]))
     assert fast['median'] == pytest.approx(0.5, abs=1e-9) and slow['n'] == 0
+
+
+def test_corner_shed_is_the_closed_form_distance_law():
+    # speed 2.0 m/s constant to a contact at t = 3.0: d(t) = 2 (3 - t). With a = 1 m/s^2 and v_c = 1: v_max = sqrt(1 + 2 d).
+    # A 3.0 m/s command exceeds it from t = 1.0; the 2.0 m/s speed exceeds it from t = 2.25 (4 > 1 + 4 (3 - t)).
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    import corner_shed
+    t = np.arange(0.0, 3.0001, 0.005)
+    table, info = corner_shed.shed_table(t, np.full_like(t, 2.0), t, np.full_like(t, 3.0), 3.0, 0.0, [1.0], [1.0])
+    assert info['distance'] == pytest.approx(6.0, abs=1e-6)
+    t_cmd, t_speed = table[(1.0, 1.0)]
+    assert t_cmd == pytest.approx(1.0, abs=0.01) and t_speed == pytest.approx(2.25, abs=0.01)
