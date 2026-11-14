@@ -1,0 +1,21 @@
+auto_map_race_node:
+  ros__parameters:
+    # Car 1's planning limits for the map racer (plan Task 9b, 2026-11-14). Car 1 cannot yet map a course
+    # (replay of 20261111-153721: mean scan fit 0.89, worst stretch 0.37), so it races car 2's map with a
+    # line rebuilt for car 1: python3 -m pure_pursuit.race_line --from-run-dir <car 2's run> --run-dir <new> --car rb1
+    #
+    # grip_truth.py on rb1 20261111-153721 and -155542 (sfu_course_2026_11_11_grip_rb1_*.json): 3.56 m/s^2
+    # sustained at an ask of 4.5 with no peak seen; one bin of 7 samples at an ask of 5.6 delivered 2.6-2.8 (the
+    # cliff it spun on at the U-turn). 3.2 is 0.9 of the sustained value. Simulator (car2_course_2026_11_11,
+    # car 1's fitted speed loop, delay_lqr at its measured servo, online ceiling 2.5): 6 seeds x 3 laps, no
+    # contact, no safety stop, flying laps 10.12-10.25 s (3.5 made contact on 3 of 3 seeds).
+    profile_max_lateral_accel: 3.2
+    # Same, right turns.
+    profile_max_lateral_accel_right: 3.2
+    # car_measure.py on the same runs: speed loop accel max 5.0 m/s^2 (fit_speed_loop.py: 5.5).
+    profile_max_accel: 5.0
+    # Car 1's speed loop coasts through a small overspeed (median 0.09 m/s^2 at 0.2-0.5 m/s over the command)
+    # and reaches a lowered command within 0.3 m/s in a median 0.52 s (2026-11-13-corner-entry-study.md), later
+    # than car 2's ~0.24 s. Planned braking 0.35 s early: no contact and no safety stop on all 18 simulated laps
+    # above; 0.25 left 13 safety-stop ticks on one seed.
+    profile_speed_delay: 0.35
