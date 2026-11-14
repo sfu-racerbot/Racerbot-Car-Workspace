@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .actuation import SteeringServo, TransportDelay, accel_table_ceiling, speed_loop_accel_ceiling
+from .actuation import SteeringServo, TransportDelay, speed_loop_accel
 from .calibration import CarCalibration, calibration_for_car
 from .grip import GripEnvelope, ProgressiveGrip, longitudinal_accel
 from .sensing import OdomSensor, PoseSensor, ScanSensor
@@ -447,20 +447,13 @@ class FidelityPlant:
         reproduces that; gym's gains are inverted here so the plant's own
         integrator and accel limit still apply unchanged.
         """
-        cal = self.calibration
         diff = command - measured
         if measured <= 0.0 and command <= 0.0:
             return command
+        accel = speed_loop_accel(self.calibration, command, measured)
         if diff >= 0.0:
-            if cal.accel_by_speed:
-                ceiling = accel_table_ceiling(cal.accel_by_speed, measured * cal.odom_speed_scale)
-            else:
-                ceiling = speed_loop_accel_ceiling(cal.speed_loop_accel_max, cal.speed_loop_accel_fade_from,
-                                                   cal.speed_loop_accel_no_load, measured)
-            accel = min(cal.speed_loop_accel_gain * diff, ceiling)
             gym_gain = 10.0 * self.params.a_max / self.params.v_max
         else:
-            accel = max(cal.speed_loop_brake_gain * diff, -cal.speed_loop_brake_max)
             gym_gain = 10.0 * self.params.a_max / -self.params.v_min
         return measured + accel / gym_gain
 

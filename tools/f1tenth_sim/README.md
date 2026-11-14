@@ -198,6 +198,21 @@ RMS against the run), which is how the conversion was checked. The fit
 itself is `tools/run_analysis/fit_sim.py`; speed error against the run fell
 from 0.46 to 0.24 m/s.
 
+**Per car since 2026-11-14.** Those numbers are now the shared default
+(`SHARED_SPEED_LOOP` in `calibration.py`). A car whose profile has
+`src/racerbot_car/cars/<id>/sim/speed_loop.yaml` uses its own values instead
+(`car_speed_loop`); the file names any of the six loop fields and a `source`.
+Car 1 has one, fitted by `tools/run_analysis/fit_speed_loop.py` to its
+2026-11-11 race runs: it accelerates harder (gain 20 /s up to 5.5 m/s²) and,
+unlike the shared loop, coasts through a small overspeed. The loop brakes
+only once the speed is more than `speed_loop_brake_deadband` (0.2 m/s on car 1)
+above the command, then at 3 /s up to 4 m/s². Its delay is 3 ticks. Speed
+error against the two runs fell from 0.361 to 0.222 m/s. After a hard ramp the
+simulated car now overshoots the command by 1.66 m/s for 0.75 s, like the real
+one (1.56 m/s, 0.75 s); the shared loop gave 1.24 m/s for 0.47 s. Details:
+`tools/run_analysis/results/2026-11-14-rb1-speed-loop.md`. Car 2 keeps the
+shared loop unless a floor profile sets one.
+
 ### 12. Gym's collision response is switched off (2026-10-20)
 
 The measured LiDAR offset (0.26 m) put the sensor back inside gym's collision

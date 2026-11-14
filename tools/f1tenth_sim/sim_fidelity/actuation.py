@@ -113,3 +113,23 @@ def accel_table_ceiling(table, speed: float) -> float:
     if any(row[1] <= 0.0 for row in rows):
         raise ValueError("acceleration table values must be positive")
     return float(np.interp(speed, [row[0] for row in rows], [row[1] for row in rows]))
+
+
+def speed_loop_accel(cal, command: float, measured: float) -> float:
+    """The acceleration (m/s^2) the car's speed loop delivers toward ``command`` from wheel speed ``measured``:
+    proportional each way with its own gain and limit. Accelerating, the ceiling is the measured table
+    (``cal.accel_by_speed``) or ``speed_loop_accel_max`` with its fade-off. Braking starts only once the speed
+    is more than ``speed_loop_brake_deadband`` above the command: rb1's VESC coasts through a 0.2-0.5 m/s
+    excess (median -0.01 m/s^2, tools/run_analysis/results/2026-11-13-corner-entry-study.md). Pure: the plant
+    (``FidelityPlant._measured_speed_loop``) and the fitting tool (tools/run_analysis/fit_speed_loop.py)
+    both call this one function."""
+    diff = command - measured
+    if diff >= 0.0:
+        if cal.accel_by_speed:
+            ceiling = accel_table_ceiling(cal.accel_by_speed, measured * cal.odom_speed_scale)
+        else:
+            ceiling = speed_loop_accel_ceiling(cal.speed_loop_accel_max, cal.speed_loop_accel_fade_from,
+                                               cal.speed_loop_accel_no_load, measured)
+        return min(cal.speed_loop_accel_gain * diff, ceiling)
+    excess = max(0.0, -diff - cal.speed_loop_brake_deadband)
+    return max(-cal.speed_loop_brake_gain * excess, -cal.speed_loop_brake_max)

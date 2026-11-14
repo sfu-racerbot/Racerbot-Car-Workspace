@@ -81,6 +81,13 @@ STEERING_MAX_RIGHT_MEASURED = -math.atan(0.36 / 0.750)  # -0.448 rad, 25.6 deg
 
 # CarCalibration's fields that come from the selected car's vesc.yaml (calibration_for_car);
 # None in a constructed calibration means "the selected car's value".
+# The shared speed loop: fitted to run 20261019-200703 with tools/run_analysis/fit_sim.py (it brakes far more gently
+# than gym's stock loop, gain 13.7/s up to mu*g), no braking deadband, a 2-tick transport delay. A car whose profile
+# has sim/speed_loop.yaml (car_speed_loop) uses its own measured values instead.
+SHARED_SPEED_LOOP = dict(speed_delay_ticks=2, speed_loop_accel_gain=5.0, speed_loop_accel_max=4.5,
+                         speed_loop_brake_gain=4.0, speed_loop_brake_max=4.0, speed_loop_brake_deadband=0.0)
+SPEED_LOOP_FIELDS = tuple(SHARED_SPEED_LOOP)
+
 VESC_FIELDS = ('steering_rate_max', 'speed_to_erpm_gain', 'steering_angle_to_servo_gain',
                'steering_angle_to_servo_offset', 'servo_min', 'servo_max', 'speed_max', 'speed_min')
 
@@ -143,15 +150,18 @@ class CarCalibration:
     # Whole-loop transport lag, in control ticks, from a command being
     # published to the actuator acting on it: ROS -> USB -> VESC firmware.
     steering_delay_ticks: int = 3
-    speed_delay_ticks: int = 2
+    # The speed loop's six fields (SPEED_LOOP_FIELDS) are per car: None here resolves at construction to the selected
+    # car's values, which are its profile's sim/speed_loop.yaml where it has one, else SHARED_SPEED_LOOP.
+    speed_delay_ticks: int | None = None
     # The VESC speed loop, as a proportional controller per direction with
-    # an acceleration ceiling each way (plant._measured_speed_loop). Fitted
-    # to run 20261019-200703 with tools/run_analysis/fit_sim.py: it brakes
-    # far more gently than gym's stock loop (gain 13.7/s, up to mu*g).
-    speed_loop_accel_gain: float = 5.0
-    speed_loop_accel_max: float = 4.5
-    speed_loop_brake_gain: float = 4.0
-    speed_loop_brake_max: float = 4.0
+    # an acceleration ceiling each way (plant._measured_speed_loop,
+    # actuation.speed_loop_accel). Braking starts only once the speed is more
+    # than speed_loop_brake_deadband above the command.
+    speed_loop_accel_gain: float | None = None
+    speed_loop_accel_max: float | None = None
+    speed_loop_brake_gain: float | None = None
+    speed_loop_brake_max: float | None = None
+    speed_loop_brake_deadband: float | None = None
     # Above this speed the acceleration ceiling falls linearly to zero at speed_loop_accel_no_load, as a
     # motor's force falls with speed (actuation.speed_loop_accel_ceiling). inf = no fall-off.
     speed_loop_accel_fade_from: float = math.inf
@@ -202,13 +212,16 @@ class CarCalibration:
         # omitted car fields at construction rather than module import. Only
         # these: the floor models' None means "off" (FLOORS), and resolving it
         # through calibration_for_car would recurse.
-        missing = [name for name in (*VESC_FIELDS, 'steering_max_left',
+        missing = [name for name in (*VESC_FIELDS, *SPEED_LOOP_FIELDS, 'steering_max_left',
                                     'steering_max_right', 'car_id')
                    if getattr(self, name) is None]
         if missing:
             selected = calibration_for_car(car_id)
             for name in missing:
                 object.__setattr__(self, name, getattr(selected, name))
+        if not (math.isfinite(self.speed_loop_brake_deadband) and self.speed_loop_brake_deadband >= 0.0):
+            raise ValueError('speed_loop_brake_deadband must be finite and >= 0 m/s, '
+                             f'got {self.speed_loop_brake_deadband!r}')
 
     # ------------------------------------------------------------------
     # Quantities the simulator needs that follow from the above
@@ -374,6 +387,7 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     "speed_loop_accel_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_gain": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
+    "speed_loop_brake_deadband": (Provenance.MEASURED, "0: the shared 2026-10-19 fit has no deadband (run 20261019-200703). A car whose profile has sim/speed_loop.yaml uses its own (car_speed_loop)"),
     "speed_loop_accel_fade_from": (Provenance.ESTIMATED, "inf by default (no fall-off); a floor profile sets it where the measured, traction-limited speed range ends"),
     "accel_by_speed": (Provenance.ESTIMATED, "empty: the loop's ceiling is speed_loop_accel_max with its fade-off. A floor may set a measured table (accel_by_speed.py). See FLOORS"),
     "speed_loop_accel_no_load": (Provenance.ESTIMATED, "inf by default; a floor profile sets an estimated motor no-load speed (actuation.speed_loop_accel_ceiling)"),
@@ -475,8 +489,42 @@ def car_from_args(parser, args) -> str:
         parser.error(str(exc))
 
 
+def car_speed_loop_path(car_id: str) -> Path:
+    """The car profile's simulator speed-loop file (it need not exist)."""
+    from racerbot_car import paths
+    return paths.cars_dir() / car_id / 'sim' / 'speed_loop.yaml'
+
+
+def car_speed_loop(car_id: str) -> tuple[dict, str, frozenset]:
+    """(the speed loop's six fields, where the car's own values came from, the fields the car's file sets) for ``car_id``:
+    SHARED_SPEED_LOOP, with any field the profile's sim/speed_loop.yaml sets (a mapping of SPEED_LOOP_FIELDS names to
+    numbers, plus a ``source`` string)."""
+    path = car_speed_loop_path(car_id)
+    if not path.is_file():
+        return dict(SHARED_SPEED_LOOP), '', frozenset()
+    import yaml
+    data = yaml.safe_load(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f'{path}: expected a mapping')
+    source = data.pop('source', '')
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError(f'{path}: needs a non-empty source string (what it was measured on and how)')
+    unknown = sorted(set(data) - set(SPEED_LOOP_FIELDS))
+    if unknown:
+        raise ValueError(f'{path}: unknown speed-loop fields {unknown}; known: {list(SPEED_LOOP_FIELDS)}')
+    values = dict(SHARED_SPEED_LOOP)
+    for name, value in data.items():
+        if name == 'speed_delay_ticks':
+            if type(value) is not int or value < 0:
+                raise ValueError(f'{path}: speed_delay_ticks must be a non-negative integer, got {value!r}')
+        elif type(value) not in (int, float) or not math.isfinite(value) or value < 0.0:
+            raise ValueError(f'{path}: {name} must be a finite non-negative number, got {value!r}')
+        values[name] = value if name == 'speed_delay_ticks' else float(value)
+    return values, f'cars/{car_id}/sim/speed_loop.yaml: {source.strip()}', frozenset(data)
+
+
 def calibration_for_car(car_id: str | None = None) -> CarCalibration:
-    """Build a fresh calibration from the selected car's effective VESC values."""
+    """Build a fresh calibration from the selected car's effective VESC values and its speed loop (car_speed_loop)."""
     car_id = selected_car(car_id, note=False)
     vesc = effective_config('vesc.yaml', '/**', car_id)
     throttle = effective_config('vesc.yaml', 'throttle_interpolator', car_id)
@@ -489,7 +537,8 @@ def calibration_for_car(car_id: str | None = None) -> CarCalibration:
            'steering_angle_to_servo_gain', 'steering_angle_to_servo_offset',
            'servo_min', 'servo_max')},
         speed_max=speed_max, speed_min=-speed_max,
-        steering_rate_max=throttle['max_servo_speed'])
+        steering_rate_max=throttle['max_servo_speed'],
+        **car_speed_loop(car_id)[0])
 
 
 def __getattr__(name):
@@ -812,6 +861,10 @@ def describe(calibration: CarCalibration | None = None) -> list[tuple]:
                 provenance, source = (Provenance.DERIVED,
                     'rb1: -(0.75 - 0.366) / 0.83 rad, computed from the servo map, not measured; '
                     'cars/rb1/calibration/vesc.yaml at servo_max 0.75; cars/rb1/car.yaml')
+        if field.name in SPEED_LOOP_FIELDS and calibration.car_id:
+            loop, loop_source, named = car_speed_loop(calibration.car_id)
+            if field.name in named and getattr(calibration, field.name) == loop[field.name]:
+                provenance, source = Provenance.MEASURED, loop_source
         rows.append(
             (provenance, field.name, getattr(calibration, field.name), source)
         )
