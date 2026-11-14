@@ -243,6 +243,12 @@ class FidelityPlant:
         self.control_dt = control_dt
         self.params = env.unwrapped.sim.vehicle_params
         self._disable_gym_collision_response()
+        # Saturating tyres replace gym's linear ones for every car (they share one params array); the
+        # steering clamp is then off, since the tyres themselves limit the cornering.
+        self._tyres = calibration.tyre_model if profile.grip_envelope else None
+        if self._tyres is not None:
+            from .tyres import make_dynamics
+            env.unwrapped.sim.dynamics_fn = make_dynamics(self._tyres)
         # Only the car under test gets sensor error. The traffic scenario's
         # opponent is a scripted reference trajectory rather than a vehicle
         # being validated, and noising it would perturb the baseline the ego
@@ -420,7 +426,7 @@ class FidelityPlant:
             if self.profile.speed_loop_model:
                 speed = self._measured_speed_loop(speed, measured_speed)
 
-            if self.profile.grip_envelope:
+            if self.profile.grip_envelope and self._tyres is None:
                 accel = longitudinal_accel(speed, measured_speed, self.params)
                 steering = self.grip[index].apply(steering, measured_speed, accel)
 

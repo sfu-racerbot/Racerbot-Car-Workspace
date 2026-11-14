@@ -136,6 +136,19 @@ collapses to 0.0 m/s² in the traffic scenario. Setting it to 0.7 keeps the
 minimum budget at 4.9 m/s² and the clamp never binds. We left the default
 honest and documented the trade rather than quietly weakening the physics.
 
+**Tyres that can let go (`tyres.py`, off by default, 2026-11-14).** The clamp
+above gives the envelope but never loss of control: at the limit the car runs
+wide. Setting `CarCalibration.tyre_model` to a `TyreModel(peak_front,
+peak_rear, shape, coupling)` swaps gym's dynamics function for the same
+single-track model with a saturating per-axle force (magic formula, the same
+slope as gym's linear tyre at zero slip, so nothing changes below the limit)
+and turns the steering clamp off. A rear that saturates first spins the car; a
+front that saturates first runs it wide (`tests/test_tyres.py`). No car or
+floor sets it yet. `event_replay.py --tyres FRONT,REAR,SHAPE` tries one; with
+car 1's measured peak it does not reproduce the 2026-11-11 U-turn contact,
+which turned out not to be a spin
+(`tools/run_analysis/results/2026-11-14-rb1-u-turn-contact.md`).
+
 ### 3. A steering servo that settles (`actuation.py`)
 
 `pid_steer` has no proportional term at all: `sv = sign(error) · sv_max`,

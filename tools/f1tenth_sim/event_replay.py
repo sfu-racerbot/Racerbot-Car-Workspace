@@ -150,21 +150,23 @@ def run_once(seed, awareness, ref, params, car_id="rb1", warm=None, calibration=
                                          measured_steering=eval_gap.steering_from_yaw_rate(float(state[5]), float(state[3]), p["wheelbase"], 0.3))
             if first_closed is None:
                 first_closed = (steering, cmd)
-        rows.append((k * CONTROL_DT, float(plant.truth(0)[3]), cmd, steering, float(plant.truth(0)[0]), float(plant.truth(0)[1]),
-                     plant.chassis_map_clearance(0)))
+        truth = plant.truth(0)
+        rows.append((k * CONTROL_DT, float(truth[3]), cmd, steering, float(truth[0]), float(truth[1]),
+                     plant.chassis_map_clearance(0), float(truth[5]), float(truth[6])))
         obs, _r, done, _t, _info = plant.step([(steering, cmd)])
         if done:
             break
     contact_steps = plant.report().get("contact_steps", 0)
     plant.close()
     a = np.array(rows)
-    t, v, cmd, st, x, y, clr = a.T
+    t, v, cmd, st, x, y, clr, yaw_rate, slip = a.T
     k = int(np.nanargmin(clr))
     at = lambda s: float(np.interp(s, t, v))
     return dict(seed=seed, awareness=bool(awareness), warm=bool(warm), first_command=dict(steering=(first_closed or (math.nan,))[0], speed=(first_closed or (math.nan, math.nan))[1]),
                 open_loop_ticks=open_loop_ticks,
                 start_clearance=start_clearance, v_07=at(0.7), v_13=at(1.3),
-                max_v_minus_cmd=float(np.max(v - cmd)), min_clearance=float(clr[k]), t_min=float(t[k]), x_min=float(x[k]), y_min=float(y[k]),
+                max_v_minus_cmd=float(np.max(v - cmd)), max_yaw_rate=float(np.max(np.abs(yaw_rate))),
+                max_slip=float(np.max(np.abs(slip))), min_clearance=float(clr[k]), t_min=float(t[k]), x_min=float(x[k]), y_min=float(y[k]),
                 contact=bool(contact_steps > 0 or clr.min() <= 0.0), contact_steps=int(contact_steps), steps=len(rows),
                 trace=dict(t=t.tolist(), v=v.tolist(), cmd=cmd.tolist(), steering=st.tolist(), x=x.tolist(), y=y.tolist()))
 
@@ -189,10 +191,17 @@ def main(argv=None) -> int:
                          "through the controller first, as the real node saw them")
     ap.add_argument("--shared-speed-loop", action="store_true",
                     help="use the shared speed loop (calibration.SHARED_SPEED_LOOP) instead of the car's own fitted one")
+    ap.add_argument("--tyres", metavar="FRONT,REAR,SHAPE[,COUPLING]",
+                    help="saturating tyres (sim_fidelity.tyres.TyreModel): peak friction front and rear, magic-formula shape, "
+                         "longitudinal coupling; default gym's linear tyres under the steering clamp, which cannot spin")
     args = ap.parse_args(argv)
     calibration = calibration_for_car("rb1")
     if args.shared_speed_loop:
         calibration = shared_speed_loop(calibration)
+    if args.tyres:
+        from dataclasses import replace
+        from sim_fidelity.tyres import TyreModel
+        calibration = replace(calibration, tyre_model=TyreModel(*(float(v) for v in args.tyres.split(","))))
     data = np.load(FIXTURE)
     params = json.loads(str(data["params_json"]))
     ref = real_reference(data)
@@ -213,7 +222,7 @@ def main(argv=None) -> int:
             r = run_once(args.first_seed + k, awareness, ref, params, warm=warm, calibration=calibration, data=data)
             runs.append(r)
             print(f"awareness {'on ' if awareness else 'off'} seed {r['seed']}: start clearance {r['start_clearance']:.3f} m; v +0.7 {r['v_07']:.2f} "
-                  f"+1.3 {r['v_13']:.2f}; max(v-cmd) {r['max_v_minus_cmd']:.2f}; min clearance {r['min_clearance']:.3f} m at +{r['t_min']:.2f} s "
+                  f"+1.3 {r['v_13']:.2f}; max(v-cmd) {r['max_v_minus_cmd']:.2f}; max yaw rate {r['max_yaw_rate']:.2f} rad/s, slip {r['max_slip']:.2f} rad; min clearance {r['min_clearance']:.3f} m at +{r['t_min']:.2f} s "
                   f"(x {r['x_min']:.2f}, y {r['y_min']:.2f}); contact {'YES' if r['contact'] else 'no'}; "
                   f"first command {r['first_command']['speed']:.2f} m/s {r['first_command']['steering']:+.3f} rad", flush=True)
     for r in runs:
