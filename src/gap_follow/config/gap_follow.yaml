@@ -648,6 +648,19 @@ gap_follow_node:
     # without it. To turn the whole layer off, memory included, use
     # enable_opponent_awareness: false here, or opponent_awareness:=false at launch.
     opponent_follow_memory_sec: 1.0  # s, inclusive hold, released one scan later
+    # Static confirmation: a track whose radial residual (d(range)/dt + v cos b + omega laser_x sin b,
+    # median of >= 4 samples in the last 0.6 s) is below this is a wall or a parked object, not a car to
+    # follow, so it contributes no follow cap (it stays an obstacle for everything else). Missing
+    # samples never confirm. 0.0 turns it off. Measured on rb1 runs 20261111-155542 and -153721,
+    # tools/run_analysis/results/2026-11-13-static-confirmation-gate.md: 0.35 confirms 0.80 / 0.86 of
+    # wall-following ticks and 1 of 159 truly moving ticks. The follow cap is lifted only for objects
+    # measured not to move.
+    opponent_follow_static_radial_speed: 0.35  # m/s
+    # And across the line of sight (range * d(bearing)/dt - v sin b + omega (laser_x cos b + range)), which a
+    # car crossing in front breaks and a wall does not: confirmed only when BOTH medians are below their
+    # limit. 1.5 is the smallest T with >= 0.75 of wall ticks confirmed on both rb1 runs (0.763 / 0.852;
+    # T=1.2: 0.650 / 0.773), tools/run_analysis/results/2026-11-13-static-confirmation-gate.md. 0 never confirms.
+    opponent_follow_static_tangential_speed: 1.5  # m/s
     opponent_follow_lateral: 0.45    # m, |y| within which a car ahead is "in the path"
     opponent_relevant_lateral: 1.0   # m, |y| beyond which a moving car is ignored
     # Steering limit for starting a pass. 0.10 rad is shipped, chosen by the R4

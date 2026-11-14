@@ -35,6 +35,7 @@ They were first driven on car 2 on 2026-10-19. That run had no contact, but car 
 22. [Launch boost](#launch-boost) — full speed off the start line, once per race
 23. [Speed on the real course (2026-10-30)](#speed-on-the-real-course-2026-10-30) — why it stopped mid-lap, the fix, and `time_trial:=true`
 24. [Reverse escape](#reverse-escape) — backing out of a nose-in stop; off by default
+25. [Static confirmation](#static-confirmation) — not following what the range rate says is a wall
 
 ## Highlights
 
@@ -1694,3 +1695,36 @@ Not yet. When a car is cleared for it, set `enable_reverse_escape: true` in that
 2. On the floor, in open space, against a cardboard box: drive at the box at low speed (`max_speed:=1.0`), let it stop. Expect 1 s of nothing, then it backs about 0.3 m and tries again. Keep a hand on LB.
 3. Put a second box behind the car's rear quarter at about 0.3 m: it must not reverse.
 
+## Static confirmation
+
+With one car on the track, every "moving car" the opponent layer follows is a false mover: a wall fragment that flickers in and out of
+`segment_objects` and that the tracker reads as moving. Each one lowered the speed through the follow cap. This gate drops the
+follow cap for a track the LiDAR's own range rate says is not moving. It is on in `gap_follow.yaml`
+(`opponent_follow_static_radial_speed: 0.35`, `opponent_follow_static_tangential_speed: 1.5`) and off with `0.0`
+(`opponent_follow_static_tangential_speed: 0.0` also turns it off).
+
+For each tracked object the layer looks at its nearest beam: range `r`, bearing `b` in the LiDAR frame. Between two consecutive
+sightings of the same track (0 < dt <= 0.25 s) it forms two residuals, with `v` the wheel speed, `omega = v tan(steering) / wheelbase`
+the yaw rate of the steering model and `lx` the LiDAR's offset ahead of the rear axle:
+
+- radial: `dr/dt + v cos b + omega lx sin b`
+- tangential: `r db/dt - v sin b + omega (lx cos b + r)`
+
+For a fixed point both are zero whatever the car is doing. A car we follow at matched speed has a radial residual equal to its own
+speed along the line of sight; a car crossing in front has a small radial and a large tangential residual, which is why both channels
+are needed. A track is static-confirmed when its window (the newest 8 samples, none older than 0.6 s, at least 4 of them) has median
+`|radial| < 0.35 m/s` and median `|tangential| < 1.5 m/s`. Too few samples, a missing detection or a non-finite input is not
+confirmed, and that is today's behaviour. The limits were measured on rb1 runs 20261111-155542 and 20261111-153721
+(`tools/run_analysis/results/2026-11-13-static-confirmation-gate.md`, `range_rate_study.py`): 0.35 / 1.5 confirms 0.80 / 0.86 of the
+ticks of the wall-following episodes and 1 of 159 ticks of the cars that truly moved (labelled from the track's own world position).
+
+What is dropped: only the follow cap and the alongside-abort ceiling that a confirmed track would contribute. It is still an
+obstacle for gap selection, the avoidance footprints, the clearance and flank stops, TTC and the braking ceiling, all of which read the
+scan. The stopped-car hold (`opponent_stopped_release_sec`) and the follow-cap memory (`opponent_follow_memory_sec`) are unchanged,
+except that the memory remembers which track set its cap and forgets it when that track is confirmed static.
+
+Known remainder: the hold and the memory of wall tracks that were briefly latched as cars (about a second each time) still set most of
+the follow ticks that are left. Three rules to remove them were measured and rejected (results file): a residual proof of a mover
+(every wall track is also proven, because the steering-model yaw rate lags in a turn), a duration rule (wall tracks are live movers for
+13-57 scans, real cars for 6-91), and clearing the memory while its source is seen and not moving (the wall tracks are already gone
+when the memory holds).

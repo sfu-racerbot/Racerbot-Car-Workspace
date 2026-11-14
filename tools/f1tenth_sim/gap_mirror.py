@@ -202,8 +202,12 @@ REQUIRED_PARAMS = frozenset((
     "opponent_steer_gain",
     "opponent_steer_rate_max",
     "opponent_follow_memory_sec",
+    "opponent_follow_static_radial_speed",
+    "opponent_follow_static_tangential_speed",
 ))
 
+
+STATIC_GATE_PARAMS = ("opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed")
 
 # Parameters added after the first real-car run of the October 2026 rework,
 # with the value that reproduces the behaviour from before they existed. Lets
@@ -255,6 +259,9 @@ LEGACY_VALUES = {
     "enable_opponent_awareness": False,
     **{f"opponent_{name}": getattr(opponent_tracking.OpponentParams(), name)
        for name in opponent_tracking.OpponentParams.__dataclass_fields__},
+    # Static confirmation (2026-11-13) did not exist: 0.0 never confirms, the old behaviour.
+    "opponent_follow_static_radial_speed": 0.0,
+    "opponent_follow_static_tangential_speed": 0.0,
     # The follow-cap memory (2026-10-28) did not exist: 0 is no hold, the old behaviour.
     "opponent_follow_memory_sec": 0.0,
     # The launch boost (2026-10-30) did not exist: off. Its limits are inert
@@ -314,6 +321,9 @@ class GapController:
     """
 
     def __init__(self, params: dict, lidar):
+        # Parameter sets recorded before the static-confirmation gate existed (replay fixtures, older runs) have
+        # the gate off, exactly as LEGACY_VALUES says; every other missing parameter is still an error.
+        params = {**{name: LEGACY_VALUES[name] for name in STATIC_GATE_PARAMS}, **params}
         missing = sorted(REQUIRED_PARAMS - set(params))
         if missing:
             raise KeyError(f"GapController is missing parameters: {missing}")
@@ -549,8 +559,10 @@ class GapController:
         # gap_follow_node: speed only, on the same tick, before the no_safe_gap stop.
         # The alongside-abort ceiling is added after the memory, never held by it.
         if self.opponents is not None:
+            self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())   # as in gap_follow_node
             follow_cap, held = self.opponents.follow_memory.update(
-                follow_cap, step * CONTROL_DT)
+                follow_cap, step * CONTROL_DT,
+                self.opponents.follow_cap_track if follow_cap != math.inf else None)
             follow_cap = min(follow_cap, alongside_cap)
             if held:
                 self.opponent_mode = ("follow_memory" if alongside_cap == math.inf
