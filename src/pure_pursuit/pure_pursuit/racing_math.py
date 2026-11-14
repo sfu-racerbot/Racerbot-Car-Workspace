@@ -1211,6 +1211,27 @@ def braking_speed_limit(clearance: float, reserve_distance: float,
     return min(max_speed, math.sqrt(2.0 * max_braking_decel * usable_distance))
 
 
+def delayed_braking_speed_limit(clearance: float, reserve_distance: float,
+                                braking_decel: float, response_sec: float) -> float:
+    """Largest speed v from which the car still stops with ``reserve_distance`` of
+    ``clearance`` left, if it keeps v for ``response_sec`` and then brakes at
+    ``braking_decel``: v * t + v^2 / (2 a) <= clearance - reserve, solved for v.
+
+    0.0 when the clearance is already inside the reserve; +inf when the clearance is
+    +inf (nothing seen).
+    """
+    if clearance == math.inf:
+        return math.inf
+    if not all(math.isfinite(value) for value in (
+            clearance, reserve_distance, braking_decel, response_sec)):
+        raise ValueError('delayed braking speed-limit inputs must be finite')
+    if reserve_distance < 0.0 or braking_decel <= 0.0 or response_sec < 0.0:
+        raise ValueError('reserve and response must be non-negative and braking positive')
+    usable = max(0.0, clearance - reserve_distance)
+    at = braking_decel * response_sec
+    return -at + math.sqrt(at * at + 2.0 * braking_decel * usable)
+
+
 def lateral_offset_point(xy: np.ndarray, index: int, next_index: int, offset: float):
     """A point `offset` meters to the *left* of waypoint `index` (negative
     offset = right), measured perpendicular to the track's local
