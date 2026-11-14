@@ -147,3 +147,35 @@ car that goes out of view. Rule M clears at most 3.5% of the wall mass (needs >=
 - Duration rule (mover_ticks >= N, N <= 16): wall tracks are live movers for 13-57 scans, real cars for 6-91; N = 16 removes 22% of
   the wall hold+memory mass on 155542 and 0.6% on 153721.
 - Rule M (clear while the source is seen and not moving): the wall tracks are gone, not seen, when the memory holds.
+
+
+## Final closed loop on the live-law gate (2026-11-13)
+
+eval_gap, 1 lap, gate off (`--set opponent_follow_static_radial_speed=0.0`) vs on (shipped 0.35 / 1.5). Follow-bound ticks, with
+the sources (live law / live alongside / held / memory) for on.
+
+rb1 car2_course_2026_11_11, seeds 12345-12350:
+
+| seed | off: follow, lap s, clearance m | on: follow, lap s, clearance m | on sources law/alongside/held/memory |
+|---|---|---|---|
+| 12345 | 252, 17.3, 0.150 | 82, 13.5, 0.172 | 0/12/45/25 |
+| 12346 | 126, 14.7, 0.171 | 132, 14.9, 0.170 | 1/10/53/68 |
+| 12347 | 123, 14.2, 0.168 | 48, 12.8, 0.178 | 0/12/33/3 |
+| 12348 | 199, 16.1, 0.141 | 159, 15.1, 0.161 | 1/12/49/97 |
+| 12349 | 217, 16.6, 0.147 | 183, 16.0, 0.150 | 11/26/67/79 |
+| 12350 | 122, 14.2, 0.163 | 55, 12.8, 0.164 | 2/10/3/40 |
+| total / mean | 1039, 15.52 | 659 (-36.6%), 14.18 | |
+
+Contact steps 0 on every run. rb1 --reverse (4 seeds): identical on and off (149 follow ticks, mean lap 12.22). rb2 car2_course_2026_11_11
+(4 seeds): follow 590 -> 499 (-15%), mean lap 14.80 -> 14.35 (seed 12348 14.2 slower: 13.5 -> 14.6, follow 88 -> 136), contact 0.
+--track indoor (4 tracks x 4 seeds = 20 runs incl. asb_sharp): identical on and off, zero follow ticks, mean lap 12.40.
+
+Two cars (eval_gap_multi, rb1 follower at 3.5 m/s behind a 1.6 m/s leader, car2_course_2026_11_11, seeds 12345-12347, 1 lap): contact 0 in all
+six runs. Follower follow-bound ticks off 663/875/470, on 513/472/519 (the runs end sooner with the gate on); follow-bound ticks while
+the leader's track (id 1) is a live mover: off 192/175/162 = 529, on 174/146/188 = 508 (-4%). That track is static-confirmed on 0.0, 0.0
+and 0.8% of its moving ticks (214-245 moving ticks per run). With the gate on the leader pair finish 1.8 s apart in all three runs; with
+it off seeds 12345 and 12346 show stalls of both cars (gap 7.1 s and 10.7 s).
+
+follow_cost.py on the two rb1 runs (`--static-gate`): identical to gate off (155542: 27.98 s under the cap, 16.75 s wall/static, 10.30 s
+real; 153721: 9.18 s, 8.97 s wall). In the real-run replays the hold and the memory, which the gate does not touch, make up the follow
+episodes; the closed-loop simulator, where the live law and the memory source clear contribute more, shows the reduction.

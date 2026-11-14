@@ -109,7 +109,7 @@ def episodes_of(rows, origin, project, dist_to_wall):
     return out
 
 
-def analyse(run_dir, loc_dir, map_yaml, line_csv):
+def analyse(run_dir, loc_dir, map_yaml, line_csv, static_gate=False):
     from scipy.ndimage import distance_transform_edt
     from pure_pursuit.occupancy_map import OCCUPIED, OccupancyMap
     run_dir = Path(run_dir).resolve()
@@ -124,6 +124,8 @@ def analyse(run_dir, loc_dir, map_yaml, line_csv):
         c, r = grid.world_to_cell(x, y)
         return float(field[int(r), int(c)]) if 0 <= int(r) < field.shape[0] and 0 <= int(c) < field.shape[1] else math.inf
     params, gyro = recorded_params(run_dir), gyro_series(run_dir)
+    if static_gate:      # the run predates the gate: switch it on at the shipped limits (gap_follow.yaml)
+        params.update(opponent_follow_static_radial_speed=0.35, opponent_follow_static_tangential_speed=1.5)
     off = dict(params, enable_opponent_awareness=False)
     rows, rows_off = [], []
     for press, release in run.lb_windows(min_duration=1.0):
@@ -143,8 +145,9 @@ def main(argv=None) -> int:
     ap.add_argument("--loc", required=True)
     ap.add_argument("--map", required=True)
     ap.add_argument("--line", required=True)
+    ap.add_argument("--static-gate", action="store_true", help="replay with the static-confirmation gate on (S 0.35, T 1.5)")
     args = ap.parse_args(argv)
-    rows, eps = analyse(args.run, args.loc, args.map, args.line)
+    rows, eps = analyse(args.run, args.loc, args.map, args.line, args.static_gate)
     print(f"{args.run}: {len(rows)} LB-held ticks ({len(rows) * DT:.1f} s), {len(eps)} follow episodes")
     print("  start   dur     s  follow next  given  m(brief) m(cf)   obj x     y    wall_d moved tracks     kind")
     for e in eps:
