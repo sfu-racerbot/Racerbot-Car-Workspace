@@ -49,3 +49,60 @@ def test_a_run_reports_speeds_clearance_and_the_trace(tmp_path):
     # the first tick is at the recorded pose and speed (the harness starts where the recording says)
     assert math.hypot(r['trace']['x'][0] - ref['pose'][0], r['trace']['y'][0] - ref['pose'][1]) < 0.02      # m
     assert r['trace']['v'][0] == pytest.approx(ref['speed'], abs=0.02)                                       # m/s
+
+
+# --- warm start (2026-11-14) -----------------------------------------------------------------------------------------
+def _fixture_warm(data, ref):
+    """warm_up inputs built from the fixture alone (its scans before the start, its wheel speed and gyro)."""
+    t = np.asarray(data['times'], dtype=float)
+    i0 = ref['start_index']
+    yaw = np.asarray(data['yaw_rates'], dtype=float)
+    ok = np.isfinite(yaw)
+    return dict(scans=[data['ranges'][j] for j in range(i0)], scan_t=t[:i0],
+                speed_at=lambda s: float(np.interp(s, t, data['odom_speeds'])), gyro_t=t[ok], gyro_wz=yaw[ok],
+                press=float(t[0]) - 0.025, start_t=float(t[i0]))
+
+
+def test_warm_up_feeds_every_scan_on_the_nodes_clock():
+    # Oracle: steer_stages.replay_window's clock, step = (t - press) / CONTROL_DT, one controller call per recorded scan.
+    data = np.load(event_replay.FIXTURE)
+    params = json.loads(str(data['params_json']))
+    ref = event_replay.real_reference(data)
+    w = _fixture_warm(data, ref)
+    calls = []
+
+    class Spy:
+        last_command_time = None
+
+        def command(self, scan, v, step, yaw_rate=None):
+            calls.append((step, v, yaw_rate))
+            return 0.1, 1.0
+
+    spy = Spy()
+    out, last = event_replay.warm_up(spy, w['scans'], w['scan_t'], w['speed_at'], w['gyro_t'], w['gyro_wz'], w['press'])
+    assert len(calls) == ref['start_index'] == 44
+    assert [c[0] for c in calls] == pytest.approx([(s - w['press']) / eval_gap.CONTROL_DT for s in w['scan_t']], abs=1e-9)
+    assert spy.last_command_time == pytest.approx(calls[0][0] - 1.0, abs=1e-9)
+    assert last == calls[-1][0] and out == (0.1, 1.0)
+    assert calls[0][1] == pytest.approx(float(data['odom_speeds'][0]), abs=1e-9)        # the wheel speed the node had
+    assert params['wheelbase'] > 0                                                        # the fixture's params load
+
+
+def test_a_warm_run_plays_the_recording_through_the_plants_empty_first_scans_only():
+    # The plant's first two scans after reset are zeros (its LiDAR delay line). A warm run plays the recorded /drive
+    # there instead of feeding the warmed controller zeros; a cold run keeps feeding the controller (old behaviour).
+    data = np.load(event_replay.FIXTURE)
+    params = json.loads(str(data['params_json']))
+    ref = event_replay.real_reference(data)
+    warm = event_replay.run_once(12345, True, ref, params, warm=_fixture_warm(data, ref), data=data)
+    cold = event_replay.run_once(12345, True, ref, params)
+    assert warm['open_loop_ticks'] == 2 and cold['open_loop_ticks'] == 0
+    assert warm['trace']['cmd'][0] == pytest.approx(float(ref['cmd'][0]), abs=1e-9)      # the recorded command, 0.50 m/s
+    assert warm['steps'] == cold['steps'] == 120
+    assert math.isfinite(warm['first_command']['speed'])
+
+
+def test_shared_speed_loop_restores_the_shared_values():
+    from sim_fidelity.calibration import SHARED_SPEED_LOOP
+    cal = event_replay.shared_speed_loop(eval_gap.calibration_for_car('rb1'))
+    assert {k: getattr(cal, k) for k in SHARED_SPEED_LOOP} == SHARED_SPEED_LOOP
