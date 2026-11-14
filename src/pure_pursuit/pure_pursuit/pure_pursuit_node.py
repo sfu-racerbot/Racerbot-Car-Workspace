@@ -306,6 +306,10 @@ class PurePursuitNode(Node):
         # docs/superpowers/plans/2026-11-12-post-race-speed-program.md.
         self.declare_parameter('flank_creep_length', 0.0)
         self.declare_parameter('flank_creep_margin', 0.01)
+        # Arc braking cap (2026-11-14): see _reactive_override and pure_pursuit.yaml.
+        self.declare_parameter('enable_arc_braking_cap', False)   # pure_pursuit.yaml ships true
+        self.declare_parameter('arc_braking_decel', 3.0)
+        self.declare_parameter('arc_braking_response_sec', 0.25)
         self.declare_parameter('scan_timeout_sec', 0.5)
         # --- Deadman button (workspace policy, see docs/architecture.md) ---
         self.declare_parameter('enable_deadman', True)
@@ -570,6 +574,11 @@ class PurePursuitNode(Node):
             self.get_parameter('flank_creep_length').value)
         self.flank_creep_margin = float(
             self.get_parameter('flank_creep_margin').value)
+        self.enable_arc_braking_cap = bool(self.get_parameter('enable_arc_braking_cap').value)
+        self.arc_braking_decel = float(self.get_parameter('arc_braking_decel').value)
+        self.arc_braking_response_sec = float(
+            self.get_parameter('arc_braking_response_sec').value)
+        self._arc_braking_cap = None   # this tick's cap from _reactive_override, or None
         self.scan_timeout_sec = float(self.get_parameter('scan_timeout_sec').value)
         self.enable_deadman = bool(self.get_parameter('enable_deadman').value)
         self.joy_topic = self.get_parameter('joy_topic').value
@@ -735,6 +744,13 @@ class PurePursuitNode(Node):
             raise RuntimeError(
                 'pure_pursuit_node: flank_creep_margin must be finite and within '
                 '[0, 0.10] m.')
+        if not (math.isfinite(self.arc_braking_decel) and self.arc_braking_decel > 0.0):
+            raise RuntimeError(
+                'pure_pursuit_node: arc_braking_decel must be finite and positive (m/s^2).')
+        if not (math.isfinite(self.arc_braking_response_sec)
+                and 0.0 <= self.arc_braking_response_sec <= 2.0):
+            raise RuntimeError(
+                'pure_pursuit_node: arc_braking_response_sec must be finite and within [0, 2] s.')
         # The arc horizon must be positive: swept_path_clearance raises for
         # max_length <= 0, and that would surface inside the control loop.
         if not (math.isfinite(self.emergency_arc_length) and self.emergency_arc_length > 0.0):
@@ -1908,6 +1924,14 @@ class PurePursuitNode(Node):
                 decision_detail = f"{reactive_detail}; base plan: {decision_detail}"
             else:
                 decision_detail += f"; {reactive_detail}"
+            arc_cap = self._arc_braking_cap
+            if arc_cap is not None and arc_cap < speed_cmd:
+                speed_cmd = arc_cap
+                hard_speed_cap = min(hard_speed_cap, arc_cap)
+                intent_reactive_cap = arc_cap if intent_reactive_cap is None else min(
+                    intent_reactive_cap, arc_cap)
+                decision_detail += (f"; arc braking cap {arc_cap:.2f}m/s "
+                                    f"(swept path free for less than the arc horizon)")
 
         if self.follow_speed_cap is not None:
             speed_cmd = min(speed_cmd, self.follow_speed_cap)
@@ -2435,6 +2459,7 @@ class PurePursuitNode(Node):
              *if* a wide-enough gap actually exists; otherwise also stop
              rather than commit to a guessed steering angle.
         """
+        self._arc_braking_cap = None   # set below once tier 1 passes; the caller applies it
         if self.last_scan is None:
             return (
                 None,
@@ -2558,6 +2583,20 @@ class PurePursuitNode(Node):
             if escape is not None:
                 return escape
             return (None, 0.0, 'emergency_obstacle', emergency_detail)
+
+        # Arc braking cap (2026-11-14): tier 1 stops only once the swept path is inside
+        # emergency_arc_clearance, a fixed 0.14 m whatever the speed. Off the line -- a flank
+        # creep that hands back to the tracking law at full lock, say -- the car could reach
+        # 1.4 m/s toward a wall inside the arc horizon and arrive at the stop too fast to
+        # make it (simulator, rb2 20261111-152132's latch pose; tools/run_analysis/results/
+        # 2026-11-14-map-racer-stuck-case.md). Cap the speed so that, holding it for
+        # arc_braking_response_sec and then braking at arc_braking_decel, the car still
+        # stops with emergency_arc_clearance free. inf (no cap) beyond the arc horizon, so a
+        # clear racing line is never slowed. It only lowers speed; the caller applies it.
+        if self.enable_arc_braking_cap and math.isfinite(arc_clear):
+            self._arc_braking_cap = racing_math.delayed_braking_speed_limit(
+                arc_clear, self.emergency_arc_clearance, self.arc_braking_decel,
+                self.arc_braking_response_sec)
 
         if not self.enable_obstacle_avoidance:
             return (

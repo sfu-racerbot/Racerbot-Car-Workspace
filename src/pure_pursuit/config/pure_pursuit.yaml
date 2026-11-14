@@ -322,6 +322,20 @@ pure_pursuit_node:
     # steering into it, still stops. 0 = off. Plan section 1.2.
     flank_creep_length: 0.50
     flank_creep_margin: 0.01
+    # Arc braking cap (2026-11-14). Tier 1 stops at a fixed emergency_arc_clearance
+    # whatever the speed. Off the line the tracking law can reach 1.4 m/s toward a
+    # wall inside the arc horizon (flank creep handing back at full lock, simulator
+    # on rb2 20261111-152132's latch pose: contact on 3 of 3 seeds) and arrive at the
+    # stop too fast. With this on, speed is capped so that holding it for
+    # arc_braking_response_sec and then braking at arc_braking_decel (m/s^2, the
+    # measured physical braking, as following_brake) still stops with
+    # emergency_arc_clearance free along the swept path; beyond emergency_arc_length
+    # nothing is capped, so a clear racing line never is (race-day line, both cars:
+    # identical laps). Only lowers speed.
+    # tools/run_analysis/results/2026-11-14-map-racer-stuck-case.md
+    enable_arc_braking_cap: true
+    arc_braking_decel: 3.0
+    arc_braking_response_sec: 0.25
     scan_timeout_sec: 0.5
     max_range: 10.0   # range readings beyond this (and inf/NaN) are clipped/filled before any math touches them
 

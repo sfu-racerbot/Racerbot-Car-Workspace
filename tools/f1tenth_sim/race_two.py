@@ -323,6 +323,10 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                         # setting: preserve override targets for stop/escape/avoid.
                         speed = min(speed, vo) if safety is None else vo
                         cap = min(cap, vo)
+                    arc_cap = getattr(d, '_arc_braking_cap', None)
+                    if arc_cap is not None and arc_cap < speed:
+                        # pure_pursuit_node's arc braking cap, computed by its own _reactive_override above.
+                        speed, cap = arc_cap, min(cap, arc_cap)
                     if base_state == 'off_racing_line':
                         speed, safety = 0.0, base_state
                     if d.follow_speed_cap is not None:
