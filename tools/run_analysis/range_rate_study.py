@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 for p in (ROOT / "tools", ROOT / "tools" / "f1tenth_sim", ROOT / "src" / "gap_follow", ROOT / "src" / "pure_pursuit"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_analysis import runlog  # noqa: E402
 from run_analysis.ego_yaw_study import MATCH, Truth, classify, run_variant  # noqa: E402
@@ -86,7 +87,7 @@ def make_extra(run, wheelbase, laser_x):
     return extra
 
 
-def study(run_dir, loc_dir, map_yaml, line_csv):
+def study(run_dir, loc_dir, map_yaml, line_csv, overrides=None, hook=None):
     from scipy.ndimage import distance_transform_edt
     from pure_pursuit.occupancy_map import OCCUPIED, OccupancyMap
     run_dir = Path(run_dir).resolve()
@@ -103,7 +104,14 @@ def study(run_dir, loc_dir, map_yaml, line_csv):
         r, c = int(r), int(c)
         return float(field[r, c]) if 0 <= r < field.shape[0] and 0 <= c < field.shape[1] else math.inf
     params, gyro = recorded_params(run_dir), gyro_series(run_dir)
-    rows = run_variant("steering", run, params, gyro, truth, loc, extra=make_extra(run, params["wheelbase"], params["laser_offset_x"]))
+    params.update(overrides or {})
+    base = make_extra(run, params["wheelbase"], params["laser_offset_x"])
+
+    def both(ctrl, row):
+        base(ctrl, row)
+        if hook is not None:
+            hook(ctrl, row)
+    rows = run_variant("steering", run, params, gyro, truth, loc, extra=both)
     eps = episodes_of(rows, origin, project, dist)
     return rows, eps
 
@@ -392,18 +400,53 @@ def proof_report(rows, eps, label):
     return out
 
 
+def hold_mass_report(run_dir, loc_dir, map_yaml, line_csv, ns=(4, 6, 8, 10, 12, 16)):
+    """Step A.1: gate on, hold/memory unrestricted. Per-track events split wall-episode tracks vs real tracks, and what each N removes."""
+    import hold_mass
+    events, last = [], {}
+
+    def hook(ctrl, row):
+        for tid, kind, mv in hold_mass.collect(ctrl, last):
+            events.append((row["t"], tid, kind, mv))
+    rows, eps = study(run_dir, loc_dir, map_yaml, line_csv, hook=hook,
+                      overrides=dict(opponent_follow_static_radial_speed=0.35, opponent_follow_static_tangential_speed=1.5,
+                                     opponent_follow_hold_min_mover_ticks=0))
+    wall, real = classify(eps)
+    wall_ids = {rows[k]["obj"]["track"] for e in wall for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1) if rows[k]["obj"]}
+    real_ids = {rows[k]["obj"]["track"] for e in real for k in range(e["tick_idx"][0], e["tick_idx"][1] + 1) if rows[k]["obj"]
+                and track_truth(rows, k, rows[k]["obj"]["track"]) == "moving"}
+    print(f"== HOLD MASS {Path(run_dir).name}: wall-episode tracks {len(wall_ids)}, real tracks {len(real_ids)}")
+    by = {}
+    for t, tid, kind, mv in events:
+        by.setdefault(tid, []).append((kind, mv))
+    for label, ids in (("wall", wall_ids), ("real", real_ids)):
+        print(f"-- {label} tracks with hold/memory ticks: track, held ticks, memory ticks, mover_ticks (min..max)")
+        for tid in sorted(ids & set(by), key=lambda x: -len(by[x])):
+            ev = by[tid]
+            mvs = [m for _k, m in ev]
+            print(f"   {tid:5d} held {sum(k == 'held' for k, _ in ev):4d} memory {sum(k == 'memory' for k, _ in ev):4d} mover_ticks {min(mvs)}..{max(mvs)}")
+    wall_events = [(tid, k, mv) for _t, tid, k, mv in events if tid in wall_ids and tid not in real_ids]
+    for n in ns:
+        frac, gone, total = hold_mass.removed(wall_events, n)
+        print(f"   N={n}: wall hold+memory tick mass removed {gone}/{total} = {frac:.3f}")
+    return events, wall_ids, real_ids
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run")
     ap.add_argument("--loc", required=True)
     ap.add_argument("--map", required=True)
     ap.add_argument("--line", required=True)
+    ap.add_argument("--mass", action="store_true", help="the hold-mass table instead of the residual tables")
     args = ap.parse_args(argv)
+    if getattr(args, "mass", False):
+        hold_mass_report(args.run, args.loc, args.map, args.line)
+        return 0
     rows, eps = study(args.run, args.loc, args.map, args.line)
     report(rows, eps, Path(args.run).name)
     gate_report(rows, eps, Path(args.run).name)
     tangential_report(rows, eps, Path(args.run).name)
-    proof_report(rows, eps, Path(args.run).name)
     return 0
 
 

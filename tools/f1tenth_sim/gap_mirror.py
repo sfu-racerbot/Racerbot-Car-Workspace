@@ -258,6 +258,7 @@ LEGACY_VALUES = {
     # Static confirmation (2026-11-13) did not exist: 0.0 never confirms, the old behaviour.
     "opponent_follow_static_radial_speed": 0.0,
     "opponent_follow_static_tangential_speed": 0.0,
+    "opponent_follow_hold_min_mover_ticks": 0,
     # The follow-cap memory (2026-10-28) did not exist: 0 is no hold, the old behaviour.
     "opponent_follow_memory_sec": 0.0,
     # The launch boost (2026-10-30) did not exist: off. Its limits are inert

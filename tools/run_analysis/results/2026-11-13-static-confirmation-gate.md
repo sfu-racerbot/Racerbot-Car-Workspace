@@ -96,3 +96,25 @@ P2 is chosen (fewest wall tracks proven), but no candidate separates walls from 
 tangential 2.2-2.9 m/s on ticks 64-73 (proof on tick 66) while the car is in a hard turn, tracker speed 3 m/s, then 0.1 m/s at rest.
 The residuals are not zero for a wall during a steering transition (the steering-model yaw rate lags the real one), which is also what
 makes the tracker call it a mover.
+
+## Earned hold (mover_ticks >= N), Step A (2026-11-13, round 4): NO N PASSES
+
+`tools/run_analysis/hold_mass.py` and `range_rate_study.py --mass`: gate on (S 0.35, T 1.5), hold and memory unrestricted
+(N = 0), per tick (track, kind, mover_ticks) for tracks in the 1 s stopped-car hold or whose cap the FollowCapMemory is holding.
+mover_ticks = scans the track was moving and not static-confirmed (counted in the tracker's update).
+
+(1) Run 155542, wall-episode tracks (held ticks / memory ticks / mover_ticks): 193 (0/476/40-51), 133 (0/296/13), 60 (0/272/32-57),
+305 (0/122/13-40), 38 (40/3/21-24), 40 (40/2/21-24), 192 (40/0/22), 166 (40/0/24), 132 (40/0/13), 265 (40/0/26), 306 (40/0/24),
+337 (40/0/30), 59 (40/0/20), 100 (39/0/14). Real tracks: 128 (0/287/16-38), 99 (0/187/35-40), 180 (0/176/6-46), 44 (0/171/23-79),
+130 (0/87/19-54), 377 (10/48/6-91), 100 (39/0/14: the static object of episode 33.53, counted on both lists).
+Wall mass removed by N: 4..12 -> 0/1531 = 0.000, 16 -> 339/1531 = 0.221.
+Run 153721 (10 wall tracks, mover_ticks 3-29): N = 4..16 -> 2/321 = 0.006.
+
+(2) eval_gap rb1 car2_course_2026_11_11 (every mover is false), mass removed at N = 8 / 16: seed 12345 0.053 / 0.413 (75 events),
+12346 0.146 / 0.233 (601), 12347 0.030 / 0.030 (33), 12348 0.090 / 0.213 (534). The mass sits on a few tracks with mover_ticks 2-30
+(12346: track 14, 453 memory ticks, mover_ticks 2-17; 12348: track 14, 405 memory ticks, 2-30).
+
+(3) Existing tests (test_opponent_tracking, test_opponent_awareness_node, test_gap_mirror_parity) pass with the default N = 4, 8, 12 and 16
+(the shipped-config-defaults test only because the yaml is 8): every behavioural test's car has at least 16 mover_ticks.
+
+Wall tracks are live movers for 13-57 scans, the same range as real cars (6-91), so a duration rule cannot reach 85% with N <= 16.
