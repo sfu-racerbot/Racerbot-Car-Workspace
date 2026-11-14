@@ -202,8 +202,12 @@ REQUIRED_PARAMS = frozenset((
     "opponent_steer_gain",
     "opponent_steer_rate_max",
     "opponent_follow_memory_sec",
+    "opponent_follow_static_radial_speed",
+    "opponent_follow_static_tangential_speed",
 ))
 
+
+STATIC_GATE_PARAMS = ("opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed")
 
 # Parameters added after the first real-car run of the October 2026 rework,
 # with the value that reproduces the behaviour from before they existed. Lets
@@ -317,6 +321,9 @@ class GapController:
     """
 
     def __init__(self, params: dict, lidar):
+        # Parameter sets recorded before the static-confirmation gate existed (replay fixtures, older runs) have
+        # the gate off, exactly as LEGACY_VALUES says; every other missing parameter is still an error.
+        params = {**{name: LEGACY_VALUES[name] for name in STATIC_GATE_PARAMS}, **params}
         missing = sorted(REQUIRED_PARAMS - set(params))
         if missing:
             raise KeyError(f"GapController is missing parameters: {missing}")

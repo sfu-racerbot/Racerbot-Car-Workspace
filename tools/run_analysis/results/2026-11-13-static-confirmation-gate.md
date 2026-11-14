@@ -179,3 +179,5 @@ it off seeds 12345 and 12346 show stalls of both cars (gap 7.1 s and 10.7 s).
 follow_cost.py on the two rb1 runs (`--static-gate`): identical to gate off (155542: 27.98 s under the cap, 16.75 s wall/static, 10.30 s
 real; 153721: 9.18 s, 8.97 s wall). In the real-run replays the hold and the memory, which the gate does not touch, make up the follow
 episodes; the closed-loop simulator, where the live law and the memory source clear contribute more, shows the reduction.
+
+Note: the sims in this PR ran from a worktree whose installed yaml was the main checkout's old one, so the gate came from the dataclass defaults (0.35 / 1.5), which equal the shipped yaml; the results stand.
