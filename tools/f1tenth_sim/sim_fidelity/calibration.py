@@ -194,6 +194,9 @@ class CarCalibration:
     grip_curve: tuple | None = None
     # True when that curve's delivered column falls past a peak (see ProgressiveGrip.falling).
     grip_curve_falls: bool = False
+    # Saturating per-axle tyres (sim_fidelity.tyres.TyreModel) in place of gym's linear ones, so the car can
+    # slide and spin. None keeps gym's tyres and the steering clamp above (grip_curve or the friction circle).
+    tyre_model: object | None = None
     # True speed the car settles at per unit of commanded speed.
     speed_command_scale: float = 1.0
     # What /odom reads per unit of true speed.
@@ -443,6 +446,7 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     "steering_linkage": (Provenance.ESTIMATED, "off: the plain calibration has no linkage model. See FLOORS"),
     "grip_curve": (Provenance.ESTIMATED, "off: the plain calibration has a sharp friction circle. See FLOORS"),
     "grip_curve_falls": (Provenance.DERIVED, "off: a grip curve must ascend in both columns. See FLOORS"),
+    "tyre_model": (Provenance.ESTIMATED, "off: gym's linear tyres under the steering clamp; they cannot spin. See FLOORS"),
     "speed_command_scale": (Provenance.DERIVED, "1: command taken as true speed. See FLOORS"),
     "odom_speed_scale": (Provenance.DERIVED, "1: odometry taken as true speed. See FLOORS"),
     "lidar_noise_per_metre": (Provenance.ESTIMATED, "0: flat noise. See FLOORS"),
