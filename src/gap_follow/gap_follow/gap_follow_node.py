@@ -253,6 +253,12 @@ class GapFollowNode(Node):
         self.declare_parameter('flank_creep_margin', 0.02)
         # Reverse escape (reverse_escape.py, docs/gap-follow.md#reverse-escape): back out of a nose-in stop over
         # the ground the car just drove across, slowly, a short fixed distance, straight. OFF by default.
+        # Brake assist (gap_logic.brake_assist_speed, docs/gap-follow.md#brake-assist): when the wheel speed is
+        # more than brake_assist_threshold above the speed this tick wants, publish target - gain * excess so the
+        # VESC, which coasts through a small overspeed, brakes. Only lowers the command; off by default.
+        self.declare_parameter('enable_brake_assist', False)
+        self.declare_parameter('brake_assist_threshold', 0.15)
+        self.declare_parameter('brake_assist_gain', 1.0)
         self.declare_parameter('enable_reverse_escape', False)
         self.declare_parameter('reverse_escape_speed', 0.30)
         self.declare_parameter('reverse_escape_max_distance', 0.35)
@@ -661,6 +667,14 @@ class GapFollowNode(Node):
                 and 0.0 <= self.flank_creep_margin <= 0.10):
             raise ValueError(
                 'flank_creep_margin must be finite and within [0, 0.10] m')
+        self.enable_brake_assist = bool(self.get_parameter('enable_brake_assist').value)
+        self.brake_assist_threshold = float(self.get_parameter('brake_assist_threshold').value)
+        self.brake_assist_gain = float(self.get_parameter('brake_assist_gain').value)
+        if not (math.isfinite(self.brake_assist_threshold) and 0.0 <= self.brake_assist_threshold <= 1.0):
+            raise ValueError('brake_assist_threshold must be finite and within [0, 1] m/s')
+        if not (math.isfinite(self.brake_assist_gain) and 0.0 <= self.brake_assist_gain <= 3.0):
+            raise ValueError('brake_assist_gain must be finite and within [0, 3]')
+        self.brake_assist_active = False
         self.enable_reverse_escape = bool(self.get_parameter('enable_reverse_escape').value)
         self.reverse_rear_clearance = float(self.get_parameter('reverse_escape_rear_quarter_clearance').value)
         self.reverse_band = (float(self.get_parameter('reverse_escape_rear_band_lo_deg').value),
@@ -2244,6 +2258,8 @@ class GapFollowNode(Node):
                if launching else "")
             + (f", follow cap={follow_cap:.2f}m/s" if math.isfinite(follow_cap) and not launching else "")
             + (f", opponent mode={self.opponent_mode}" if self.opponent_mode else "")
+            + (f", BRAKE ASSIST (wheel {self.current_speed:.2f}m/s over {speed:.2f}: published lower)"
+               if self.brake_assist_active else "")
             + (f", static (radial residual {min(self.opponents.static_skipped):.2f}m/s): not followed"
                if self.opponents is not None and self.opponents.static_skipped and not launching else "")
             + (f", FLANK CREEP (wall alongside, body arc clear for "
@@ -2779,6 +2795,7 @@ class GapFollowNode(Node):
         return now, min(self.command_slew_max_dt, max(0.0, elapsed))
 
     def _publish_drive(self, steering_angle: float, speed: float, now=None):
+        override = None
         if self.reverse is not None:
             override = self._reverse_override(speed)
             if override is not None:
@@ -2786,6 +2803,14 @@ class GapFollowNode(Node):
                 # (_scan_step stops first, and the machine is also given it) gates this one like any other.
                 self.steering_basis = 0.0
                 steering_angle, speed = 0.0, override
+        # Brake assist: what is published may sit below the speed this tick wants, so the VESC brakes to it. The
+        # planned speed stays the ramp and cap basis (last_commanded_speed below), so it never slows re-acceleration.
+        published = speed
+        self.brake_assist_active = False
+        if self.enable_brake_assist and override is None and self._odom_fresh():
+            published = gap_logic.brake_assist_speed(
+                speed, self.current_speed, self.brake_assist_threshold, self.brake_assist_gain)
+            self.brake_assist_active = published < speed
         if now is None:
             now = self.get_clock().now()
         if math.isfinite(speed) and math.isfinite(steering_angle):
@@ -2800,7 +2825,7 @@ class GapFollowNode(Node):
         msg.header.stamp = now.to_msg()
         msg.header.frame_id = 'base_link'
         msg.drive.steering_angle = steering_angle
-        msg.drive.speed = speed
+        msg.drive.speed = published
         self.drive_pub.publish(msg)
 
     def _stop(self, state: str, detail: str):

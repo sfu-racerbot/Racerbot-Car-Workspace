@@ -164,6 +164,17 @@ gap_follow_node:
     # (eval_gap, indoor): every layout still passes with no contact.
     # neural_racer intentionally stays at 2.0 (see test_config.py).
     max_lateral_accel: 2.5
+    # Brake assist (docs/gap-follow.md#brake-assist): the curvature caps above are met on the COMMAND, and car 1's
+    # VESC hardly brakes for a small overspeed (median 0.09 m/s^2 with the wheel 0.2-0.5 m/s above the command; after
+    # a hard ramp a median 1.56 m/s above it for 0.75 s; rb1 runs 20261111-155542 and -153721,
+    # tools/run_analysis/results/2026-11-13-corner-entry-study.md). At the 2026-11-11 U-turn the cap asked 2.0-2.2 m/s,
+    # the car held 2.7-2.9, its lateral demand reached ~4.4 m/s^2 against a measured grip cliff at 4.5 and it spun
+    # into the inner wall. With this on, a wheel speed more than brake_assist_threshold above the tick's speed
+    # publishes target - brake_assist_gain * excess (never below 0) so the VESC brakes; the planned speed stays the
+    # ramp basis. Off until a floor test (wheels off, then low speed).
+    enable_brake_assist: false
+    brake_assist_threshold: 0.15     # m/s
+    brake_assist_gain: 1.0
     # Race defaults (2026-10-27): 3.0 -> 5.0, the speed ramp. The car's VESC speed
     # loop already lags a 3.0 ramp (measured 2026-10-27), so on the car this mostly
     # removes a software cap. It limits how fast a speed command may RISE and never

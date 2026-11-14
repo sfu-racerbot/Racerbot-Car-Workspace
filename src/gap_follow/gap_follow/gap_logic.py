@@ -1434,6 +1434,27 @@ class TractionHold:
         return self.holding
 
 
+def brake_assist_speed(target: float, measured: float, threshold: float, gain: float) -> float:
+    """The speed to publish so the VESC actually slows to ``target`` (docs/gap-follow.md#brake-assist).
+
+    Car 1's VESC speed loop hardly brakes for a small overspeed: on its 2026-11-11 race runs it decelerated a median
+    0.09 m/s^2 with the wheel speed 0.2-0.5 m/s above the command, and after a hard ramp stayed a median 1.56 m/s
+    above it for 0.75 s (tools/run_analysis/results/2026-11-13-corner-entry-study.md). The curvature caps were met
+    on the command and missed on the floor. When the measured speed is more than ``threshold`` above ``target`` this
+    returns ``target - gain * (measured - target)``: the loop then sees an error past its deadband and brakes.
+
+    Only ever lowers the command, never below zero (a negative command is reverse). The target itself is returned
+    unchanged when it is not positive, when ``measured`` is not finite (stale or missing odometry: no judgement), or
+    within ``threshold`` of it.
+    """
+    if not (math.isfinite(target) and target > 0.0 and math.isfinite(measured)):
+        return target
+    excess = measured - target
+    if excess <= threshold:
+        return target
+    return max(0.0, target - gain * excess)
+
+
 def traction_limited_speed(desired_speed, last_commanded_speed, holding) -> float:
     """Hold without delaying a lower speed ceiling."""
     return min(desired_speed, last_commanded_speed) if holding else desired_speed
