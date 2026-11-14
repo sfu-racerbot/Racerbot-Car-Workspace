@@ -517,6 +517,20 @@ class FidelityPlant:
                     break
         return touching
 
+    def chassis_map_clearance(self, index: int = 0) -> float:
+        """Metres from the agent's real chassis outline (corners and edge midpoints) to the nearest occupied map cell: the
+        distance transform ``_wall_contact`` thresholds at zero, as a number. nan before the first scan has built the map."""
+        simulator = self.env.unwrapped.sim
+        scan_sim = simulator.scan_sims[0]
+        if scan_sim.dt is None:
+            return math.nan
+        field = scan_sim.dt if self._contact_dt is None else self._contact_dt
+        corners = self._chassis_outline(index)
+        samples = np.vstack((corners, (corners + np.roll(corners, -1, 0)) / 2.0))
+        return min(float(self._distance_transform(
+            float(x), float(y), scan_sim.orig_x, scan_sim.orig_y, scan_sim.orig_c, scan_sim.orig_s,
+            scan_sim.map_height, scan_sim.map_width, scan_sim.map_resolution, field)) for x, y in samples)
+
     def _chassis_contact(self) -> set[int]:
         """Agents whose real chassis overlap, checked all round the car.
 
