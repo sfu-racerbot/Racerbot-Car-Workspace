@@ -107,12 +107,12 @@ def warm_inputs(run_dir, data=None):
                 gyro_wz=gyro_wz, press=press, start_t=t0)
 
 
-def run_once(seed, awareness, ref, params, car_id="rb1", warm=None, calibration=None, data=None):
+def run_once(seed, awareness, ref, params, car_id="rb1", warm=None, calibration=None, data=None, track=TRACK):
     """One closed-loop run from the recorded state. ``warm``: warm_inputs(...) of the recorded run; the controller first replays
     the recorded scans from the LB press up to the start (warm_up), so it starts with the real node's history instead of none.
     ``calibration``: default the car's own."""
     calibration = calibration_for_car(car_id) if calibration is None else calibration
-    plant = eval_gap.make_plant(TRACK, seed, calibration=calibration, car_id=car_id)
+    plant = eval_gap.make_plant(track, seed, calibration=calibration, car_id=car_id)
     pose = np.array([ref["pose"]], dtype=float)
     plant.reset(pose, speeds=[ref["speed"]])
     plant.step([(0.0, 0.0)])                                     # builds the map's distance transform
@@ -184,6 +184,7 @@ def main(argv=None) -> int:
     ap.add_argument("--seeds", type=int, default=6)
     ap.add_argument("--first-seed", type=int, default=12345)
     ap.add_argument("--out")
+    ap.add_argument("--track", default=TRACK, help="the simulator track (default %(default)s)")
     ap.add_argument("--warm", metavar="RUN_DIR",
                     help="the recorded run (data/rb1/racerbot_runs/20261111-155542): replay its scans from the LB press up to the start "
                          "through the controller first, as the real node saw them")
@@ -210,7 +211,8 @@ def main(argv=None) -> int:
     runs = []
     for awareness in (True, False):
         for k in range(args.seeds):
-            r = run_once(args.first_seed + k, awareness, ref, params, warm=warm, calibration=calibration, data=data)
+            r = run_once(args.first_seed + k, awareness, ref, params, warm=warm, calibration=calibration, data=data,
+                         track=args.track)
             runs.append(r)
             print(f"awareness {'on ' if awareness else 'off'} seed {r['seed']}: start clearance {r['start_clearance']:.3f} m; v +0.7 {r['v_07']:.2f} "
                   f"+1.3 {r['v_13']:.2f}; max(v-cmd) {r['max_v_minus_cmd']:.2f}; min clearance {r['min_clearance']:.3f} m at +{r['t_min']:.2f} s "

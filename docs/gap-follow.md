@@ -36,6 +36,7 @@ They were first driven on car 2 on 2026-10-19. That run had no contact, but car 
 23. [Speed on the real course (2026-10-30)](#speed-on-the-real-course-2026-10-30) — why it stopped mid-lap, the fix, and `time_trial:=true`
 24. [Reverse escape](#reverse-escape) — backing out of a nose-in stop; off by default
 25. [Static confirmation](#static-confirmation) — not following what the range rate says is a wall
+26. [Brake assist](#brake-assist) — publishing below the cap so a coasting VESC actually slows; off by default
 
 ## Highlights
 
@@ -1728,3 +1729,28 @@ the follow ticks that are left. Three rules to remove them were measured and rej
 (every wall track is also proven, because the steering-model yaw rate lags in a turn), a duration rule (wall tracks are live movers for
 13-57 scans, real cars for 6-91), and clearing the memory while its source is seen and not moving (the wall tracks are already gone
 when the memory holds).
+
+## Brake assist
+
+**Off by default** (`enable_brake_assist: false`). Every speed cap in this node (curvature, clearance, corner, follow) is met on the
+*command*. Car 1's VESC hardly brakes for a small overspeed: on its 2026-11-11 race runs it decelerated a median 0.09 m/s² with the
+wheel speed 0.2-0.5 m/s above the command, and after a hard ramp it stayed a median 1.56 m/s above the command for 0.75 s
+(`tools/run_analysis/results/2026-11-13-corner-entry-study.md`). At the U-turn where car 1 hit the inner wall (run
+20261111-155542, 87.3 s) the curvature cap asked 2.0-2.2 m/s for steering 0.2 rad (the 2.5 m/s² lateral limit), the car held
+2.7-2.9 m/s, its lateral demand reached about 4.4 m/s², its measured grip falls off a cliff near 4.5 m/s²
+(`sim_fidelity/sfu_course_2026_11_11_grip_rb1_bno.json`), and the yaw rate jumped from 1.4 to 4-5 rad/s: it spun, and the side met
+the wall about 0.25 s later.
+
+With it on, when the fresh wheel speed is more than `brake_assist_threshold` (0.15 m/s) above the speed the tick plans, the node
+publishes `max(0, plan - brake_assist_gain * (wheel - plan))` (`gap_logic.brake_assist_speed`), so the VESC's error leaves its
+deadband and it brakes. It only ever lowers the command, never below zero, and does nothing with stale odometry or for the reverse
+escape. The planned speed stays `last_commanded_speed`, the next tick's ramp basis, so re-acceleration is not slowed. The decision log
+says `BRAKE ASSIST` on a tick where it acted.
+
+**Simulator evidence so far is against turning it on.** With car 1's fitted speed loop (`cars/rb1/sim/speed_loop.yaml`), on
+`car2_course_2026_11_11` it lowers the grip-limited share of the lap (0.14 to 0.10) but every setting tried is slower and closer to the
+walls: gain 1.0 / threshold 0.15 gives 12.97 s against 11.74 s and a minimum clearance of 0.145 m against 0.187 m (6 seeds; reversed,
+12.16 against 10.91 s and 0.113 against 0.184 m). The simulator's tyres keep a flat 5.4 m/s² of grip with no cliff, so it shows the
+cost of braking more and cannot show the spin it is meant to prevent. Before a floor test, give the simulator car 1's grip cliff and
+re-run that comparison.
+

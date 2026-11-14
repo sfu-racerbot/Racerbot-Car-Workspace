@@ -204,10 +204,14 @@ REQUIRED_PARAMS = frozenset((
     "opponent_follow_memory_sec",
     "opponent_follow_static_radial_speed",
     "opponent_follow_static_tangential_speed",
+    "enable_brake_assist",
+    "brake_assist_threshold",
+    "brake_assist_gain",
 ))
 
 
 STATIC_GATE_PARAMS = ("opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed")
+BRAKE_ASSIST_PARAMS = ("enable_brake_assist", "brake_assist_threshold", "brake_assist_gain")
 
 # Parameters added after the first real-car run of the October 2026 rework,
 # with the value that reproduces the behaviour from before they existed. Lets
@@ -259,6 +263,10 @@ LEGACY_VALUES = {
     "enable_opponent_awareness": False,
     **{f"opponent_{name}": getattr(opponent_tracking.OpponentParams(), name)
        for name in opponent_tracking.OpponentParams.__dataclass_fields__},
+    # The brake assist (2026-11-14) did not exist: off.
+    "enable_brake_assist": False,
+    "brake_assist_threshold": 0.15,
+    "brake_assist_gain": 1.0,
     # Static confirmation (2026-11-13) did not exist: 0.0 never confirms, the old behaviour.
     "opponent_follow_static_radial_speed": 0.0,
     "opponent_follow_static_tangential_speed": 0.0,
@@ -323,7 +331,8 @@ class GapController:
     def __init__(self, params: dict, lidar):
         # Parameter sets recorded before the static-confirmation gate existed (replay fixtures, older runs) have
         # the gate off, exactly as LEGACY_VALUES says; every other missing parameter is still an error.
-        params = {**{name: LEGACY_VALUES[name] for name in STATIC_GATE_PARAMS}, **params}
+        # Parameter sets recorded before the brake assist existed have it off, likewise.
+        params = {**{name: LEGACY_VALUES[name] for name in (*STATIC_GATE_PARAMS, *BRAKE_ASSIST_PARAMS)}, **params}
         missing = sorted(REQUIRED_PARAMS - set(params))
         if missing:
             raise KeyError(f"GapController is missing parameters: {missing}")
@@ -825,7 +834,14 @@ class GapController:
         self.last_commanded_speed = speed
         self.last_command_time = step
         self.stopped = False
-        return steering, float(speed)
+        # gap_follow_node._publish_drive: the published speed may sit below the planned one so the VESC brakes;
+        # the planned speed above stays the ramp basis. The node needs fresh odometry; the simulator's always is.
+        published = speed
+        if p["enable_brake_assist"]:
+            published = gap_logic.brake_assist_speed(speed, float(current_speed), p["brake_assist_threshold"],
+                                                     p["brake_assist_gain"])
+        tel["brake_assist"] = published < speed
+        return steering, float(published)
 
     def _understeer_cap(self, steering, dt, current_speed, yaw_rate, measured_steering):
         """Fresh samples arrive per tick; None is an untrusted/missing sample."""
