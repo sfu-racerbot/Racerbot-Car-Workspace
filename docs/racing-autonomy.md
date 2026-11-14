@@ -190,6 +190,42 @@ The earlier probe-built lines gave 11.40–11.47 s on 06a and 8.67–8.77 s on 0
 
 These are no-ROS simulator runs of the shipped line and controller math, not a full ROS launch or physical-car validation. **Before driving: static checks, wheels off the ground, then the capped low-speed floor test. Hold LB whenever the car should move.**
 
+## Racing on another car's map
+
+**Car 1 cannot map a course yet.** A replay of its 2026-11-11 race run through the real `map_course` launch
+(`tools/run_analysis/replay_map_course.py data/rb1/racerbot_runs/20261111-153721 --from-seconds 103`) closed three laps,
+but the map failed its own check: mean scan fit 0.89 against the 0.90 it needs, and one stretch at 0.37 where the car
+got lost. So car 1 races on a map car 2 made, with a line built for car 1.
+
+A mapping run's line carries the car that built it: `raceline_profiled.csv` is planned with that car's grip,
+acceleration and braking delay. Copy only the course, then build the line for the car that will race it:
+
+```bash
+python3 -m pure_pursuit.race_line --car rb1 \
+    --from-run-dir data/rb2/racerbot_auto/<car 2's run> --run-dir data/rb1/racerbot_auto/<new name>
+```
+
+`--from-run-dir` copies the map (yaml and image), `raceline_raw.csv` and `start_pose.yaml`, never the other car's
+built line. It refuses a `--run-dir` that already holds files and writes `adopted_from.yaml` naming the source. The
+line is then built with `--car`'s layered limits. Race it with `race_launch.py run_dir:=<the new directory>` as usual.
+Copy the course to car 1 first (`data/` is per car and the run is on car 2).
+
+**Car 1's limits** (`cars/rb1/calibration/auto_map_race.yaml`, `cars/rb1/tuning/pure_pursuit.yaml`), from its race
+runs:
+- planning lateral 3.2 m/s², from the 3.56 it sustained;
+- acceleration 5.0 m/s², its speed loop;
+- planned speed delay 0.35 s: its VESC coasts through a small overspeed and reaches a lowered command in a median
+  0.52 s;
+- `delay_lqr` with its measured servo, 12/s at 1.75 rad/s;
+- overtaking off and following on, as on car 2.
+
+The online ceiling stays at the shared 2.5 m/s².
+
+**Simulator only, not driven.** On `car2_course_2026_11_11` with car 1's fitted speed loop, over 6 seeds and 3 laps,
+there was no contact and no safety stop. First laps were 10.65-10.78 s and flying laps 10.12-10.25 s, against car 1's
+gap follow at 11.74 s in the same simulator and 10.8-12.2 s on the day. Planning at 3.5 m/s², or with a 3.0 online
+ceiling, made contact. Floor ladder F3 comes first (plan section 9).
+
 ## Following traffic on car 2: stage 1
 
 Car 2 follows a confirmed opponent by lowering its speed target while retaining `delay_lqr` steering. Its tuning overlay enables `enable_opponent_following` and disables `enable_opponent_overtake`, because the legacy offset-point pass has no swept-body path check.

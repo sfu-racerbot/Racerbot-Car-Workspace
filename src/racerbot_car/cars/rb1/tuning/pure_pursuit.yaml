@@ -1,0 +1,14 @@
+pure_pursuit_node:
+  ros__parameters:
+    # Car 1's map racer (plan Task 9b, 2026-11-14). Its steering chain was measured on its 2026-11-11 race runs
+    # (car_measure.py on 20261111-153721 and -155542): 3-tick command transport, servo 12/s at 1.75 rad/s.
+    # why: car 1's measured steering delays make pure pursuit weave like car 2's; with pure_pursuit the simulated race-day lap made contact (seed 12346, 0.45 m cross-track)
+    steering_law: delay_lqr
+    # why: car 1's measured servo gain, 12/s (car_measure.py, rb1 20261111-153721 and -155542); the shared value is car 2's 15
+    delay_lqr.servo_gain: 12.0
+    # why: car 1's measured servo slew, 1.75 rad/s (same runs); the shared value is car 2's 2.5
+    delay_lqr.servo_rate: 1.75
+    # why: the offset-point pass hit cars or walls in all 48 of car 2's traffic races and is the same code on car 1; no swept-path planner exists
+    enable_opponent_overtake: false
+    # why: car 1's speed loop coasts through a small overspeed and reaches a lowered command in a median 0.52 s, so it must brake for a car ahead before the emergency tier
+    enable_opponent_following: true

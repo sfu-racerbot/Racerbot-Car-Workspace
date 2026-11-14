@@ -38,7 +38,7 @@ web_dashboard_node:
       - pure_pursuit_node
       - gap_follow_node
     tuning_config_files:
-      - pure_pursuit/config/pure_pursuit.yaml|racerbot_car/cars/rb1/calibration/pure_pursuit.yaml
+      - pure_pursuit/config/pure_pursuit.yaml|racerbot_car/cars/rb1/calibration/pure_pursuit.yaml|racerbot_car/cars/rb1/tuning/pure_pursuit.yaml
       - gap_follow/config/gap_follow.yaml|racerbot_car/cars/rb1/calibration/gap_follow.yaml
 
     # The only process names the stop panel may end. The actuation path

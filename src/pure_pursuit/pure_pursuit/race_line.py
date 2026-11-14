@@ -371,9 +371,47 @@ def load_params(car_id=None, supervisor_config=None) -> dict:
     return values
 
 
+ADOPTED_FILES = ('map.yaml', 'raceline_raw.csv')
+OPTIONAL_ADOPTED_FILES = ('start_pose.yaml',)
+
+
+def adopt_run_dir(source: Path, target: Path, car_id: str) -> list:
+    """Start ``target`` from another mapping run's course: copy its map (yaml and image), its recorded path
+    (``raceline_raw.csv``) and its start pose, nothing it built for its own car (``raceline_profiled.csv`` carries
+    that car's limits). ``target`` must not exist or must be empty, so no run is ever overwritten. Writes
+    ``adopted_from.yaml`` naming the source. Returns the copied file names. The line is then rebuilt for
+    ``car_id`` by main(), with that car's layered limits (docs/racing-autonomy.md#racing-on-another-cars-map)."""
+    import shutil
+    import yaml
+    source, target = Path(source), Path(target)
+    if source.resolve() == target.resolve():
+        raise ValueError('--from-run-dir and --run-dir are the same directory')
+    missing = [name for name in ADOPTED_FILES if not (source / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f'{source} has no {", ".join(missing)}: not a mapping run directory')
+    meta = yaml.safe_load((source / 'map.yaml').read_text())
+    image = meta.get('image') if isinstance(meta, dict) else None
+    if not isinstance(image, str) or Path(image).name != image or not (source / image).is_file():
+        raise FileNotFoundError(f'{source}/map.yaml names no image beside it ({image!r})')
+    if target.exists() and any(target.iterdir()):
+        raise FileExistsError(f'{target} is not empty: choose a new directory')
+    target.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for name in (*ADOPTED_FILES, image, *OPTIONAL_ADOPTED_FILES):
+        if (source / name).is_file():
+            shutil.copy2(source / name, target / name)
+            copied.append(name)
+    (target / 'adopted_from.yaml').write_text(yaml.safe_dump(
+        dict(source=str(source.resolve()), car=car_id, files=copied), sort_keys=False))
+    return copied
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', required=True, type=Path)
+    parser.add_argument('--from-run-dir', type=Path,
+                        help="another mapping run (another car's, typically) to take the map and recorded path from; "
+                             '--run-dir must then be new or empty, and the line is built for --car')
     parser.add_argument('--car', help='Car ID (default: current car).')
     parser.add_argument('--config', type=Path, help='Supervisor base YAML, before car calibration.')
     parser.add_argument('--mode',
@@ -385,6 +423,10 @@ def main(argv=None) -> int:
     for name in overrides:
         parser.add_argument('--' + name.replace('_', '-'), type=float)
     args = parser.parse_args(argv)
+    if args.from_run_dir is not None:
+        from racerbot_car.identity import current_car_id
+        copied = adopt_run_dir(args.from_run_dir, args.run_dir, args.car or current_car_id())
+        print(f'adopted {", ".join(copied)} from {args.from_run_dir} into {args.run_dir}')
     values = load_params(args.car, args.config)
     values.update({key: getattr(args, name) for name, key in overrides.items()
                    if getattr(args, name) is not None})
