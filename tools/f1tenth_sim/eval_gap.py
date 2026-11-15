@@ -183,11 +183,11 @@ def _reverse_laps(plant) -> float:
 
 def run_track(track: str, params: dict, seed: int, timeout_s: float,
               reverse: bool = False, calibration=None, car_id=None, trace=None,
-              max_laps: int = 1) -> dict:
+              max_laps: int = 1, grip_scale: float | None = None) -> dict:
     """``max_laps`` laps of ``track`` (default one, from a standing start). ``reverse`` starts facing
     backwards, so the indoor layouts (all counter-clockwise) get exercised with right turns.
     ``lap_times_s`` lists each completed lap's own time: the first includes the standing start, the
-    rest are flying laps."""
+    rest are flying laps. ``grip_scale`` scales the floor's calibrated grip (FidelityPlant.set_grip_scale)."""
     if max_laps < 1:
         raise ValueError("max_laps must be at least 1")
     if reverse and max_laps != 1:
@@ -197,6 +197,8 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
     start = np.array([[line.xs[0], line.ys[0],
                        line.yaws[0] + (math.pi if reverse else 0.0)]], dtype=float)
     obs, _ = plant.reset(start)
+    if grip_scale is not None:      # a slicker or grippier floor than calibrated, from the start (#74)
+        plant.set_grip_scale(grip_scale)
     lidar = plant.env.unwrapped.sim.scan_sims[0]
     # Use the config's lidar for geometry: angle_min/increment come from the env.
     class _Lidar:
