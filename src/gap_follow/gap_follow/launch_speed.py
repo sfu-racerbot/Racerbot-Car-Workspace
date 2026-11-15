@@ -70,14 +70,15 @@ TIME_TRIAL = {'aim_depth_bias': 1.0, 'max_lateral_accel': 3.0,
               'enable_opponent_awareness': False}
 
 
-#: Per-car additions to TIME_TRIAL (2026-11-14). Car 2: a softer steering gain and a faster command
-#: slew -- 2-7% faster on 14 of 16 simulator courses with zero contact (race-day course 11.00 -> 10.78 s
-#: standing, 10.18 -> 9.88 s flying; asb_sharp +0.4%, min clearance 0.150 -> 0.100 m there),
-#: tools/run_analysis/results/2026-11-14-gap-follow-pace.md. Car 1 keeps the shared values: the same
-#: change made contact on three courses with its slower servo (1.75 rad/s) and 0.33 rad steering limit.
-TIME_TRIAL_BY_CAR = {'rb2': {'steering_gain': 0.8, 'max_steering_rate': 4.0}}
+#: Per-car additions to TIME_TRIAL. None today. Car 2's steering_gain 0.8 / max_steering_rate 4.0
+#: (2026-11-14, #71) was 2-7% faster on its own suite but failed the floor matrix (2026-11-15,
+#: tools/f1tenth_sim/floor_matrix.py, 12 courses x {own, race-day floor} x grip 0.85/1.0/1.15 x 3 seeds):
+#: new contacts on both 10-30 courses and new stalls on 06a/06b on the race-day floor, clearance down
+#: 0.15 -> 0.10 m on the race-day course; tools/run_analysis/results/2026-11-14-gap-follow-pace.md.
+TIME_TRIAL_BY_CAR = {}
 
 
 def time_trial_overrides(car_id):
-    """time_trial:=true's parameter overrides for ``car_id``: TIME_TRIAL plus that car's additions."""
-    return {**TIME_TRIAL, **TIME_TRIAL_BY_CAR.get(car_id, {})}
+    """time_trial:=true's parameter overrides for ``car_id``: TIME_TRIAL plus that car's additions. The time
+    trial's refusal of opponent awareness always wins: a time trial is one car alone."""
+    return {**TIME_TRIAL, **TIME_TRIAL_BY_CAR.get(car_id, {}), 'enable_opponent_awareness': False}
