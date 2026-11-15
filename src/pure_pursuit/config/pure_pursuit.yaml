@@ -376,6 +376,18 @@ pure_pursuit_node:
     pass_speed_uncertainty: 0.5  # m/s added to the car's measured speed while it is out of sight
     pass_clear_margin: 0.5   # m -- worst-case body lead before moving back across in front of it
     pass_standoff: 2.5       # m -- planner on: follow this far back, so a car that stops dead can be passed
+    # Stopped-car bypass (planner on): a parked car (its from-behind anchor moved < stopped_detect_move over
+    # stopped_detect_sec) is driven round at a crawl on a rollout path (pass_planner.bypass_entry), with the
+    # same stop checks as a pass. docs/racing-autonomy.md, "Stopped-car bypass".
+    enable_stopped_bypass: false
+    stopped_detect_sec: 1.0          # s of sightings over which a parked car's anchor must stay put
+    stopped_detect_move: 0.15        # m -- the anchor's largest move that still counts as parked (noise 0.07-0.08)
+    stopped_release_move: 0.30       # m -- a sighting this far outside the latched footprint: it is moving
+    stopped_speed_bound: 0.1         # m/s -- a latched parked car's speed bound (instead of measured + 0.5)
+    stopped_bypass_max_speed: 1.0    # m/s -- the bypass's speed cap
+    stopped_bypass_wall_margin: 0.06 # m -- planning margin to walls while bypassing (keep-going tier 0.05)
+    stopped_bypass_car_margin: 0.06  # m -- planning margin to the parked car's box (keep-going tier 0.04)
+    stopped_bypass_steering_headroom: 0.95   # share of the steering limit a crawl path may need
     opponent_min_width: 0.15          # meters -- narrower than this is noise/a thin post, not a car
     opponent_max_width: 0.7           # meters -- wider than this is treated as a wall, not a car
     opponent_cluster_gap: 0.3         # meters -- a range jump bigger than this splits one cluster into two

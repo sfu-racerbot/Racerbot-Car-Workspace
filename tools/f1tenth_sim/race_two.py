@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 from collections import Counter
 import csv
 import hashlib
@@ -37,7 +38,7 @@ METHODS = {
     '_sanitized_window', '_emergency_escape',
     '_pass_reset_state', '_pass_flank_clear', '_pass_limits', '_pass_line_frame', '_pass_walls', '_pass_tracking_input',
     '_pass_enter_abort', '_pass_opponent', '_local_pass_update', '_pass_reset_after', '_pass_observe',
-    '_following_reserve',
+    '_following_reserve', '_pass_stopped',
 }
 
 
@@ -58,7 +59,7 @@ def node_decisions():
     adapter = ast.ClassDef(name='Decisions', bases=[], keywords=[], body=methods, decorator_list=[])
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0),
                               tracker, adapter], type_ignores=[])
-    namespace = dict(math=math, np=np, racing_math=racing_math, following=following,
+    namespace = dict(math=math, np=np, dataclasses=dataclasses, racing_math=racing_math, following=following,
                      pass_completion=pass_completion, pass_planner=pass_planner, tracking_laws=tracking_laws)
     exec(compile(ast.fix_missing_locations(module), str(NODE), 'exec'), namespace)
     return namespace['Decisions'], namespace['OpponentTracker']
@@ -68,7 +69,7 @@ Decisions, OpponentTracker = node_decisions()
 
 
 class NodeDecisions(Decisions):
-    def __init__(self, plan, lidar, expected_ranges, wall_distance, params):
+    def __init__(self, plan, lidar, expected_ranges, wall_distance, params, walls_many=None):
         self.__dict__.update(params)
         self.xy, self.seg_len, self.speed_profile = plan.xy, plan.seg_len, plan.speed
         self.num_waypoints = len(plan.xy)
@@ -82,6 +83,8 @@ class NodeDecisions(Decisions):
             max_reverse_speed=params['opponent_max_reverse_speed'], max_speed=params['opponent_max_speed'],
             min_wall_distance=params['opponent_min_wall_distance'])
         self.opponent_wall_distance = SimpleNamespace(at=wall_distance)
+        if walls_many is not None:
+            self.opponent_wall_distance.at_many = walls_many
         self.map_ray_caster = SimpleNamespace(expected_ranges=expected_ranges)
         self.lidar = lidar
         self.overtake_active, self.overtake_side = False, 1
@@ -319,6 +322,17 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                                         scan_sim.orig_c, scan_sim.orig_s, scan_sim.map_height,
                                         scan_sim.map_width, scan_sim.map_resolution, scan_sim.dt)
 
+    def walls_at(xs, ys):
+        # wall_at for many points at once: gym's xy_2_rc (laser_models.py) vectorised, same field and clipping.
+        xt, yt = np.asarray(xs, float) - scan_sim.orig_x, np.asarray(ys, float) - scan_sim.orig_y
+        xr = xt * scan_sim.orig_c + yt * scan_sim.orig_s
+        yr = -xt * scan_sim.orig_s + yt * scan_sim.orig_c
+        res = scan_sim.map_resolution
+        bad = (xr < 0) | (xr >= scan_sim.map_width * res) | (yr < 0) | (yr >= scan_sim.map_height * res)
+        c = np.where(bad, -1, (xr / res).astype(int))
+        r = np.where(bad, -1, (yr / res).astype(int))
+        return scan_sim.dt[r, c]
+
     decisions = []
     for i in range(count):
         def expected(x, y, yaw, angles, index=i):
@@ -329,7 +343,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
         if i == 0 and pass_planner_enabled:
             agent_params.update(enable_local_pass_planner=True, enable_opponent_overtake=False)
         decisions.append(NodeDecisions(plan if i == 0 else opp_plan, lidar, expected, wall_at,
-                                       agent_params if i == 0 else dict(opp_params)))
+                                       agent_params if i == 0 else dict(opp_params), walls_many=walls_at))
     rows = []
     try:
         for step in range(math.ceil(timeout / rv.CONTROL_DT)):

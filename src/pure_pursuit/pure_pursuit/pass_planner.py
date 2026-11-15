@@ -81,6 +81,7 @@ class Limits:
     max_unseen: float = 1.0           # approved: a sighting within the last second
     spacing: float = 0.10
     horizon: float = 12.0
+    body_grid: tuple = (9, 5)         # body sample points, along x across; finer = less slack in build()
 
 
 def keeping(limits):
@@ -211,11 +212,20 @@ def lateral_profile(s, d0, target, shift_out, s_return, shift_back):
 
 def body_points(limits):
     rear = (limits.wheelbase - limits.length) / 2
-    gx, gy = np.meshgrid(np.linspace(rear, rear + limits.length, 9),
-                         np.linspace(-limits.width / 2, limits.width / 2, 5))
+    nx, ny = limits.body_grid
+    gx, gy = np.meshgrid(np.linspace(rear, rear + limits.length, nx),
+                         np.linspace(-limits.width / 2, limits.width / 2, ny))
     # Any body point is within half a cell diagonal of a sample point.
-    slack = math.hypot(limits.length / 16, limits.width / 8)
+    slack = math.hypot(limits.length / (2 * (nx - 1)), limits.width / (2 * (ny - 1)))
     return gx.ravel(), gy.ravel(), slack
+
+
+def build_slack(limits, curvature):
+    """What build() subtracts from a sample's wall clearance for a path of this curvature: the body grid's
+    slack, half a sample step and the body's swing over half a step."""
+    _, _, slack = body_points(limits)
+    radius = math.hypot(limits.length, limits.width / 2)
+    return slack + limits.spacing / 2 + radius * abs(curvature) * limits.spacing / 2
 
 
 def build(line, s0, d, mode, limits, walls, *, side=0, target=0.0):
@@ -464,6 +474,58 @@ class Manoeuvre:
         ret = None if not math.isfinite(self.s_return) else line.wrap(self.s_return - self.s_start)
         return lateral_profile(s_rel, self.d_start, self.target, self.out, ret, self.back)
 
+    def held(self):
+        """The same manoeuvre with no shift back: it holds its offset."""
+        return replace(self, s_return=math.inf)
+
+
+@dataclass(frozen=True)
+class Bypass:
+    """A stopped car's bypass: a crawl path found by rollout (crawl_rollout), anchored to the line once as offsets
+    ``d`` at arcs ``s_rel`` past ``s_start``, then a smooth shift back to the line over ``back``.
+
+    The same interface as Manoeuvre, so manoeuvre_plan, build and every stop check treat it unchanged.
+    """
+    s_start: float
+    s_rel: tuple
+    d: tuple
+    back: float
+    side: int
+    target: float
+
+    @property
+    def d_start(self):
+        return self.d[0]
+
+    @property
+    def out(self):
+        return self.s_rel[-1]
+
+    @property
+    def s_return(self):
+        return self.s_start + self.s_rel[-1]
+
+    def lateral(self, s_abs, line):
+        from scipy.interpolate import CubicSpline
+        r = np.maximum(line.wrap(np.asarray(s_abs, float) - self.s_start), 0.0)
+        end = self.s_rel[-1]
+        # A C2 spline through the rollout's points: linear interpolation would put a curvature spike at each
+        # point, which build() reads as unsteerable.
+        spline = CubicSpline(self.s_rel, self.d, bc_type='natural')
+        d = spline(np.clip(r, 0.0, end))
+        if math.isfinite(self.back):
+            # Back to the line by a quintic Hermite that starts with the path's own offset and slope (no kink
+            # where the path ends) and ends on the line with zero slope and curvature.
+            t = np.clip((r - end) / self.back, 0.0, 1.0)
+            h0 = 1 - 10 * t ** 3 + 15 * t ** 4 - 6 * t ** 5
+            h1 = t - 6 * t ** 3 + 8 * t ** 4 - 3 * t ** 5
+            ret = self.d[-1] * h0 + float(spline(end, 1)) * self.back * h1
+            d = np.where(r > end, ret, d)
+        return d
+
+    def held(self):
+        return replace(self, back=math.inf)
+
 
 def nominal_speed(line, s0, ahead=10.0):
     """The line's mean profile speed over the next `ahead` metres: the pace a pass runs at."""
@@ -515,8 +577,7 @@ def manoeuvre_plan(line, pose, speed, manoeuvre, walls, limits, *, mode, hold=Fa
     if not math.isfinite(s0):
         return None
     if hold:
-        m = Manoeuvre(manoeuvre.s_start, manoeuvre.d_start, manoeuvre.target, manoeuvre.out,
-                      math.inf, manoeuvre.back, manoeuvre.side)
+        m = manoeuvre.held()
         ahead = max(0.0, line.wrap(manoeuvre.s_start + manoeuvre.out - s0))
     else:
         m = manoeuvre
@@ -630,3 +691,149 @@ def explain(plan, speed, opponent, line, limits):
         if _overlaps(plan, int(np.flatnonzero(reached)[-1]), math.inf, opponent, line, limits):
             return 'stopped car reaches the stopped pose'
     return ''
+
+
+CAR_BUFFER = 0.02
+
+
+def crawl_rollout(line, pose, opponent, walls, limits, *, levels=5, segments=None, seg=0.5, step=None, beam=40,
+                  crawl=1.0, rate=2.5, past=0.3):
+    """A crawl path round a stopped car, or None.
+
+    Beam search over piecewise-constant steering: ``segments`` pieces of ``seg`` metres (None: enough to clear
+    the box's front along the line from here, plus two), each one of ``levels``
+    steering angles across the usable range (steering_headroom of the limit), the rack slewing at ``rate`` rad/s
+    while crawling at ``crawl`` m/s, integrated as a kinematic bicycle about the rear axle every ``step`` metres
+    (None: the plan's sample spacing).
+    A rollout survives while every body point clears the walls by wall_margin plus build()'s sampling slack, and
+    its body's bounding box clears the opponent's reachable box (opponent_box, full reach) as _overlaps() judges
+    it, in the frame of the line's tangent at the box; it succeeds once the
+    rear face is ``past`` metres beyond the box's front with the heading within 0.6 rad of the line's. Of the
+    successes the one with the most clearance wins. Returns the rear-axle points (n x 2), the first being ``pose``.
+    The shapes the shift-and-hold manoeuvre allows (a constant offset, ramps of at least min_shift) do not fit
+    beside a car parked in a bend 1-2 m ahead; on the 2026-11-11 course every stall seed has such a path.
+    """
+    # One rollout pose per plan sample (None: limits.spacing), so build() checks the poses checked here.
+    step = limits.spacing if step is None else step
+    lo, hi, half = opponent_box(opponent, math.inf, limits)
+    if not (math.isfinite(lo) and math.isfinite(hi)):
+        return None
+    sc = (lo + hi) / 2
+    cx, cy = line.point(np.array([sc]), np.array([opponent.lateral]))[0]
+    h = float(line.heading(np.array([sc]))[0])
+    ch, sh, half_len = math.cos(h), math.sin(h), (hi - lo) / 2
+    gx, gy, _ = body_points(limits)
+    rear = (limits.wheelbase - limits.length) / 2
+    # The rollout charges what build() will, so a path it finds survives build()'s check.
+    wall_need = limits.wall_margin + build_slack(limits, math.tan(limits.steering * limits.steering_headroom)
+                                                 / limits.wheelbase)
+    # 85% of what build() allows: at a crawl the rack reaches its angle within a sample, and build()'s
+    # three-point curvature estimate overshoots that step by ~13% (1.18 against 1.04 1/m, 2026-11-15).
+    steer = np.linspace(-1.0, 1.0, levels) * limits.steering * limits.steering_headroom * 0.85
+    slew = rate * step / crawl
+    # state rows: x, y, yaw, delta, clearance; paths as lists of points
+    x0, y0, yaw0 = (float(v) for v in pose)
+    if segments is None:
+        need = (cx - x0) * ch + (cy - y0) * sh + half_len + past - rear
+        segments = int(min(12, max(2, math.ceil(need / seg) + 2)))
+    states = [(x0, y0, yaw0, 0.0, math.inf, [(x0, y0)])]
+    wins = []
+    n_sub = max(1, int(round(seg / step)))
+    for _ in range(segments):
+        grown = []
+        for (x, y, yaw, delta, clear, path) in states:
+            for target in steer:
+                grown.append([x, y, yaw, delta, clear, list(path), target, True])
+        if not grown:
+            break
+        X = np.array([g[0] for g in grown]); Y = np.array([g[1] for g in grown]); YAW = np.array([g[2] for g in grown])
+        D = np.array([g[3] for g in grown]); C = np.array([g[4] for g in grown]); T = np.array([g[6] for g in grown])
+        alive = np.ones(len(grown), bool); won = np.zeros(len(grown), bool)
+        for _ in range(n_sub):
+            D = D + np.clip(T - D, -slew, slew)
+            X = X + np.cos(YAW) * step
+            Y = Y + np.sin(YAW) * step
+            YAW = YAW + np.tan(D) / limits.wheelbase * step
+            c, sn = np.cos(YAW)[:, None], np.sin(YAW)[:, None]
+            px = X[:, None] + c * gx - sn * gy
+            py = Y[:, None] + sn * gx + c * gy
+            wall = np.asarray(walls(px.ravel(), py.ravel()), float).reshape(px.shape)
+            wall = np.where(np.isfinite(wall), wall, -math.inf).min(axis=1)
+            # The car test _overlaps() applies: our body's bounding box in the line's frame (here the box's
+            # frame, the line's tangent at the box) against the box, with long_margin along and car_margin across.
+            rel = YAW - h
+            centre = rear + limits.length / 2
+            lxc = (X + np.cos(YAW) * centre - cx) * ch + (Y + np.sin(YAW) * centre - cy) * sh
+            lyc = -(X + np.cos(YAW) * centre - cx) * sh + (Y + np.sin(YAW) * centre - cy) * ch
+            long_half = limits.length / 2 * np.abs(np.cos(rel)) + limits.width / 2 * np.abs(np.sin(rel))
+            lat_half = limits.width / 2 * np.abs(np.cos(rel)) + limits.length / 2 * np.abs(np.sin(rel))
+            car = np.maximum(np.abs(lxc) - (half_len + long_half + limits.long_margin),
+                             np.abs(lyc) - (half + lat_half + limits.car_margin))
+            # 2 cm for the spline through these points (and its headings) differing from the rollout itself.
+            ok = alive & ~won & (wall >= wall_need) & (car >= CAR_BUFFER)
+            alive = alive & (won | ok)
+            C = np.where(ok, np.minimum(C, np.minimum(wall - wall_need, car - CAR_BUFFER)), C)
+            for i in np.flatnonzero(ok):
+                grown[i][5].append((float(X[i]), float(Y[i])))
+            rear_along = (X - cx) * ch + (Y - cy) * sh + rear
+            heading_ok = np.abs((YAW - h + math.pi) % (2 * math.pi) - math.pi) < 0.6
+            won = won | (ok & (rear_along >= half_len + past) & heading_ok)
+        for i in np.flatnonzero(won & alive):
+            wins.append((float(C[i]), grown[i][5]))
+        keep = np.flatnonzero(alive & ~won)
+        # Prune by clearance within 0.1 m bins of lateral offset from the box: a path already committed to going
+        # round has less clearance than one still heading straight at it, and must not be pruned for that.
+        lateral = (-(X - cx) * sh + (Y - cy) * ch)[keep]
+        bins = np.round(lateral / 0.1).astype(int)
+        order = keep[np.lexsort((-C[keep], bins))]
+        ranked, seen = [], {}
+        for i, b in zip(order, np.round((-(X[order] - cx) * sh + (Y[order] - cy) * ch) / 0.1).astype(int)):
+            if seen.get(b, 0) < max(2, beam // 10):
+                seen[b] = seen.get(b, 0) + 1
+                ranked.append(i)
+        keep = np.asarray(sorted(ranked, key=lambda i: -C[i])[:beam], int)
+        states = [(float(X[i]), float(Y[i]), float(YAW[i]), float(D[i]), float(C[i]), grown[i][5]) for i in keep]
+    if not wins:
+        return None
+    return np.asarray(max(wins, key=lambda w: w[0])[1], float)
+
+
+def bypass_entry(line, pose, speed, opponent, walls, limits, *, nominal):
+    """entry() for a stopped car: the crawl_rollout path anchored as a Bypass, then the same checks as a pass
+    (whole manoeuvre wall-clear, hold plan clear of the car's full reach, a checked stop at a crawl).
+    Returns (plan, manoeuvre, speed_cap, reason)."""
+    path = crawl_rollout(line, pose, opponent, walls, limits)
+    if path is None:
+        return None, None, None, 'bypass: no crawl path round the stopped car'
+    s0, _ = line.frenet(pose[0], pose[1])
+    rel, ds = [0.0], []
+    hint = None
+    for x, y in path:
+        s, d = line.frenet(x, y)
+        r = line.wrap(s - s0)
+        if not ds:
+            ds.append(d)
+            continue
+        if r > rel[-1] + 1e-3:
+            rel.append(r)
+            ds.append(d)
+    if len(rel) < 3:
+        return None, None, None, 'bypass: crawl path does not advance along the line'
+    k = int(np.argmin(np.abs(np.asarray(rel) - line.wrap(opponent.rear_arc - s0))))
+    target = float(ds[k])
+    back = shift_length(ds[-1], max(nominal, 1.0), limits)
+    m = Bypass(float(s0), tuple(rel), tuple(ds), back, 1 if target > opponent.lateral else -1, target)
+    whole = manoeuvre_plan(line, pose, speed, m, walls, limits, mode='pass')
+    if whole is None:
+        return None, None, None, 'bypass: no plan along the crawl path'
+    if np.any(whole.wall < limits.wall_margin):
+        j = int(np.argmax(whole.wall < limits.wall_margin))
+        what = 'wall' if math.isfinite(whole.wall[j]) else 'unsteerable'
+        return None, None, None, f'bypass: {what} {whole.dist[j]:.1f}m along the crawl path'
+    plan = manoeuvre_plan(line, pose, speed, m, walls, limits, mode='pass', hold=True)
+    if math.isfinite(box_free_distance(plan, opponent, line, limits)):
+        return None, None, None, "bypass: the crawl path meets the car's full-reach box"
+    v = safe_speed(plan, opponent, line, limits, speed)
+    if v is None or v < 0.3:
+        return None, None, None, 'bypass: no checked stop at a crawl'
+    return plan, m, v, ''
