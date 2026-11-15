@@ -54,7 +54,8 @@ def test_static_every_launch_naming_a_split_config_calls_layered_or_car_params()
         source = path.read_text()
         strings = {n.value for n in ast.walk(ast.parse(source))
                    if isinstance(n, ast.Constant) and isinstance(n.value, str)}
-        if strings & SPLIT and 'layered(' not in source and 'car_params(' not in source:
+        # effective_config() is racerbot_car.layers' layered read (it calls layered() itself).
+        if strings & SPLIT and not any(c in source for c in ('layered(', 'car_params(', 'effective_config(')):
             missing.append(str(path.relative_to(ROOT)))
     assert not missing, missing
 
