@@ -351,6 +351,16 @@ class PurePursuitNode(Node):
         self.declare_parameter('pass_speed_uncertainty', 0.5)
         self.declare_parameter('pass_clear_margin', 0.5)
         self.declare_parameter('pass_standoff', 2.5)
+        # Stopped-car bypass (planner on): a crawl path round a parked car, pass_planner.bypass_entry.
+        self.declare_parameter('enable_stopped_bypass', False)
+        self.declare_parameter('stopped_detect_sec', 1.0)
+        self.declare_parameter('stopped_detect_move', 0.15)
+        self.declare_parameter('stopped_release_move', 0.30)
+        self.declare_parameter('stopped_speed_bound', 0.1)
+        self.declare_parameter('stopped_bypass_max_speed', 1.0)
+        self.declare_parameter('stopped_bypass_wall_margin', 0.06)
+        self.declare_parameter('stopped_bypass_car_margin', 0.06)
+        self.declare_parameter('stopped_bypass_steering_headroom', 0.95)
         self.declare_parameter('following_brake', 3.0)
         self.declare_parameter('following_response_sec', 0.45)
         self.declare_parameter('following_reserve', 0.65)
@@ -613,6 +623,26 @@ class PurePursuitNode(Node):
         self.pass_speed_uncertainty = float(self.get_parameter('pass_speed_uncertainty').value)
         self.pass_clear_margin = float(self.get_parameter('pass_clear_margin').value)
         self.pass_standoff = float(self.get_parameter('pass_standoff').value)
+        self.enable_stopped_bypass = bool(self.get_parameter('enable_stopped_bypass').value)
+        for name in ('stopped_detect_sec', 'stopped_detect_move', 'stopped_release_move', 'stopped_speed_bound',
+                     'stopped_bypass_max_speed', 'stopped_bypass_wall_margin', 'stopped_bypass_car_margin',
+                     'stopped_bypass_steering_headroom'):
+            setattr(self, name, float(self.get_parameter(name).value))
+        if self.enable_stopped_bypass:
+            if not self.enable_local_pass_planner:
+                raise ValueError('enable_stopped_bypass needs enable_local_pass_planner')
+            keep = pass_planner.Limits()
+            checks = (
+                ('stopped_detect_sec', 0.5, 3.0), ('stopped_detect_move', 0.05, 0.3),
+                ('stopped_release_move', self.stopped_detect_move, 1.0), ('stopped_speed_bound', 0.05, 0.5),
+                ('stopped_bypass_max_speed', 0.3, 1.5),
+                ('stopped_bypass_wall_margin', keep.keep_wall_margin, keep.wall_margin),
+                ('stopped_bypass_car_margin', keep.keep_car_margin, keep.wall_margin),
+                ('stopped_bypass_steering_headroom', 0.5, 1.0))
+            for name, lo, hi in checks:
+                value = getattr(self, name)
+                if not (math.isfinite(value) and lo <= value <= hi):
+                    raise ValueError(f'{name} must be in [{lo}, {hi}], got {value}')
         if self.enable_local_pass_planner:
             # Planner off: none of these constrain anything, so none may
             # refuse a configuration main accepted (review 2026-11-08).
@@ -3122,6 +3152,9 @@ class PurePursuitNode(Node):
         self._opp_seen = None
         self._pass_line = None
         self._pass_flank_since = None   # since when the rejoin flank has been seen clear
+        self._stop_history = []         # (time, rear arc, lateral) of from-behind anchors, for the stopped latch
+        self._stop_latch = None         # (rear arc, lateral) where the car ahead was latched as parked
+        self._bypass_next_try = 0.0     # a failed bypass search is not repeated before this time
 
     def _following_reserve(self):
         """Stage-1 following reserve; with the planner on, the pass standoff.
@@ -3140,13 +3173,65 @@ class PurePursuitNode(Node):
             return max(self.following_reserve, self.pass_standoff)
         return self.following_reserve
 
-    def _pass_limits(self):
-        return pass_planner.Limits(
+    def _pass_limits(self, stopped=False):
+        limits = pass_planner.Limits(
             wheelbase=self.wheelbase, length=self.car_length, width=self.car_width,
             steering=self.max_steering_angle, lateral_accel=self.max_lateral_accel,
             brake=self.following_brake, response=self.following_response_sec,
             max_offset=min(0.85, self.max_cross_track_error - 0.15),
             clear_margin=self.pass_clear_margin)
+        if stopped:
+            # A parked car is passed at a crawl, where tracking error is small: plan nearer the keep-going tier
+            # and use more of the steering. The keep-going tier itself is unchanged.
+            limits = dataclasses.replace(limits, wall_margin=self.stopped_bypass_wall_margin,
+                             car_margin=self.stopped_bypass_car_margin,
+                             long_margin=max(self.stopped_bypass_car_margin, limits.keep_long_margin),
+                             steering_headroom=self.stopped_bypass_steering_headroom,
+                             spacing=0.05, body_grid=(17, 9))
+        return limits
+
+    def _pass_stopped(self, line, now, point):
+        """Whether the car ahead is parked, latched (enable_stopped_bypass).
+
+        Its tracked speed is no use here: a parked car's centroid speed swings +-0.5 m/s (race_two stalled seeds,
+        2026-11-15). It is parked once its from-behind anchor has moved less than stopped_detect_move over
+        stopped_detect_sec of continuous sightings, and stays latched, sighted from any side, until a sighting
+        falls more than stopped_release_move outside the latched car's footprint (it has moved), or, idle, it is
+        lost for the lost timeout.
+        """
+        if not self.enable_stopped_bypass or self._opp_seen is None or self._opp_anchor is None:
+            self._stop_history, self._stop_latch = [], None
+            return False
+        age = now - self._opp_seen
+        length = pass_planner.Limits().opponent_length
+        if self._stop_latch is not None:
+            rear, lateral = self._stop_latch
+            moved = False
+            if point is not None:
+                s_o, d_o = line.frenet(point[0], point[1])
+                if math.isfinite(s_o) and math.isfinite(d_o):
+                    along = line.wrap(s_o - rear)
+                    moved = (not -self.stopped_release_move <= along <= length + self.stopped_release_move
+                             or abs(d_o - lateral) > self.car_width / 2 + self.stopped_release_move)
+            if moved or (self._pass_state == 'idle' and age > self.opponent_lost_timeout_sec):
+                self._stop_history, self._stop_latch = [], None
+                return False
+            return True
+        rear, lateral, extra = self._opp_anchor
+        if extra != 0.0 or age > 0.2:
+            self._stop_history = []
+            return False
+        if not self._stop_history or self._stop_history[-1][0] != now:
+            self._stop_history.append((now, rear, lateral))
+        self._stop_history = [h for h in self._stop_history if now - h[0] <= self.stopped_detect_sec + 0.2]
+        first = self._stop_history[0]
+        if now - first[0] < self.stopped_detect_sec:
+            return False
+        span = max(math.hypot(line.wrap(r - rear), lat - lateral) for _, r, lat in self._stop_history)
+        if span < self.stopped_detect_move:
+            self._stop_latch = (rear, lateral)
+            return True
+        return False
 
     def _pass_line_frame(self):
         if self._pass_line is None or self._pass_line[0] is not self.xy:
@@ -3262,9 +3347,11 @@ class PurePursuitNode(Node):
                 lateral = self._opp_anchor[1]
             self._opp_anchor = ((s_o - self.car_length) % line.total, lateral, self.car_length)
 
-    def _pass_opponent(self, now):
+    def _pass_opponent(self, now, stopped=False):
         rear, lateral, extra = self._opp_anchor
         bound = max(0.0, self._opp_speed or 0.0) + self.pass_speed_uncertainty
+        if stopped:
+            bound = self.stopped_speed_bound    # latched parked; unseen time still grows its box
         return pass_planner.StalledOpponent(rear, lateral, bound, max(0.0, now - self._opp_seen), extra)
 
     def _local_pass_update(self, nearest_idx, now, point):
@@ -3285,15 +3372,17 @@ class PurePursuitNode(Node):
         if not (math.isfinite(s_ego) and math.isfinite(speed)):
             return
         self._pass_observe(line, s_ego, now, point)
+        stopped = self._pass_stopped(line, now, point)
+        limits = self._pass_limits(stopped)
 
         state = self._pass_state
         if state == 'idle':
             self._pass_plan, self._pass_hold_steering = None, False
             self.overtake_active = False
-            if (point is None or self._opp_speed is None or self._opp_accelerating
+            if (point is None or self._opp_speed is None or (self._opp_accelerating and not stopped)
                     or self._opp_anchor[2] != 0.0 or now < self._pass_retry_after):
                 return
-            opponent = self._pass_opponent(now)
+            opponent = self._pass_opponent(now, stopped)
             front = s_ego + (self.wheelbase + self.car_length) / 2
             gap = line.wrap(opponent.rear_arc - front)
             # Following sits pass_standoff back; look a metre beyond that.
@@ -3306,6 +3395,14 @@ class PurePursuitNode(Node):
                 return
             plan, manoeuvre, cap, why = pass_planner.entry(line, pose, speed, opponent, walls, limits,
                                                            nominal=nominal)
+            if plan is None and stopped and now >= self._bypass_next_try:
+                plan, manoeuvre, cap, bypass_why = pass_planner.bypass_entry(
+                    line, pose, speed, opponent, walls, limits, nominal=nominal)
+                why = f'{why}; {bypass_why}' if plan is None else why
+                if plan is None:
+                    self._bypass_next_try = now + 0.5   # a beam search; a parked car does not change
+                else:
+                    cap = min(cap, self.stopped_bypass_max_speed)
             if plan is None:
                 self.last_opponent_status += f'; no checked pass ({why})'
                 return
@@ -3318,7 +3415,7 @@ class PurePursuitNode(Node):
                 f"checked stop at {cap:.2f}m/s")
             return
 
-        opponent = self._pass_opponent(now)
+        opponent = self._pass_opponent(now, stopped)
         ego_rear = s_ego + (self.wheelbase - self.car_length) / 2
         if state == 'pass':
             lead = pass_planner.worst_case_lead(ego_rear, opponent, line, limits)
@@ -3338,6 +3435,8 @@ class PurePursuitNode(Node):
                 if cap is not None:
                     # Alongside a car, close on it at no more than max_closing.
                     cap = min(cap, opponent.speed_bound + limits.max_closing)
+                    if isinstance(self._pass_manoeuvre, pass_planner.Bypass):
+                        cap = min(cap, self.stopped_bypass_max_speed)
                     self._pass_plan, self.follow_speed_cap = plan, cap
                     self.overtake_active = True
                     self.last_opponent_status = (
@@ -3399,6 +3498,13 @@ class PurePursuitNode(Node):
                     and nominal - opponent.speed_bound > 0.3):
                 plan, manoeuvre, cap, _ = pass_planner.entry(line, pose, speed, opponent, walls, limits,
                                                              nominal=nominal)
+                if plan is None and stopped and now >= self._bypass_next_try:
+                    plan, manoeuvre, cap, _ = pass_planner.bypass_entry(
+                        line, pose, speed, opponent, walls, limits, nominal=nominal)
+                    if plan is None:
+                        self._bypass_next_try = now + 0.5
+                    else:
+                        cap = min(cap, self.stopped_bypass_max_speed)
                 if plan is not None:
                     self._pass_state, self._pass_plan, self._pass_hold_steering = 'pass', plan, False
                     self._pass_manoeuvre, self._pass_started = manoeuvre, now
