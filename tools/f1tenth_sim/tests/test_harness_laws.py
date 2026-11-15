@@ -86,3 +86,35 @@ def test_path_follower_law_failure_commands_zero():
     assert steering == 0.0
     assert speed == 0.0
     assert follower.law_fail_steps == 1
+
+
+def _loop_plan(rv, racing_math):
+    n = 40
+    ang = np.linspace(0, 2 * math.pi, n, endpoint=False)
+    xy = np.column_stack([3.0 * np.cos(ang), 3.0 * np.sin(ang)])
+    return rv.PathPlan(xy=xy, seg_len=racing_math.compute_segment_lengths(xy, closed=True), speed=np.full(n, 1.5))
+
+
+@pytest.mark.parametrize('car', ['rb1', 'rb2'])
+def test_path_follower_builds_the_law_from_the_cars_effective_config(car):
+    """As pure_pursuit_node builds _law_params (2026-11-15): every delay_lqr.* key of the car's effective
+    pure_pursuit.yaml reaches the law, so car 1's tuning overlay (servo_gain 12, servo_rate 1.75) is simulated.
+    Oracle: the effective config itself (racerbot_car.layers), which for rb1 differs from the law's defaults."""
+    import run_validation as rv
+    from pure_pursuit import racing_math
+    from racerbot_car.layers import effective_config
+    want = effective_config('pure_pursuit.yaml', 'pure_pursuit_node', car)
+    law = rv.PathFollower(_loop_plan(rv, racing_math), law_name='delay_lqr', car_id=car).law
+    assert law.params.servo_gain == want['delay_lqr.servo_gain']
+    assert law.params.servo_rate == want['delay_lqr.servo_rate']
+    assert law.params.sensing_delay == want['delay_lqr.sensing_delay']
+    if car == 'rb1':
+        assert (law.params.servo_gain, law.params.servo_rate) == (12.0, 1.75), 'precondition: rb1 overlay'
+
+
+def test_explicit_law_params_still_win_over_the_cars_config():
+    import run_validation as rv
+    from pure_pursuit import racing_math
+    law = rv.PathFollower(_loop_plan(rv, racing_math), law_name='delay_lqr', car_id='rb1',
+                          law_params={'delay_lqr.servo_rate': 2.0}).law
+    assert law.params.servo_rate == 2.0 and law.params.servo_gain == 12.0
