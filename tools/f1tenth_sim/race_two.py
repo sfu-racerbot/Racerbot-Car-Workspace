@@ -226,10 +226,14 @@ def race_metrics(rows, dt, length, laps):
             completed += 1
             pass_armed = False
         stuck += int(-3.0 <= lead < 0.0 and row['ego_command'] < row['profile_speed'] - 0.3)
-        # The striking car in a car-to-car contact is the one behind (lead < 0: us).
+        # The striking car in a car-to-car contact is the one behind: lead wrapped to half a lap (after a car is
+        # lapped its unwrapped lead is a lap or more), lead < 0 is us. A contact with a car under 0.3 m/s (stopped,
+        # stalled) is always ours: it cannot have driven into us.
         if row['car_contact']:
-            ego_struck += int(lead < 0.0)
-            opp_struck += int(lead >= 0.0)
+            wrapped = (lead + length / 2.0) % length - length / 2.0
+            ours = wrapped < 0.0 or row.get('opp_speed', math.inf) < 0.3
+            ego_struck += int(ours)
+            opp_struck += int(not ours)
         for i, key in enumerate(('ego_progress', 'opp_progress')):
             required = length * laps - (row['head_start'] if i else 0.0)
             if finish[i] is None and row[key] >= required:
