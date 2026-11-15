@@ -1561,6 +1561,10 @@ This section describes car 2's course and car 2's runs on 2026-10-30, plus the d
 | Other cars on the track | `ros2 launch gap_follow gap_follow_launch.py` | 21.3-22.1 s |
 | One car, against the clock | `ros2 launch gap_follow gap_follow_launch.py time_trial:=true` | 18.8-19.3 s |
 
+**Escape-arc credit (`swept_clearance_reach`, 2026-11-14, ships 0 = off).** The braking ceiling normally stops the car for whatever its current arc runs into, so approaching a hairpin it brakes for the outer wall the car is about to turn away from. With a reach above 0 it also checks arcs up to that much more steering toward the gap, counts only those the car can hold at its speed (`speed^2 * curvature` within the lateral limit), and charges each the distance driven before the rack gets there (`braking_latency_sec` plus the steering change at `max_steering_rate`); the best of these and today's arcs sets the ceiling (`gap_logic.escape_arc_clearance`). In the simulator, reach 0.1 with car 2's time trial was up to 4.5% faster on 16 courses with no contact; car 1 gained a contact. Simulator only.
+
+**Car 2's time trial also sets `steering_gain` 0.8 and `max_steering_rate` 4.0** (2026-11-14, `gap_follow/launch_speed.py` `TIME_TRIAL_BY_CAR`): 2-7% faster on 14 of 16 simulator courses with no contact; car 1 keeps the shared values, which made contact on three courses with its slower servo. See `tools/run_analysis/results/2026-11-14-gap-follow-pace.md`. Simulator only; never driven.
+
 **Never use `time_trial:=true` with another car on the track.** It turns [opponent awareness](#several-cars-at-once) off, and its aim did much worse with two cars in the simulator: 0 of 12 runs finished on `room_2026_07_27`, with wall contacts.
 
 ### What was wrong

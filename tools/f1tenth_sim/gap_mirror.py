@@ -204,16 +204,22 @@ REQUIRED_PARAMS = frozenset((
     "opponent_follow_memory_sec",
     "opponent_follow_static_radial_speed",
     "opponent_follow_static_tangential_speed",
+    "swept_clearance_reach",
+    "swept_clearance_reach_rate",
 ))
 
 
-STATIC_GATE_PARAMS = ("opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed")
+STATIC_GATE_PARAMS = ("opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed",
+                      # escape-arc credit (2026-11-14): 0 is the behaviour before it existed
+                      "swept_clearance_reach", "swept_clearance_reach_rate")
 
 # Parameters added after the first real-car run of the October 2026 rework,
 # with the value that reproduces the behaviour from before they existed. Lets
 # an older YAML (git show <commit>:src/gap_follow/config/gap_follow.yaml) be
 # replayed against the run it drove -- see tools/run_analysis/replay.py.
 LEGACY_VALUES = {
+    'swept_clearance_reach': 0.0,
+    'swept_clearance_reach_rate': 2.0,
     'enable_imu_impact_stop': False,
     'imu_impact_threshold': 33.7257297468959,
     'imu_impact_min_samples': 1,
@@ -692,13 +698,13 @@ class GapController:
         braking_clearance = forward_clearance
         if p["enable_swept_clearance"]:
             swept_hw = p["car_width"] / 2.0 + p["swept_clearance_margin"]
-            braking_clearance = min(
-                gap_logic.swept_path_clearance(
-                    window, window_valid, beam_angles, curvature, swept_hw,
-                    p["car_length"], p["wheelbase"], p["laser_offset_x"],
-                    p["laser_offset_y"], p["swept_clearance_max_length"])
-                for curvature in (limited_curvature,
-                                  math.tan(steering) / p["wheelbase"]))
+            braking_clearance = gap_logic.escape_arc_clearance(
+                window, window_valid, beam_angles, (desired_steering, steering),
+                p["swept_clearance_reach"], desired_steering, float(current_speed),
+                min(p["max_steering_rate"], p["swept_clearance_reach_rate"]), p["braking_latency_sec"],
+                lateral_limit, swept_hw,
+                p["car_length"], p["wheelbase"], p["laser_offset_x"],
+                p["laser_offset_y"], p["swept_clearance_max_length"], p["max_steering_angle"])
             tel["arc_clear"] = braking_clearance
         clearance_speed = gap_logic.braking_speed_limit(
             braking_clearance, p["forward_stop_clearance"],
