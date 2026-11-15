@@ -512,7 +512,7 @@ gap_follow_node:
     # Escape-arc credit (2026-11-14, rad): the braking ceiling may also count a tighter arc toward the
     # gap, up to this much more steering, that the car can hold at its speed, charged the distance
     # driven before the rack gets there (gap_logic.escape_arc_clearance). 0 = off (the shortest of
-    # the two current arcs, as before).
+    # the two current arcs, as before). Car 2's time trial sets 0.1 (gap_follow/launch_speed.py).
     swept_clearance_reach: 0.0
 
     # --- Arc guard (docs/gap-follow.md#arc-guard) ---

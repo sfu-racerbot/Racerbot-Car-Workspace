@@ -75,7 +75,9 @@ TIME_TRIAL = {'aim_depth_bias': 1.0, 'max_lateral_accel': 3.0,
 #: standing, 10.18 -> 9.88 s flying; asb_sharp +0.4%, min clearance 0.150 -> 0.100 m there),
 #: tools/run_analysis/results/2026-11-14-gap-follow-pace.md. Car 1 keeps the shared values: the same
 #: change made contact on three courses with its slower servo (1.75 rad/s) and 0.33 rad steering limit.
-TIME_TRIAL_BY_CAR = {'rb2': {'steering_gain': 0.8, 'max_steering_rate': 4.0}}
+#: Car 2 also takes swept_clearance_reach 0.1 (escape-arc credit, same date): up to 4.5% faster on 06b and 2%
+#: on 06a and course_2026_10_30, zero contact on all 16 courses; car 1 gained a contact with it.
+TIME_TRIAL_BY_CAR = {'rb2': {'steering_gain': 0.8, 'max_steering_rate': 4.0, 'swept_clearance_reach': 0.1}}
 
 
 def time_trial_overrides(car_id):
