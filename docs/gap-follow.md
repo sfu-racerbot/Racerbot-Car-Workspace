@@ -1561,6 +1561,8 @@ This section describes car 2's course and car 2's runs on 2026-10-30, plus the d
 | Other cars on the track | `ros2 launch gap_follow gap_follow_launch.py` | 21.3-22.1 s |
 | One car, against the clock | `ros2 launch gap_follow gap_follow_launch.py time_trial:=true` | 18.8-19.3 s |
 
+**Car 2's time trial also sets `steering_gain` 0.8 and `max_steering_rate` 4.0** (2026-11-14, `gap_follow/launch_speed.py` `TIME_TRIAL_BY_CAR`): 2-7% faster on 14 of 16 simulator courses with no contact; car 1 keeps the shared values, which made contact on three courses with its slower servo. See `tools/run_analysis/results/2026-11-14-gap-follow-pace.md`. Simulator only; never driven.
+
 **Never use `time_trial:=true` with another car on the track.** It turns [opponent awareness](#several-cars-at-once) off, and its aim did much worse with two cars in the simulator: 0 of 12 runs finished on `room_2026_07_27`, with wall contacts.
 
 ### What was wrong

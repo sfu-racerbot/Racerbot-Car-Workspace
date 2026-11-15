@@ -36,3 +36,35 @@ starts.
 Reproduce: `eval_gap.run_track('car2_course_2026_11_11', params, seed, 90, calibration=with_floor(
 'sfu_course_2026_11_11_rb2', calibration_for_car('rb2')), car_id='rb2', trace=...)` with
 `params = gap_mirror.node_params(car_id='rb2') | TIME_TRIAL`.
+
+## Update (2026-11-14, evening): standing against flying laps, and a car 2 time-trial step
+
+The 11.0 s above is a **standing-start** lap. `eval_gap.run_track(..., max_laps=N)` now reports each lap
+(`lap_times_s`): car 2's flying laps on this course are already **10.10-10.25 s** (median 10.16). Real race-day lap
+times are flying laps, so the 10.6 s target compares against a flying lap; the simulator is optimistic for car 2's
+gap follow, though: its flying mean speed (about 3.0 m/s) is about 10% above the real run's 2.71 m/s (see the
+correction in `2026-11-14-rb2-race-day-agreement.md`). Pace changes are therefore judged by their gain against the
+simulator's own baseline, on both laps.
+
+Advisor's sweep (Fable 5.2, scratch mirror; repo untouched): smoothing the aim or capping on filtered or delivered
+curvature was slower or crashed; the hairpins are grip-limited (yaw rate 1.77 rad/s at full lock whatever the cap).
+What helped: a softer `steering_gain` with a faster command slew.
+
+**Shipped for car 2 only (`launch_speed.TIME_TRIAL_BY_CAR`): `steering_gain` 0.8, `max_steering_rate` 4.0 with
+`time_trial:=true`.** 16-course suite, 3 seeds, 2 laps each (median standing / flying):
+
+| course | baseline | car 2 time trial |
+|---|---|---|
+| car2_course_2026_11_11 (rb2 floor) | 11.00 / 10.18 | 10.78 / 9.88 |
+| indoor_oval, indoor_tight, indoor_wide | 9.28 / 8.35, 8.93 / 8.20, 11.12 / 10.20 | 9.03 / 8.12, 8.70 / 8.05, 10.85 / 10.07 |
+| asb_10000, asb_sharp | 13.65 / 13.03, 13.90 / 13.22 | 13.47 / 12.80, 13.95 / 13.28 |
+| narrow_1p2, narrow_1p0 | 9.38 / 8.62, 9.88 / 9.25 | 9.05 / 8.35, 9.50 / 8.90 |
+| car1_course_2026_10_26 | 10.75 / 10.12 | 10.60 / 10.25 |
+| car2_course_2026_11_06a, _scans | 11.40 / 10.47, 11.35 / 10.60 | 11.12 / 10.40, 11.10 / 10.47 |
+| car2_course_2026_11_06b, _scans | 8.57 / 7.80, 8.53 / 7.67 | 8.40 / 7.62, 8.43 / 7.67 |
+| course_2026_10_30, _scans | 17.30 / 16.25, 16.65 / 15.70 | 16.75 / 15.57, 16.23 / 15.05 |
+| room_2026_07_27 | 6.80 / 5.92 | 6.30 / 5.47 |
+
+Zero contact before and after on every course; minimum clearance on the race-day course 0.150 -> 0.100 m. Two small
+regressions: asb_sharp +0.05 s, car1_course_2026_10_26 flying +0.13 s. Car 1 keeps the shared time trial: the same
+change made contact on course_2026_10_30, its _scans version and asb_sharp with car 1's calibration.
