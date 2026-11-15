@@ -233,6 +233,7 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
     # Per tick, the ids of the tracks marked moving (awareness on only).
     moving_per_tick = []
     lap_marks = []          # sim time at which each lap completed
+    min_chassis_map = math.inf   # the plant's own chassis-to-map clearance, never the controller's view
 
     for step in range(max_steps):
         ego = obs["agent_0"]
@@ -297,6 +298,9 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
             min_forward = min(min_forward, fs)
 
         obs, _r, done, _t, info = plant.step([(steering, cmd_speed)])
+        chassis = plant.chassis_map_clearance(0)
+        if math.isfinite(chassis):
+            min_chassis_map = min(min_chassis_map, chassis)
         while not reverse and float(info["lap_counts"][0]) > len(lap_marks):
             lap_marks.append(float(info["sim_time"]))
         if reverse and _reverse_laps(plant) >= 1.0:
@@ -340,6 +344,8 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
         "stop_reasons": stop_reasons,
         "min_body_clearance_m": (round(min_body_clear, 3)
                                  if math.isfinite(min_body_clear) else None),
+        "min_chassis_map_clearance_m": (round(min_chassis_map, 3)
+                                        if math.isfinite(min_chassis_map) else None),
         "speed_shed_mps": round(speed_shed, 2),
         "hard_brake_ticks": hard_brake_ticks,
         "steering_reversals_per_s": round(reversals, 3),
