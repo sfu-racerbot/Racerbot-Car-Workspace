@@ -74,6 +74,8 @@ A speed-loop refit on this run (`fit_speed_loop.py`, wider grid: accel gain 10, 
 the 1-D replay error by 12-14% against the race-day floor's loop on all three race-day runs (two out of sample), but
 makes the closed-loop simulator faster still (standing 11.0 -> 10.78 s), so it is not adopted on that evidence alone.
 
-So simulator gains for car 2's gap-follow time trial are evidence again, within the 1-3% this agreement allows. The
-real lap time remains unmeasured (no reliable positions); at 27.5 m of true path per simulated lap, the car's 2.72 m/s
-would be about 10.1 s.
+**The real lap, without localisation:** the autocorrelation of `/drive` steering over the 109 s LB hold peaks at a lag of
+9.70 s (r 0.78) and again at 19.40 s, so the car's flying laps were about **9.70 s**, against the simulator's 10.1-10.25
+s. The car drove a shorter path (about 26.5 m at 2.73 m/s, against the simulator's 27.5 m) at about the same speed. For
+the time trial the simulator is therefore 4-5% **slow**, not optimistic. It also means car 2's gap-follow time trial
+(9.70 s) was faster on race day than its map racer (10.05 s flying).
