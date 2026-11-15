@@ -1023,10 +1023,13 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                   max_speed: Optional[float] = None,
                   max_lateral_accel: Optional[float] = None,
                   safety: str = "fallback", laps: int = 1,
-                  steering_limit: float | None = None) -> dict:
+                  steering_limit: float | None = None,
+                  grip_schedule=()) -> dict:
     """One solo lap of pure pursuit. The optional arguments default to the selected
     car's own: its calibration, the track's own line planned at the PathPlan defaults,
-    and pure_pursuit.yaml's speed and lateral limits."""
+    and pure_pursuit.yaml's speed and lateral limits. ``grip_schedule``: ((sim time s, grip
+    scale), ...) applied to the floor as the time passes (FidelityPlant.set_grip_scale): a
+    (0.0, 0.85) entry is a floor 15% slicker throughout, a later one a mid-run change."""
     global STEERING_LIMIT
     if safety not in SAFETY_MODES:
         raise ValueError(f"safety must be one of {SAFETY_MODES}")
@@ -1051,6 +1054,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     # clock, and the scenario's 0.5m limit would fail the comparison before
     # the car had turned a wheel.
     obs, _ = plant.reset(plan_initial_pose(plan, line))
+    schedule = sorted((float(t), float(k)) for t, k in grip_schedule)
     follower = PathFollower(plan, law_name=law_name, law_params=law_params,
                             car_id=car_id, steering_limit=steering_limit)
     command_shaper = CommandShaper(car_id, max_speed, max_lateral_accel)
@@ -1131,6 +1135,8 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             steering, speed = command_shaper.command(
                 steering, speed, hard_speed_cap,
                 measured_speed=ego["std_state"][3])
+            while schedule and step * CONTROL_DT >= schedule[0][0]:
+                plant.set_grip_scale(schedule.pop(0)[1])
             obs, _reward, done, _truncated, info = plant.step(
                 [(steering, speed)]
             )

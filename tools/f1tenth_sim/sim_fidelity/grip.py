@@ -59,6 +59,9 @@ class GripEnvelope:
     # not put the whole friction circle into the longitudinal axis. See the
     # tuning note in tools/f1tenth_sim/README.md.
     longitudinal_coupling: float = 1.0
+    # The floor's grip relative to the calibration: 0.85 is a floor 15% slicker. The plant's
+    # set_grip_scale changes it mid-run (a grip schedule, 2026-11-14).
+    scale: float = 1.0
     limited_steps: int = 0
     total_steps: int = 0
     max_demanded_lateral: float = 0.0
@@ -72,7 +75,7 @@ class GripEnvelope:
         demand is given priority, which is the usual approximation and the
         conservative one here: it is what makes trail-braking cost grip.
         """
-        limit = self.friction_accel_limit
+        limit = self.friction_accel_limit * self.scale
         used = longitudinal_accel * self.longitudinal_coupling
         remaining = limit * limit - used * used
         budget = math.sqrt(remaining) if remaining > 0.0 else 0.0
@@ -165,6 +168,8 @@ class ProgressiveGrip:
     # limited to sqrt(peak^2 - (coupling * a_long)^2), peak the curve's largest delivered value. 0 (the
     # default, and every floor so far) takes no share: grip_by_long_accel measured braking costing nothing.
     longitudinal_coupling: float = 0.0
+    # The floor's grip relative to the measured curve (see GripEnvelope.scale).
+    scale: float = 1.0
 
     def __post_init__(self):
         if not (math.isfinite(self.longitudinal_coupling) and 0.0 <= self.longitudinal_coupling <= 1.0):
@@ -177,8 +182,8 @@ class ProgressiveGrip:
         self._asked, self._delivered = asked, delivered
 
     def deliver(self, asked: float) -> float:
-        """What the tyres deliver for ``asked``; past the table it stays at the last value."""
-        return float(np.interp(asked, self._asked, self._delivered))
+        """What the tyres deliver for ``asked``, times ``scale``; past the table it stays at the last value."""
+        return float(np.interp(asked, self._asked, self._delivered)) * self.scale
 
     def apply(self, steering: float, speed: float, longitudinal_accel: float = 0.0) -> float:
         """The wheel angle that turns the car as hard as the tyres actually will."""
@@ -189,7 +194,8 @@ class ProgressiveGrip:
         allowed = self.deliver(demanded)
         if self.longitudinal_coupling > 0.0:
             used = self.longitudinal_coupling * longitudinal_accel
-            allowed = min(allowed, math.sqrt(max(0.0, max(self._delivered) ** 2 - used * used)))
+            peak = max(self._delivered) * self.scale
+            allowed = min(allowed, math.sqrt(max(0.0, peak ** 2 - used * used)))
         self.max_demanded_lateral = max(self.max_demanded_lateral, demanded)
         self.max_allowed_lateral = max(self.max_allowed_lateral, allowed)
         if allowed < demanded:

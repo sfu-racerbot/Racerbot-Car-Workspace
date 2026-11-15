@@ -591,6 +591,17 @@ class FidelityPlant:
             degraded[key] = agent
         return degraded
 
+    def set_grip_scale(self, scale: float, index: int | None = None) -> None:
+        """Make the floor ``scale`` times as grippy as calibrated from the next step on, for one car or all (a
+        grip schedule: a mid-run change, or a slicker or grippier floor from the start). Acts on the grip model
+        that limits cornering (GripEnvelope or ProgressiveGrip); off without the grip envelope or with tyre_model."""
+        if not (math.isfinite(scale) and scale > 0.0):
+            raise ValueError(f"grip scale must be finite and positive, got {scale!r}")
+        if not self.profile.grip_envelope or self._tyres is not None:
+            raise ValueError("this plant has no grip model to scale (grip_envelope off, or tyre_model set)")
+        for i in (range(self.num_agents) if index is None else [index]):
+            self.grip[i].scale = float(scale)
+
     def truth(self, index: int = 0) -> np.ndarray:
         """Ground-truth standard state, for metrics and assertions only."""
         return self._truth[index]
