@@ -3352,6 +3352,11 @@ class PurePursuitNode(Node):
         bound = max(0.0, self._opp_speed or 0.0) + self.pass_speed_uncertainty
         if stopped:
             bound = self.stopped_speed_bound    # latched parked; unseen time still grows its box
+            if self._stop_latch is not None:
+                # Its footprint is the one latched from behind: seen from beside, a sighting may be any face
+                # (length_extra), but a parked car has not moved -- a sighting outside it releases the latch.
+                rear, lateral = self._stop_latch
+                extra = 0.0
         return pass_planner.StalledOpponent(rear, lateral, bound, max(0.0, now - self._opp_seen), extra)
 
     def _local_pass_update(self, nearest_idx, now, point):
@@ -3417,8 +3422,13 @@ class PurePursuitNode(Node):
 
         opponent = self._pass_opponent(now, stopped)
         ego_rear = s_ego + (self.wheelbase - self.car_length) / 2
+        parked_lead = None
+        if stopped and self._stop_latch is not None:
+            # A latched parked car's front is known: no unseen-motion bound (which goes to -inf after max_unseen).
+            parked_lead = line.wrap(ego_rear - (self._stop_latch[0] + limits.opponent_length))
         if state == 'pass':
-            lead = pass_planner.worst_case_lead(ego_rear, opponent, line, limits)
+            lead = (parked_lead if parked_lead is not None
+                    else pass_planner.worst_case_lead(ego_rear, opponent, line, limits))
             if lead >= limits.clear_margin:
                 state = self._pass_state = 'return'
                 self._pass_manoeuvre = pass_planner.new_return(line, pose, speed, limits)
@@ -3464,6 +3474,11 @@ class PurePursuitNode(Node):
                 self.overtake_active = True
                 self.last_opponent_status = f'overtake rejoining on a checked path at {cap:.2f}m/s'
                 return
+        if parked_lead is not None and parked_lead >= limits.clear_margin:
+            # Past the parked car by the rejoin margin: nothing of this manoeuvre is left to protect.
+            self.last_opponent_status = f'overtake complete: {parked_lead:.2f}m past the parked car'
+            self._pass_reset_after(now)
+            return
         # Abort: brake to zero on the first checked path, never forget the car.
         self.overtake_active = True
         self.follow_speed_cap = 0.0
