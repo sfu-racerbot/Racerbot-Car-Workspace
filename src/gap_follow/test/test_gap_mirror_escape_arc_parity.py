@@ -101,3 +101,50 @@ def test_the_node_refuses_a_reach_out_of_range(value):
             GapFollowNode()
     finally:
         rclpy.shutdown()
+
+
+def test_the_charge_uses_the_racks_physical_rate_not_a_faster_command_slew():
+    # Car 2's time trial slews commands at 4.0 rad/s; its rack turns at about 2.5. The escape-arc charge must use the
+    # smaller (swept_clearance_reach_rate 2.0 here): node and mirror agree, and differ from charging at 4.0.
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG), '-p', f'swept_clearance_reach:={REACH}',
+                     '-p', 'max_steering_rate:=4.0', '-p', 'swept_clearance_reach_rate:=2.0',
+                     '-p', 'enable_launch_boost:=false', *TEST_ONLY_DRIVE])
+    node = GapFollowNode()
+    try:
+        published = []
+        node.drive_pub.publish = lambda msg: published.append(msg)
+        node.command_slew_max_dt = DT
+        params = gap_mirror.node_params()
+        params.update(swept_clearance_reach=REACH, max_steering_rate=4.0, swept_clearance_reach_rate=2.0,
+                      enable_launch_boost=False, command_slew_max_dt=DT)
+        fast = dict(params, swept_clearance_reach_rate=4.0)
+        scenes = _scenes()
+        mirror = gap_mirror.GapController(params, _Lidar(scenes[0][0]))
+        mirror_fast = gap_mirror.GapController(fast, _Lidar(scenes[0][0]))
+        joy = Joy()
+        joy.buttons = [0] * 5
+        joy.buttons[4] = 1
+        differs = 0
+        for step, (scan, speed, basis) in enumerate(scenes):
+            node.last_commanded_speed = speed
+            node.steering_basis = basis
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            for m in (mirror, mirror_fast):
+                m.steering_basis = node.steering_basis
+                m.last_commanded_speed = node.last_commanded_speed
+                m.previous_target_idx = node.previous_target_idx
+                m.last_command_time = step - 1
+            node.scan_callback(scan)
+            expected = mirror.command(np.asarray(scan.ranges), speed, step)
+            drive = published[-1].drive
+            assert drive.speed == pytest.approx(expected[1], abs=TOLERANCE), f'tick {step}: speed'
+            assert drive.steering_angle == pytest.approx(expected[0], abs=TOLERANCE), f'tick {step}: steering'
+            differs += abs(mirror_fast.command(np.asarray(scan.ranges), speed, step)[1] - expected[1]) > 1e-3
+        assert differs >= 1, 'the rate must change some command, or this proves nothing'
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()

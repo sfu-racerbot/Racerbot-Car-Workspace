@@ -329,6 +329,8 @@ class GapFollowNode(Node):
         self.declare_parameter('swept_clearance_max_length', 3.0)
         # Escape-arc credit for the braking ceiling (2026-11-14), see gap_logic.escape_arc_clearance.
         self.declare_parameter('swept_clearance_reach', 0.0)
+        # The rack's physical turn rate for the escape-arc charge (rad/s), not the command slew.
+        self.declare_parameter('swept_clearance_reach_rate', 2.0)
         # Arc guard: if the steering the gap logic asked for sweeps the body
         # into something within arc_guard_length, use the nearest steering
         # whose arc is clear. See gap_logic.arc_guard_steering.
@@ -550,6 +552,8 @@ class GapFollowNode(Node):
         self.swept_clearance_max_length = float(
             self.get_parameter('swept_clearance_max_length').value)
         self.swept_clearance_reach = float(self.get_parameter('swept_clearance_reach').value)
+        self.swept_clearance_reach_rate = float(
+            self.get_parameter('swept_clearance_reach_rate').value)
         self.braking_latency_sec = float(self.get_parameter('braking_latency_sec').value)
         self.steering_gain_speed_ref = float(
             self.get_parameter('steering_gain_speed_ref').value)
@@ -2010,7 +2014,8 @@ class GapFollowNode(Node):
             braking_clearance = gap_logic.escape_arc_clearance(
                 raw_window, window_valid, beam_angles, (desired_steering, steering_angle),
                 self.swept_clearance_reach, desired_steering, reach_speed,
-                self.max_steering_rate, self.braking_latency_sec, lateral_limit,
+                min(self.max_steering_rate, self.swept_clearance_reach_rate),
+                self.braking_latency_sec, lateral_limit,
                 swept_half_width, self.car_length, self.wheelbase, self.laser_offset_x,
                 self.laser_offset_y, self.swept_clearance_max_length, self.max_steering_angle)
         clearance_speed = gap_logic.braking_speed_limit(
@@ -2413,6 +2418,9 @@ class GapFollowNode(Node):
             if not (math.isfinite(self.swept_clearance_reach)
                     and 0.0 <= self.swept_clearance_reach <= 0.3):
                 raise ValueError('swept_clearance_reach must be finite and within [0, 0.3] rad')
+            if not (math.isfinite(self.swept_clearance_reach_rate)
+                    and self.swept_clearance_reach_rate > 0.0):
+                raise ValueError('swept_clearance_reach_rate must be finite and positive')
         if self.enable_arc_guard:
             if not (math.isfinite(self.arc_guard_length) and self.arc_guard_length > 0.0):
                 raise ValueError('arc_guard_length must be finite and positive')

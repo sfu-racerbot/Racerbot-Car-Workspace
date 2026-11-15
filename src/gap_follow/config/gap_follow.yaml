@@ -514,6 +514,10 @@ gap_follow_node:
     # driven before the rack gets there (gap_logic.escape_arc_clearance). 0 = off (the shortest of
     # the two current arcs, as before).
     swept_clearance_reach: 0.0
+    # The rack's physical turn rate (rad/s) the escape-arc charge assumes; the charge uses the smaller of this and
+    # max_steering_rate, so a command slew above what the servo does (car 2's time trial, 4.0) is not credited.
+    # 2.0 = the shared max_steering_rate; car 2's floor servo turns at 2.5 rad/s.
+    swept_clearance_reach_rate: 2.0
 
     # --- Arc guard (docs/gap-follow.md#arc-guard) ---
     # If the steering the gap logic asks for would sweep the body into

@@ -43,3 +43,15 @@ def test_the_default_is_still_one_lap():
 def test_bad_lap_counts_are_refused(kwargs, match):
     with pytest.raises(ValueError, match=match):
         eval_gap.run_track('indoor_oval', gap_mirror.node_params(car_id='rb2'), 12345, 60.0, car_id='rb2', **kwargs)
+
+
+def test_the_chassis_clearance_is_the_plants_minimum(tmp_path):
+    # invariant: min_chassis_map_clearance_m is the smallest per-tick FidelityPlant.chassis_map_clearance, which the
+    # trace records independently (its first row is before the first step, so it is compared from the second on).
+    import numpy as np
+    trace = tmp_path / 'trace.npz'
+    r = eval_gap.run_track('indoor_oval', gap_mirror.node_params(car_id='rb2'), 12345, 60.0, car_id='rb2', trace=str(trace))
+    c = np.load(trace)['chassis_clearance']
+    finite = c[1:][np.isfinite(c[1:])]
+    assert r['min_chassis_map_clearance_m'] is not None and r['min_chassis_map_clearance_m'] > 0.0
+    assert r['min_chassis_map_clearance_m'] <= round(float(finite.min()), 3) + 1e-9
