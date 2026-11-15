@@ -18,6 +18,8 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_gap  # noqa: E402,F401
 import run_validation as rv  # noqa: E402
@@ -210,6 +212,7 @@ def race_metrics(rows, dt, length, laps):
     clear_ticks = 0
     finish = [None, None]
     stuck = 0
+    ego_struck = opp_struck = 0
     for row in rows:
         active = row['active']
         attempts += int(active and not was_active)
@@ -223,6 +226,10 @@ def race_metrics(rows, dt, length, laps):
             completed += 1
             pass_armed = False
         stuck += int(-3.0 <= lead < 0.0 and row['ego_command'] < row['profile_speed'] - 0.3)
+        # The striking car in a car-to-car contact is the one behind (lead < 0: us).
+        if row['car_contact']:
+            ego_struck += int(lead < 0.0)
+            opp_struck += int(lead >= 0.0)
         for i, key in enumerate(('ego_progress', 'opp_progress')):
             required = length * laps - (row['head_start'] if i else 0.0)
             if finish[i] is None and row[key] >= required:
@@ -236,6 +243,7 @@ def race_metrics(rows, dt, length, laps):
                 emergency_stop_ticks=sum(r['safety'] in ('body_contact', 'emergency_obstacle') for r in rows),
                 safety_ticks=dict(Counter(r['safety'] for r in rows)),
                 car_contact_ticks=sum(bool(r['car_contact']) for r in rows),
+                ego_striking_contact_ticks=ego_struck, opponent_striking_contact_ticks=opp_struck,
                 wall_contact_ticks=sum(bool(r['wall_contact']) for r in rows))
 
 
@@ -251,33 +259,54 @@ def stall_progress(opponent, seed, length):
     return 4.0 + length * ((seed - 12345) % 6) / 6
 
 
+# Opponent profile factor, and our own (``ego_ahead``: we start ahead on a slower profile, a faster car behind).
+OPPONENT_FACTOR = {'map60': 0.6, 'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'braking': 0.8, 'gap': 1.0,
+                   'solo': 1.0, 'stalled': 0.8, 'ego_ahead': 1.0}
+EGO_FACTOR = {'ego_ahead': 0.85}
+OPPONENTS = tuple(OPPONENT_FACTOR)
+DEFAULT_FLOOR = 'sfu_course_2026_11_06'
+
+
 def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0,
-        pass_lookahead=None, cap_only=False, pass_planner_enabled=False):
-    rv.select_profile('car', 'rb2')
+        pass_lookahead=None, cap_only=False, pass_planner_enabled=False, car='rb2', floor=DEFAULT_FLOOR,
+        online_lateral=None, overrides=None):
+    """One race. ``car``: both cars are this car (its profile, overlays, steering law parameters). ``floor``: a
+    FLOORS name, or 'car' for the car's own calibration. ``online_lateral``: the shaper's online cornering cap,
+    None = the car's shipped max_lateral_accel (until 2026-11-15 this was fixed at 2.7, below car 2's 3.1).
+    ``overrides``: pure_pursuit parameters for our car only (the opponent keeps the shipped ones)."""
+    rv.select_profile('car', car)
     xy, speeds = racing_math.load_profiled_csv(line)
-    plan = rv.PathPlan(np.asarray(xy), racing_math.compute_segment_lengths(xy, closed=True), np.minimum(speeds, 5.0))
+    base_plan = rv.PathPlan(np.asarray(xy), racing_math.compute_segment_lengths(xy, closed=True), np.minimum(speeds, 5.0))
+    plan = rv.PathPlan(base_plan.xy, base_plan.seg_len, base_plan.speed * EGO_FACTOR.get(opponent, 1.0))
     count = 1 if opponent == 'solo' else 2
-    plant = rv.make_plant(eval_gap.track_path(track), count, seed,
-                          calibration=with_floor('sfu_course_2026_11_06'), car_id='rb2', max_laps=1000)
-    params = rv._pure_pursuit_params('rb2')
+    calibration = rv.calibration_for_car(car) if floor == 'car' else with_floor(floor, rv.calibration_for_car(car))
+    plant = rv.make_plant(eval_gap.track_path(track), count, seed, calibration=calibration, car_id=car, max_laps=1000)
+    params = rv._pure_pursuit_params(car)
+    opp_params = dict(params)
+    params.update(overrides or {})
     if pass_lookahead is not None:
         params['overtake_lookahead_distance'] = pass_lookahead
-    followers = [rv.PathFollower(plan, law_name='delay_lqr', car_id='rb2')]
-    factor = {'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'braking': 0.8, 'gap': 1.0, 'solo': 1.0,
-              'stalled': 0.8}[opponent]
-    opp_plan = rv.PathPlan(plan.xy, plan.seg_len, np.minimum(plan.speed * factor, 1.5) if opponent == 'blocker' else plan.speed * factor)
-    followers.append(rv.PathFollower(opp_plan, law_name='delay_lqr', car_id='rb2'))
-    shapers = [rv.CommandShaper('rb2', 5.0, 2.7) for _ in range(2)]
+        opp_params['overtake_lookahead_distance'] = pass_lookahead
+    followers = [rv.PathFollower(plan, law_name=params['steering_law'], car_id=car)]
+    factor = OPPONENT_FACTOR[opponent]
+    opp_plan = rv.PathPlan(base_plan.xy, base_plan.seg_len, np.minimum(base_plan.speed * factor, 1.5) if opponent == 'blocker' else base_plan.speed * factor)
+    followers.append(rv.PathFollower(opp_plan, law_name=opp_params['steering_law'], car_id=car))
+    shapers = [rv.CommandShaper(car, 5.0, online_lateral) for _ in range(2)]
     lidar = rv._lidar()
-    gap = rv.GapController(rv.node_params(car_id='rb2'), lidar)
+    gap = rv.GapController(rv.node_params(car_id=car), lidar)
     poses = np.vstack([rv.plan_initial_pose(plan, plant.env.unwrapped.track.raceline)[0]] * 2)
     start, _ = racing_math.find_nearest_index(plan.xy, poses[0, :2], closed=True)
     oi = racing_math.find_lookahead_index(plan.seg_len, start, head_start, closed=True)
     delta = plan.xy[(oi + 1) % len(xy)] - plan.xy[oi]
     poses[1] = [*plan.xy[oi], math.atan2(delta[1], delta[0])]
+    if opponent == 'ego_ahead':
+        poses = poses[::-1].copy()          # we take the spot ahead, the opponent the grid spot behind
     obs, _ = plant.reset(poses[:count])
     progress = [Progress(plan, plant.truth(i)[:2]) for i in range(count)]
+    # Signed: positive when the opponent starts ahead of us, negative when it starts behind.
     actual_head = (progress[1].arc - progress[0].arc) % progress[0].length if count == 2 else 0
+    if opponent == 'ego_ahead':
+        actual_head -= progress[0].length
     stall = stall_progress(opponent, seed, progress[0].length)
     scan_sim = plant.env.unwrapped.sim.scan_sims[0]
 
@@ -295,7 +324,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
         agent_params = dict(params)
         if i == 0 and pass_planner_enabled:
             agent_params.update(enable_local_pass_planner=True, enable_opponent_overtake=False)
-        decisions.append(NodeDecisions(plan if i == 0 else opp_plan, lidar, expected, wall_at, agent_params))
+        decisions.append(NodeDecisions(plan if i == 0 else opp_plan, lidar, expected, wall_at,
+                                       agent_params if i == 0 else dict(opp_params)))
     rows = []
     try:
         for step in range(math.ceil(timeout / rv.CONTROL_DT)):
@@ -391,7 +421,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                   pass_planner_sha256=hashlib.sha256(Path(pass_planner.__file__).read_bytes()).hexdigest(),
                   controller_parameters=params,
                   harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                  setup='standing start; frozen map and line settled before LB; both cars rb2',
+                  setup=f'standing start; frozen map and line settled before LB; both cars {car}',
+                  car=car, floor=floor, online_lateral=shapers[0].max_lateral_accel, overrides=overrides or {},
                   line_sha256=hashlib.sha256(Path(line).read_bytes()).hexdigest(),
                   plant=plant.report())
     return result, rows
@@ -401,7 +432,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--track', required=True)
     ap.add_argument('--line', required=True)
-    ap.add_argument('--opponent', choices=('map80', 'map90', 'gap', 'blocker', 'braking', 'solo', 'stalled'), required=True)
+    ap.add_argument('--opponent', choices=OPPONENTS, required=True)
+    ap.add_argument('--car', choices=('rb1', 'rb2'), default='rb2', help='both cars are this car')
+    ap.add_argument('--floor', default=DEFAULT_FLOOR, help="a FLOORS name, or 'car' for the car's own calibration")
+    ap.add_argument('--online-lateral', type=float, help="online cornering cap, m/s^2 (default: the car's shipped)")
+    ap.add_argument('--set', action='append', default=[], help='key=value pure_pursuit parameter for our car only')
     ap.add_argument('--seeds', default='12345,12346,12347,12348,12349,12350')
     ap.add_argument('--head-start', type=float, default=3.0)
     ap.add_argument('--laps', type=int, default=4)
@@ -418,11 +453,18 @@ def main():
         ap.error('need head-start in [2,4] m, positive laps and finite positive timeout')
     if args.pass_lookahead is not None and (not math.isfinite(args.pass_lookahead) or args.pass_lookahead <= 0):
         ap.error('pass-lookahead must be positive and finite')
+    overrides = {}
+    for item in args.set:
+        key, sep, raw = item.partition('=')
+        if not sep:
+            ap.error(f'--set needs key=value, got {item!r}')
+        overrides[key] = yaml.safe_load(raw)
     args.output.mkdir(parents=True, exist_ok=True)
     results = []
     for seed in map(int, args.seeds.split(',')):
         result, rows = run(args.track, args.line, args.opponent, seed, args.head_start, args.laps, args.timeout,
-                           args.pass_lookahead, args.cap_only, args.pass_planner)
+                           args.pass_lookahead, args.cap_only, args.pass_planner, car=args.car, floor=args.floor,
+                           online_lateral=args.online_lateral, overrides=overrides)
         with (args.output / f'{seed}.csv').open('w') as stream:
             writer = csv.DictWriter(stream, fieldnames=rows[0])
             writer.writeheader()
