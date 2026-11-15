@@ -250,6 +250,11 @@ def test_arc_guard_backs_off_a_turn_whose_arc_is_blocked(node):
     # latch, since nothing then changes the steering. With it, the car takes
     # the nearest arc that is clear and keeps going.
     node.enable_corner_setup = False
+    # This test isolates the arc guard. The unguarded stop it uses as its
+    # baseline is the latch that flank creep (docs/superpowers/plans/
+    # 2026-11-12-post-race-speed-program.md section 1.2, Task 2) removes, so
+    # the creep is switched off here (ruled by the tech lead, 2026-11-12).
+    node.flank_creep_length = 0.0
     scan = _raycast(_left_turn(0.25, 1.15, corner_x=0.6))
     node.enable_arc_guard = False
     unguarded = _drive(node, scan, speed=0.5)
@@ -279,6 +284,56 @@ def test_arc_guard_backs_off_a_turn_whose_arc_is_blocked(node):
     assert abs(requested - guarded) <= node.arc_guard_max_correction + 1e-9
     assert free(guarded) > free(requested)
     assert 'arc guard' in node.recorded_details[-1]
+
+
+def _blocked_turn_with_flank_creep(node, blocker_x=None):
+    """The scene of the test above, arc guard off, flank creep at its shipped
+    values; returns (command, independent body-arc distance, independent swept
+    clearance), both computed here from the scan and the commanded steering."""
+    node.enable_corner_setup = False
+    node.enable_arc_guard = False
+    assert node.flank_creep_length == pytest.approx(0.50, abs=1e-12)  # shipped
+    assert node.flank_creep_margin == pytest.approx(0.02, abs=1e-12)  # shipped
+    segments = _left_turn(0.25, 1.15, corner_x=0.6)
+    if blocker_x is not None:
+        # a wall across the right half of the lane, blocker_x m ahead of the LiDAR
+        segments = segments + [((blocker_x, -1.15), (blocker_x, -0.05))]
+    scan = _raycast(segments)
+    cmd = _drive(node, scan, speed=0.5)
+    clean, valid = gap_logic.sanitize_ranges(scan.ranges, node.max_range, scan.range_min)
+    lo, hi = node._fov_indices(scan)
+    angles = scan.angle_min + np.arange(lo, hi + 1) * scan.angle_increment
+    curvature = math.tan(cmd.steering_angle) / node.wheelbase
+    body = gap_logic.body_arc_free_distance(
+        clean[lo:hi + 1], valid[lo:hi + 1], angles, curvature,
+        node.car_width / 2.0 + node.flank_creep_margin, node.car_length,
+        node.wheelbase, node.laser_offset_x, 0.0, max_length=0.5)
+    swept = gap_logic.swept_path_clearance(
+        clean[lo:hi + 1], valid[lo:hi + 1], angles, curvature,
+        node.car_width / 2.0 + node.swept_clearance_margin, node.car_length,
+        node.wheelbase, node.laser_offset_x, 0.0, 5.0)
+    return cmd, body, swept
+
+
+def test_unguarded_blocked_turn_creeps_with_flank_creep_on(node):
+    # Same scene as above: the swept band reads 0 (the latch) but the body's own
+    # rectangle is clear for 0.5 m along the commanded arc, so it crawls.
+    cmd, body, swept = _blocked_turn_with_flank_creep(node)
+    assert body == math.inf, 'precondition: the body arc is free'
+    assert swept == 0.0, 'precondition: the flank-latch geometry'
+    assert 0.0 < cmd.speed <= node.escape_creep_speed
+
+
+def test_unguarded_turn_into_a_wall_the_body_reaches_still_stops(node):
+    # Refusal half. Moving the corner to corner_x=0.3 (or 0.1..0.7, or behind
+    # the car) never blocks the body's arc: the gap aim steers away from the
+    # corner, so the body is free for 0.5 m (probed: corner_x 0.1-3.0 all give
+    # body arc inf). The nearest scene that does block it adds a wall across
+    # the right half of the lane 0.6 m ahead of the LiDAR: the arc the car is
+    # steering reaches it in 0.38 m (blocker_x 0.5-0.65 block, 0.8+ do not).
+    cmd, body, swept = _blocked_turn_with_flank_creep(node, blocker_x=0.6)
+    assert math.isfinite(body) and body < 0.5, 'precondition: the body arc is not free'
+    assert cmd.speed == 0.0
 
 
 def test_arc_guard_leaves_an_open_corridor_alone(node):

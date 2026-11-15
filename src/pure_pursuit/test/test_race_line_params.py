@@ -9,8 +9,10 @@ from pure_pursuit.race_line import RaceLineConfig, load_params
 # 2026-11-07: rb2 grip 2.9 -> 3.2 and speed delay 0.10 -> 0.22 (its calibration overlay gives
 # the measurements); shared body floor 0.08 -> 0.22 on straights, 0.30 near the steering limit
 # (auto_map_race.yaml comment: the line must cover the controller's tracking error).
+# 2026-11-14 (user ruling on PR #63): rb1 2.5/6.0/0.10 -> its own measurements 3.2/5.0/0.35
+# (cars/rb1/calibration/auto_map_race.yaml; results/2026-11-14-rb1-speed-loop.md).
 @pytest.mark.parametrize('car,angle,grip,accel,gain,delay', [
-    ('rb1', .30, 2.5, 6., 1., .10), ('rb2', .38, 3.2, 4., .99, .22)])
+    ('rb1', .30, 3.2, 5., 1., .35), ('rb2', .38, 3.2, 4., .99, .22)])
 def test_car_physics_and_controller_stop(car, angle, grip, accel, gain, delay, monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', car)
     values = load_params()

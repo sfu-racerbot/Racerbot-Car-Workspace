@@ -12,11 +12,13 @@ from racerbot_car.layers import effective_config
 # 2026-11-09: online ceiling 2.7 -> 3.1 with the multi-start lines and speed lead: no contact
 # on 06a/06b (6 simulator seeds) or the 50-course suite; still under the ~3.4 the floor
 # achieves at hard asks (cars/rb2/calibration/pure_pursuit.yaml).
+# 2026-11-14 (user ruling on PR #63): rb1's planning physics 2.5/6.0/0.10 -> its measured
+# 3.2/5.0/0.35 (cars/rb1/calibration/auto_map_race.yaml gives the runs).
 @pytest.mark.parametrize('car,angle,grip,accel,gain,delay,online', [
-    ('rb1', 0.30, 2.5, 6.0, 1.0, 0.10, None), ('rb2', 0.38, 3.2, 4.0, 0.99, 0.22, 3.1)])
+    ('rb1', 0.30, 3.2, 5.0, 1.0, 0.35, None), ('rb2', 0.38, 3.2, 4.0, 0.99, 0.22, 3.1)])
 def test_effective_line_physics(car, angle, grip, accel, gain, delay, online):
     values = effective_config('auto_map_race.yaml', 'auto_map_race_node', car)
-    # oracle: measured runs above; rb1 retains shared defaults by specification.
+    # oracle: measured runs above (each car's calibration overlay).
     assert [values[k] for k in ('profile_max_steering_angle', 'profile_max_lateral_accel',
                                'profile_max_lateral_accel_right', 'profile_max_accel',
                                'profile_steering_linkage_gain', 'profile_speed_delay')] == [
@@ -38,3 +40,12 @@ def test_line_calibration_allows_physics_but_not_safety_or_mode(tmp_path):
         path.write_text(f'auto_map_race_node:\n  ros__parameters:\n    {key}: 1\n')
         problems = check_calibration_overlay(path, path.name)
         assert len(problems) == 1 and key in problems[0]
+
+
+@pytest.mark.parametrize('car,expected', [('rb1', 1.0), ('rb2', 0.88)])
+def test_launch_speed_scale_effective_per_car(car, expected):
+    # oracle: spec (2026-11-13 brief): rb2's tuning overlay sets 0.88 (run 20261111-152132), rb1 keeps the shared
+    # 1.0 (off); launch_scale_distance stays the shared 0.0 (one lap) on both.
+    config = effective_config('pure_pursuit.yaml', 'pure_pursuit_node', car)
+    assert config['launch_speed_scale'] == expected
+    assert config['launch_scale_distance'] == 0.0

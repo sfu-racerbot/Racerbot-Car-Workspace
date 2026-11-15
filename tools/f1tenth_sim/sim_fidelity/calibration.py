@@ -81,6 +81,13 @@ STEERING_MAX_RIGHT_MEASURED = -math.atan(0.36 / 0.750)  # -0.448 rad, 25.6 deg
 
 # CarCalibration's fields that come from the selected car's vesc.yaml (calibration_for_car);
 # None in a constructed calibration means "the selected car's value".
+# The shared speed loop: fitted to run 20261019-200703 with tools/run_analysis/fit_sim.py (it brakes far more gently
+# than gym's stock loop, gain 13.7/s up to mu*g), no braking deadband, a 2-tick transport delay. A car whose profile
+# has sim/speed_loop.yaml (car_speed_loop) uses its own measured values instead.
+SHARED_SPEED_LOOP = dict(speed_delay_ticks=2, speed_loop_accel_gain=5.0, speed_loop_accel_max=4.5,
+                         speed_loop_brake_gain=4.0, speed_loop_brake_max=4.0, speed_loop_brake_deadband=0.0)
+SPEED_LOOP_FIELDS = tuple(SHARED_SPEED_LOOP)
+
 VESC_FIELDS = ('steering_rate_max', 'speed_to_erpm_gain', 'steering_angle_to_servo_gain',
                'steering_angle_to_servo_offset', 'servo_min', 'servo_max', 'speed_max', 'speed_min')
 
@@ -143,19 +150,25 @@ class CarCalibration:
     # Whole-loop transport lag, in control ticks, from a command being
     # published to the actuator acting on it: ROS -> USB -> VESC firmware.
     steering_delay_ticks: int = 3
-    speed_delay_ticks: int = 2
+    # The speed loop's six fields (SPEED_LOOP_FIELDS) are per car: None here resolves at construction to the selected
+    # car's values, which are its profile's sim/speed_loop.yaml where it has one, else SHARED_SPEED_LOOP.
+    speed_delay_ticks: int | None = None
     # The VESC speed loop, as a proportional controller per direction with
-    # an acceleration ceiling each way (plant._measured_speed_loop). Fitted
-    # to run 20261019-200703 with tools/run_analysis/fit_sim.py: it brakes
-    # far more gently than gym's stock loop (gain 13.7/s, up to mu*g).
-    speed_loop_accel_gain: float = 5.0
-    speed_loop_accel_max: float = 4.5
-    speed_loop_brake_gain: float = 4.0
-    speed_loop_brake_max: float = 4.0
+    # an acceleration ceiling each way (plant._measured_speed_loop,
+    # actuation.speed_loop_accel). Braking starts only once the speed is more
+    # than speed_loop_brake_deadband above the command.
+    speed_loop_accel_gain: float | None = None
+    speed_loop_accel_max: float | None = None
+    speed_loop_brake_gain: float | None = None
+    speed_loop_brake_max: float | None = None
+    speed_loop_brake_deadband: float | None = None
     # Above this speed the acceleration ceiling falls linearly to zero at speed_loop_accel_no_load, as a
     # motor's force falls with speed (actuation.speed_loop_accel_ceiling). inf = no fall-off.
     speed_loop_accel_fade_from: float = math.inf
     speed_loop_accel_no_load: float = math.inf
+    # Opt-in: ((wheel speed, acceleration ceiling), ...), linear between points, flat beyond. When set it replaces
+    # speed_loop_accel_max and its fade-off as the loop's acceleration ceiling (actuation.accel_table_ceiling).
+    accel_by_speed: tuple = ()
 
     # --- Speed envelope -------------------------------------------------
     speed_max: float = None
@@ -179,6 +192,11 @@ class CarCalibration:
     # Lateral acceleration the rack asks for to what the tyres deliver,
     # ((asked, delivered), ...), ascending. None keeps GripEnvelope's sharp limit.
     grip_curve: tuple | None = None
+    # True when that curve's delivered column falls past a peak (see ProgressiveGrip.falling).
+    grip_curve_falls: bool = False
+    # Saturating per-axle tyres (sim_fidelity.tyres.TyreModel) in place of gym's linear ones, so the car can
+    # slide and spin. None keeps gym's tyres and the steering clamp above (grip_curve or the friction circle).
+    tyre_model: object | None = None
     # True speed the car settles at per unit of commanded speed.
     speed_command_scale: float = 1.0
     # What /odom reads per unit of true speed.
@@ -197,13 +215,16 @@ class CarCalibration:
         # omitted car fields at construction rather than module import. Only
         # these: the floor models' None means "off" (FLOORS), and resolving it
         # through calibration_for_car would recurse.
-        missing = [name for name in (*VESC_FIELDS, 'steering_max_left',
+        missing = [name for name in (*VESC_FIELDS, *SPEED_LOOP_FIELDS, 'steering_max_left',
                                     'steering_max_right', 'car_id')
                    if getattr(self, name) is None]
         if missing:
             selected = calibration_for_car(car_id)
             for name in missing:
                 object.__setattr__(self, name, getattr(selected, name))
+        if not (math.isfinite(self.speed_loop_brake_deadband) and self.speed_loop_brake_deadband >= 0.0):
+            raise ValueError('speed_loop_brake_deadband must be finite and >= 0 m/s, '
+                             f'got {self.speed_loop_brake_deadband!r}')
 
     # ------------------------------------------------------------------
     # Quantities the simulator needs that follow from the above
@@ -369,7 +390,9 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     "speed_loop_accel_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_gain": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
+    "speed_loop_brake_deadband": (Provenance.MEASURED, "0: the shared 2026-10-19 fit has no deadband (run 20261019-200703). A car whose profile has sim/speed_loop.yaml uses its own (car_speed_loop)"),
     "speed_loop_accel_fade_from": (Provenance.ESTIMATED, "inf by default (no fall-off); a floor profile sets it where the measured, traction-limited speed range ends"),
+    "accel_by_speed": (Provenance.ESTIMATED, "empty: the loop's ceiling is speed_loop_accel_max with its fade-off. A floor may set a measured table (accel_by_speed.py). See FLOORS"),
     "speed_loop_accel_no_load": (Provenance.ESTIMATED, "inf by default; a floor profile sets an estimated motor no-load speed (actuation.speed_loop_accel_ceiling)"),
     "speed_max": (
         Provenance.DERIVED,
@@ -422,6 +445,8 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     ),
     "steering_linkage": (Provenance.ESTIMATED, "off: the plain calibration has no linkage model. See FLOORS"),
     "grip_curve": (Provenance.ESTIMATED, "off: the plain calibration has a sharp friction circle. See FLOORS"),
+    "grip_curve_falls": (Provenance.DERIVED, "off: a grip curve must ascend in both columns. See FLOORS"),
+    "tyre_model": (Provenance.ESTIMATED, "off: gym's linear tyres under the steering clamp; they cannot spin. See FLOORS"),
     "speed_command_scale": (Provenance.DERIVED, "1: command taken as true speed. See FLOORS"),
     "odom_speed_scale": (Provenance.DERIVED, "1: odometry taken as true speed. See FLOORS"),
     "lidar_noise_per_metre": (Provenance.ESTIMATED, "0: flat noise. See FLOORS"),
@@ -468,8 +493,42 @@ def car_from_args(parser, args) -> str:
         parser.error(str(exc))
 
 
+def car_speed_loop_path(car_id: str) -> Path:
+    """The car profile's simulator speed-loop file (it need not exist)."""
+    from racerbot_car import paths
+    return paths.cars_dir() / car_id / 'sim' / 'speed_loop.yaml'
+
+
+def car_speed_loop(car_id: str) -> tuple[dict, str, frozenset]:
+    """(the speed loop's six fields, where the car's own values came from, the fields the car's file sets) for ``car_id``:
+    SHARED_SPEED_LOOP, with any field the profile's sim/speed_loop.yaml sets (a mapping of SPEED_LOOP_FIELDS names to
+    numbers, plus a ``source`` string)."""
+    path = car_speed_loop_path(car_id)
+    if not path.is_file():
+        return dict(SHARED_SPEED_LOOP), '', frozenset()
+    import yaml
+    data = yaml.safe_load(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f'{path}: expected a mapping')
+    source = data.pop('source', '')
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError(f'{path}: needs a non-empty source string (what it was measured on and how)')
+    unknown = sorted(set(data) - set(SPEED_LOOP_FIELDS))
+    if unknown:
+        raise ValueError(f'{path}: unknown speed-loop fields {unknown}; known: {list(SPEED_LOOP_FIELDS)}')
+    values = dict(SHARED_SPEED_LOOP)
+    for name, value in data.items():
+        if name == 'speed_delay_ticks':
+            if type(value) is not int or value < 0:
+                raise ValueError(f'{path}: speed_delay_ticks must be a non-negative integer, got {value!r}')
+        elif type(value) not in (int, float) or not math.isfinite(value) or value < 0.0:
+            raise ValueError(f'{path}: {name} must be a finite non-negative number, got {value!r}')
+        values[name] = value if name == 'speed_delay_ticks' else float(value)
+    return values, f'cars/{car_id}/sim/speed_loop.yaml: {source.strip()}', frozenset(data)
+
+
 def calibration_for_car(car_id: str | None = None) -> CarCalibration:
-    """Build a fresh calibration from the selected car's effective VESC values."""
+    """Build a fresh calibration from the selected car's effective VESC values and its speed loop (car_speed_loop)."""
     car_id = selected_car(car_id, note=False)
     vesc = effective_config('vesc.yaml', '/**', car_id)
     throttle = effective_config('vesc.yaml', 'throttle_interpolator', car_id)
@@ -482,7 +541,8 @@ def calibration_for_car(car_id: str | None = None) -> CarCalibration:
            'steering_angle_to_servo_gain', 'steering_angle_to_servo_offset',
            'servo_min', 'servo_max')},
         speed_max=speed_max, speed_min=-speed_max,
-        steering_rate_max=throttle['max_servo_speed'])
+        steering_rate_max=throttle['max_servo_speed'],
+        **car_speed_loop(car_id)[0])
 
 
 def __getattr__(name):
@@ -512,6 +572,33 @@ SFU_COURSE_HELD_OUT_RUNS = ("20261030-184826", "20261030-183134", "20261030-1810
 
 SFU_COURSE_2026_11_06_FIT_RUNS = ("20261106-163633", "20261106-164401", "20261106-170803")
 SFU_COURSE_2026_11_06_HELD_OUT_RUNS = ("20261106-171030", "20261106-184753")
+SFU_COURSE_2026_11_11_RB2_FIT_RUNS = ("20261111-152132", "20261111-135934", "20261111-142254")
+
+
+# Gyro-basis median delivered lateral acceleration per asked bin on car 2, 2026-11-11 (bins of 10 or more
+# samples; grip_truth.py --json gyro_curve of runs 20261111-152132, -135934, -142254). Falls past its peak.
+SFU_2026_11_11_RB2_GYRO_CURVE = (
+                (0.0, 0.0),
+                (0.24780840442007881, 0.24780840442007881),
+                (0.7974440280734391, 0.7974440280734391),
+                (1.2715557017298433, 1.2715557017298433),
+                (1.767423331714832, 1.767423331714832),
+                (2.2756500555012367, 2.2756500555012367),
+                (2.7375241827844983, 2.7098528689465846),
+                (3.217853000236789, 2.8809540690061866),
+                (3.7081195959524607, 2.93841069556196),
+                (4.3847966706921095, 2.7063512860611474),
+                (5.279196169155968, 2.7998427458681205),
+)
+# Times which the plant's own tyres' understeer is made up in the plant. Calibrated on flying-lap time and braking;
+# the 152132 launch run-wide is NOT reproduced; the grip scale lies between 1.10 (lap 10.12 s) and 1.25 (best
+# open-loop yaw RMS). See FLOORS provenance and sfu_course_2026_11_11_rb2_replay.json closed_loop_selection.
+SFU_2026_11_11_RB2_GRIP_SCALE = 1.15
+
+
+def sfu_2026_11_11_rb2_grip_curve(scale: float) -> tuple:
+    """The floor's grip table at ``scale``: the measured curve times the scale, never above the request."""
+    return tuple((asked, min(asked, achieved * scale)) for asked, achieved in SFU_2026_11_11_RB2_GYRO_CURVE)
 
 
 @dataclass(frozen=True)
@@ -597,6 +684,73 @@ FLOORS: dict[str, Floor] = {
             lidar_noise_per_metre="same Hokuyo's 2026-10-30 range slope, checked against 20261106-163633 stable window",
             lidar_dropout_rate="20261106-163633 moving_no_echo = 0; sfu_course_2026_11_06_lidar.json",
             lidar_self_hits="20261106-163633 stable parked window: no rear-right self hits",
+        ),
+    ),
+    "sfu_course_2026_11_11_rb2": Floor(
+        name="sfu_course_2026_11_11_rb2",
+        description="Car 2 on the 2026-11-11 race-day course (UVic), measured from its race-day runs. The grip "
+                    "curve FALLS past its peak (2.94 m/s^2 at 3.75 asked, 2.7 beyond). See docs/sim-calibration.md "
+                    "and the adjacent sfu_course_2026_11_11_* JSON.",
+        track="car2_course_2026_11_11",
+        fit_runs=SFU_COURSE_2026_11_11_RB2_FIT_RUNS,
+        held_out_runs=(),
+        overrides=dict(
+            floor="sfu_course_2026_11_11_rb2",
+            steering_linkage=((-0.461, -0.448), (-0.436, -0.423), (-0.349, -0.3370065000246209), (0.0, 0.011993499975379084), (0.349, 0.36099349997537905), (0.436, 0.423), (0.528, 0.509)),
+            # Gyro-basis median delivered lateral acceleration per asked bin, bins of 10 or more
+            # samples, never above the request (grip_truth.py --json gyro_curve), times 1.15 (the plant's
+            # own tyres understeer on top; chosen on the 152132 launch). Falls past the peak.
+            grip_curve=sfu_2026_11_11_rb2_grip_curve(SFU_2026_11_11_RB2_GRIP_SCALE),
+            grip_curve_falls=True,
+            steering_delay_ticks=2,
+            steering_rate_max=2.5,
+            steering_servo_gain=15.0,
+            speed_loop_accel_gain=10.0,
+            speed_loop_accel_max=4.0,
+            speed_loop_brake_gain=5.0,
+            speed_loop_brake_max=4.0,
+            speed_loop_accel_fade_from=5.4,
+            speed_loop_accel_no_load=16.0,
+            speed_delay_ticks=4,
+            odom_speed_scale=1.0166595115220707,
+            speed_command_scale=4614.0 / 4447.983786 / 1.0166595115220707,
+            longitudinal_grip_coupling=0.0,
+            lidar_noise_std=0.003,
+            lidar_noise_per_metre=0.0015,
+            lidar_dropout_rate=0.0,
+            lidar_self_hits=(),
+        ),
+        sources=dict(
+            floor="2026-11-11 rb2 runs 152132, 135934, 142254; sfu_course_2026_11_11_rb2_measurement.json",
+            steering_linkage="central slope 1.0 and trim 0.011993 (car_measure.py steering_trim_rad) chosen by fit-plant "
+                             "gyro replay on 20261111-152132 over slopes 0.95-1.1 and delays 2-4 ticks, "
+                             "sfu_course_2026_11_11_rb2_replay.json; outer points retained from 2026-10-16 circles",
+            grip_curve="grip_truth.py on 20261111-152132, -135934, -142254, /imu/vesc/data, steering window 0.10 rad, "
+                       "gyro basis, bins of 10+ samples; sfu_course_2026_11_11_grip_rb2_vesc.json gyro_curve; times 1.15. "
+                       "Calibrated on flying-lap time and braking; the 152132 launch run-wide is NOT reproduced; the grip scale "
+                       "lies between 1.10 (lap 10.12 s) and 1.25 (best open-loop yaw RMS). At 1.15 the cap-on flying lap is 9.95 s "
+                       "against the real 10.05 s, braking lag and deceleration match (acceptance B), and the open-loop yaw RMS is "
+                       "better than the 11-06 floor. From s=8.1 m with the cap off the sim makes contact at s 11.7-12.0 in 6/6 "
+                       "seeds (4.74 / 5.09 m/s at s=10 / 11 against the real 4.28 / 4.75), but the real car's cap was still "
+                       "binding there, so that run is not comparable. Cells: sfu_course_2026_11_11_rb2_replay.json closed_loop_selection",
+            grip_curve_falls="the same curve: 2.94 m/s^2 at 3.75 asked falling to 2.71 at 4.38",
+            steering_delay_ticks="fit-plant gyro replay on 20261111-152132 selects 2 ticks by yaw RMS (0.1256 against 0.1333 at 3); sfu_course_2026_11_11_rb2_replay.json",
+            steering_rate_max="car_measure.py servo replay on 20261111-152132, -135934, -142254",
+            steering_servo_gain="car_measure.py servo replay on 20261111-152132, -135934, -142254",
+            speed_loop_accel_gain="car_measure.py speed loop, sfu_course_2026_11_11_rb2_measurement.json speed_loop",
+            speed_loop_accel_max="car_measure.py speed loop, sfu_course_2026_11_11_rb2_measurement.json speed_loop",
+            speed_loop_brake_gain="car_measure.py speed loop, sfu_course_2026_11_11_rb2_measurement.json speed_loop",
+            speed_loop_brake_max="car_measure.py speed loop, sfu_course_2026_11_11_rb2_measurement.json speed_loop",
+            speed_loop_accel_fade_from="ESTIMATED, carried from sfu_course_2026_11_06: no fall-off seen up to 5.14 m/s",
+            speed_loop_accel_no_load="ESTIMATED, carried from sfu_course_2026_11_06; not measured",
+            speed_delay_ticks="car_measure.py speed loop, sfu_course_2026_11_11_rb2_measurement.json speed_loop",
+            odom_speed_scale="wheel / scan-to-map true speed, 20261111-152132, -135934, -142254 (wheel_over_true)",
+            speed_command_scale="wheel over-read of the three runs and the run's vesc gains 4614 / 4447.983786",
+            longitudinal_grip_coupling="grip_by_long_accel: 3.079 braking below -3 vs 2.968 steady m/s^2, same runs",
+            lidar_noise_std="CARRIED from sfu_course_2026_11_06_stable_lidar.json (same Hokuyo); not re-measured",
+            lidar_noise_per_metre="CARRIED from sfu_course_2026_11_06 (same Hokuyo); not re-measured",
+            lidar_dropout_rate="CARRIED from sfu_course_2026_11_06; not re-measured",
+            lidar_self_hits="CARRIED from sfu_course_2026_11_06; not re-measured",
         ),
     ),
     "sfu_course_2026_10_30": Floor(
@@ -711,6 +865,10 @@ def describe(calibration: CarCalibration | None = None) -> list[tuple]:
                 provenance, source = (Provenance.DERIVED,
                     'rb1: -(0.75 - 0.366) / 0.83 rad, computed from the servo map, not measured; '
                     'cars/rb1/calibration/vesc.yaml at servo_max 0.75; cars/rb1/car.yaml')
+        if field.name in SPEED_LOOP_FIELDS and calibration.car_id:
+            loop, loop_source, named = car_speed_loop(calibration.car_id)
+            if field.name in named and getattr(calibration, field.name) == loop[field.name]:
+                provenance, source = Provenance.MEASURED, loop_source
         rows.append(
             (provenance, field.name, getattr(calibration, field.name), source)
         )

@@ -1,5 +1,6 @@
 import json
 import math
+from collections import deque
 
 import numpy as np
 import rclpy
@@ -13,7 +14,7 @@ from std_msgs.msg import String
 
 from drive_intent import predict, schema
 from drive_intent.throttle import FailureLatch, IntentThrottle
-from gap_follow import gap_logic, launch_boost, live_tuning, opponent_tracking
+from gap_follow import gap_logic, launch_boost, live_tuning, opponent_tracking, reverse_escape
 
 # /imu/status is latched by imu_bridge (its STATUS_QOS), so a node started
 # after the bridge still gets the current verdict at once.
@@ -245,6 +246,25 @@ class GapFollowNode(Node):
         # Crawl allowed once inside forward_stop_clearance, so a car that has
         # found its way out of a corner can take it instead of latching.
         self.declare_parameter('escape_creep_speed', 0.40)
+        # Crawl away from a wall alongside the body when the body's own arc is
+        # clear (gap_logic.body_arc_free_distance); 0 = off. See the
+        # speed stage and docs/superpowers/plans/2026-11-12-post-race-speed-program.md.
+        self.declare_parameter('flank_creep_length', 0.0)
+        self.declare_parameter('flank_creep_margin', 0.02)
+        # Reverse escape (reverse_escape.py, docs/gap-follow.md#reverse-escape): back out of a nose-in stop over
+        # the ground the car just drove across, slowly, a short fixed distance, straight. OFF by default.
+        self.declare_parameter('enable_reverse_escape', False)
+        self.declare_parameter('reverse_escape_speed', 0.30)
+        self.declare_parameter('reverse_escape_max_distance', 0.35)
+        self.declare_parameter('reverse_escape_max_time', 1.6)
+        self.declare_parameter('reverse_escape_wait_sec', 1.0)
+        self.declare_parameter('reverse_escape_settle_sec', 0.3)
+        self.declare_parameter('reverse_escape_cooldown_sec', 4.0)
+        self.declare_parameter('reverse_escape_max_attempts', 2)
+        self.declare_parameter('reverse_escape_rearm_progress', 3.0)
+        self.declare_parameter('reverse_escape_rear_quarter_clearance', 0.10)
+        self.declare_parameter('reverse_escape_rear_band_lo_deg', 95.0)
+        self.declare_parameter('reverse_escape_rear_band_hi_deg', 130.0)
 
         # Cornering anticipation: an extra speed cap from how much the
         # chosen gap's near-only bearing (gap_logic.near_gap_bearing)
@@ -493,6 +513,10 @@ class GapFollowNode(Node):
             self.get_parameter('forward_stop_fov_deg').value))
         self.escape_creep_speed = float(
             self.get_parameter('escape_creep_speed').value)
+        self.flank_creep_length = float(
+            self.get_parameter('flank_creep_length').value)
+        self.flank_creep_margin = float(
+            self.get_parameter('flank_creep_margin').value)
         self.enable_cornering_anticipation = bool(
             self.get_parameter('enable_cornering_anticipation').value)
         self.anticipation_near_depth = float(
@@ -628,6 +652,45 @@ class GapFollowNode(Node):
             raise ValueError(
                 'escape_creep_speed must be finite, positive, and no greater '
                 'than max(min_speed, 0.5) -- it is a crawl, not a drive speed')
+        if not (math.isfinite(self.flank_creep_length)
+                and 0.0 <= self.flank_creep_length <= 2.0):
+            raise ValueError(
+                'flank_creep_length must be finite and within [0, 2] m '
+                '(0 turns the flank creep off)')
+        if not (math.isfinite(self.flank_creep_margin)
+                and 0.0 <= self.flank_creep_margin <= 0.10):
+            raise ValueError(
+                'flank_creep_margin must be finite and within [0, 0.10] m')
+        self.enable_reverse_escape = bool(self.get_parameter('enable_reverse_escape').value)
+        self.reverse_rear_clearance = float(self.get_parameter('reverse_escape_rear_quarter_clearance').value)
+        self.reverse_band = (float(self.get_parameter('reverse_escape_rear_band_lo_deg').value),
+                             float(self.get_parameter('reverse_escape_rear_band_hi_deg').value))
+        if not (math.isfinite(self.reverse_band[0]) and math.isfinite(self.reverse_band[1])
+                and 90.0 <= self.reverse_band[0] < self.reverse_band[1] <= 135.0):
+            raise ValueError(
+                'reverse_escape_rear_band_lo_deg and _hi_deg must be finite, with 90 <= lo < hi <= 135 deg')
+        # ValueError from the constructor names the argument that is out of range. Built only when the feature
+        # is on: with it off there is no state machine at all (self.reverse is None), so no code path can command
+        # a negative speed.
+        self.reverse = None if not self.enable_reverse_escape else reverse_escape.ReverseEscape(
+            wait_sec=float(self.get_parameter('reverse_escape_wait_sec').value),
+            speed=float(self.get_parameter('reverse_escape_speed').value),
+            max_distance=float(self.get_parameter('reverse_escape_max_distance').value),
+            max_time=float(self.get_parameter('reverse_escape_max_time').value),
+            settle_sec=float(self.get_parameter('reverse_escape_settle_sec').value),
+            cooldown_sec=float(self.get_parameter('reverse_escape_cooldown_sec').value),
+            max_attempts=int(self.get_parameter('reverse_escape_max_attempts').value),
+            rearm_progress=float(self.get_parameter('reverse_escape_rearm_progress').value),
+            rear_quarter_clearance=self.reverse_rear_clearance)
+        # Per scan tick: this tick's interval (scan stamps), whether the pipeline ended blocked ahead, the rear
+        # quarters, the net forward ground driven in the last 3 s, and what the machine reported.
+        self._rev_last_stamp = None
+        self._rev_dt = 0.0
+        self._rev_hint = False
+        self._rev_rear_clear = False
+        self._rev_recent = 0.0
+        self._rev_report = None
+        self._rev_ring = deque()
         if not math.isfinite(self.forward_stop_fov) or not (
                 0.0 < self.forward_stop_fov <= self.forward_fov):
             raise ValueError(
@@ -1367,8 +1430,61 @@ class GapFollowNode(Node):
                 'published stop, node will exit')
             raise
 
+    def _reverse_tick_start(self, scan: LaserScan):
+        """Per-scan bookkeeping for the reverse escape (only when it is enabled): the interval from the scan
+        stamps (a stamp that is zero, repeated, older or more than 0.25 s later gives 0: nothing advances), and
+        the net forward distance driven in the last 3 s from fresh odometry (0 when it is stale)."""
+        stamp = scan.header.stamp.sec + scan.header.stamp.nanosec * 1e-9
+        previous = self._rev_last_stamp
+        dt = stamp - previous if previous is not None and stamp > previous else 0.0
+        self._rev_dt = dt if dt <= 0.25 else 0.0
+        self._rev_last_stamp = stamp
+        self._rev_hint = False
+        self._rev_rear_clear = False
+        self._rev_report = None
+        fresh = self._odom_fresh()
+        step_m = self.current_speed * self._rev_dt if fresh else 0.0
+        self._rev_ring.append((stamp, step_m))
+        while self._rev_ring and stamp - self._rev_ring[0][0] > 3.0:
+            self._rev_ring.popleft()
+        self._rev_recent = max(0.0, sum(m for _, m in self._rev_ring)) if fresh else 0.0
+        if fresh and step_m > 0.0:
+            self.reverse.note_forward(step_m)
+
+    def _reverse_rear_check(self, scan: LaserScan):
+        clear, _detail = reverse_escape.rear_quarter_clear(
+            scan.ranges, scan.angle_min, scan.angle_increment, scan.range_min,
+            car_width=self.car_width, car_length=self.car_length, wheelbase=self.wheelbase,
+            laser_offset_x=self.laser_offset_x, laser_offset_y=self.laser_offset_y,
+            clearance=self.reverse_rear_clearance, band_deg=self.reverse_band)
+        # A hard impact while backing ends the reverse like a blocked rear quarter does.
+        self._rev_rear_clear = bool(clear and not self.impact_latch.latched)
+
+    def _reverse_override(self, speed: float):
+        """The reverse escape's command for this tick, or None. Called from _publish_drive, which every scan
+        tick reaches exactly once (the drive path and _stop()), so the machine is stepped once per tick and sees
+        the deadman, a stale odometry or a blocked rear quarter on the very tick they happen."""
+        out = self.reverse.step(
+            dt=self._rev_dt, deadman=self._deadman_engaged(),
+            blocked_ahead=bool(self._rev_hint and speed == 0.0),
+            measured_speed=self.current_speed if self._odom_fresh() else None,
+            rear_quarter_clear=self._rev_rear_clear, recent_forward_m=self._rev_recent)
+        if out is None:
+            self._rev_report = None
+            return None
+        if out < 0.0:
+            detail = (f"reverse escape: backing out, {self.reverse.remaining:.2f}m of {self.reverse.target:.2f}m "
+                      f"left at {-out:.2f}m/s, straight (blocked ahead, rear quarters clear, "
+                      f"{self._rev_recent:.2f}m driven in the last 3 s, attempt {self.reverse.attempts})")
+        else:
+            detail = 'reverse escape: settling after the reverse'
+        self._rev_report = dict(detail=detail, speed=out)
+        return out
+
     def _scan_step(self, scan: LaserScan):
         self.last_scan_time = self.get_clock().now()
+        if self.reverse is not None:
+            self._reverse_tick_start(scan)
 
         deadman_ok, stop_state, stop_detail = self._deadman_status()
         if not deadman_ok:
@@ -1400,6 +1516,8 @@ class GapFollowNode(Node):
         # they must never trigger the emergency stop, but must stay
         # non-free for gap selection -- see gap_logic.sanitize_ranges.
         clean, valid = gap_logic.sanitize_ranges(scan.ranges, self.max_range, scan.range_min)
+        if self.reverse is not None:
+            self._reverse_rear_check(scan)
         self.opponent_mode = None
         if self.opponents is not None:
             self._observe_opponents(clean, valid, scan)
@@ -1656,8 +1774,11 @@ class GapFollowNode(Node):
         # no_safe_gap stop below. The alongside-abort ceiling is added after the
         # memory, so it binds only on scans that see the alongside car.
         if self.opponents is not None:
+            # A cap set by a track that has since been confirmed static is not held (a wall is not a car).
+            self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())
             follow_cap, held = self.opponents.follow_memory.update(
-                follow_cap, self.opponent_last_stamp)
+                follow_cap, self.opponent_last_stamp,
+                self.opponents.follow_cap_track if follow_cap != math.inf else None)
             if held:
                 self.opponent_mode = ('follow_memory' if alongside_cap == math.inf
                                       else 'follow')
@@ -1671,6 +1792,7 @@ class GapFollowNode(Node):
                 # stop that would have fired above had this tier not been
                 # given a chance to escape first.
                 if emergency_tripped:
+                    self._rev_hint = True      # directional and boxed in: the nose-in case
                     self._stop('emergency_clearance', emergency_detail)
                 else:
                     self._stop(
@@ -1684,6 +1806,7 @@ class GapFollowNode(Node):
                 f"{closest_dist:.2f}m"
                 if math.isfinite(closest_dist)
                 else "no valid return")
+            self._rev_hint = True
             self._stop(
                 'no_safe_gap',
                 f"no gap exceeds either the preferred "
@@ -1914,6 +2037,32 @@ class GapFollowNode(Node):
                     self.max_speed,
                 ),
             )
+        # Flank creep: the swept-path ceiling above is zero for any wall
+        # inside its band beside the body (a return alongside gives along < 0,
+        # clamped to 0), and the cone above reads clear, so a car 5 cm off a
+        # wall with open road ahead stopped for good (rb1 20261111-155542,
+        # 87.6-95.9 s). The crawl is allowed only when the body's own
+        # rectangle, driven along the arc the rack will drive this tick, meets
+        # no return within flank_creep_length: touching the wall, or steering
+        # into it, still stops. Never on an emergency or TTC tick.
+        flank_creeping = False
+        if (self.flank_creep_length > 0.0 and clearance_speed <= 0.0
+                and not creeping and not (emergency_tripped or ttc_tripped)
+                and gap_logic.body_arc_free_distance(
+                    raw_window, window_valid, beam_angles,
+                    math.tan(steering_angle) / self.wheelbase,
+                    self.car_width / 2.0 + self.flank_creep_margin,
+                    self.car_length, self.wheelbase, self.laser_offset_x,
+                    self.laser_offset_y,
+                    max_length=self.flank_creep_length) == math.inf):
+            clearance_speed = self.escape_creep_speed
+            creeping = True
+            flank_creeping = True
+            # A crawl away from a wall is not a launch: do not start the
+            # boost on it (it would drop the ramp and caps), and end one that
+            # is running, as the other escapes do.
+            launching = False
+            self.launch_boost.end('flank_creep')
         understeer_cap, understeer_off = self._understeer_cap(steering_angle, command_dt)
         # Launch boost: end it once the braking ceiling reaches the car, the car
         # turns, or the time/distance backstop runs out (launch_boost.step).
@@ -1985,6 +2134,9 @@ class GapFollowNode(Node):
             # Launch boost: no ramp and no traction hold. Wheelspin off the
             # line is accepted (the traction state above still updates).
             speed = desired_speed
+        # Blocked ahead for the reverse escape: the clearance (or forward-reserve creep) ceiling is what holds the
+        # car at zero, not a flank creep, a TTC trip or another cap.
+        self._rev_hint = reverse_escape.blocked_by_clearance(speed, clearance_speed, flank_creeping, ttc_tripped)
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
         if self.enable_imu_traction:
@@ -2092,7 +2244,12 @@ class GapFollowNode(Node):
                if launching else "")
             + (f", follow cap={follow_cap:.2f}m/s" if math.isfinite(follow_cap) and not launching else "")
             + (f", opponent mode={self.opponent_mode}" if self.opponent_mode else "")
-            + (f", CREEP (forward clearance {forward_clearance:.3f}m inside "
+            + (f", static (radial residual {min(self.opponents.static_skipped):.2f}m/s): not followed"
+               if self.opponents is not None and self.opponents.static_skipped and not launching else "")
+            + (f", FLANK CREEP (wall alongside, body arc clear for "
+               f"{self.flank_creep_length:.2f}m; crawling away)"
+               if flank_creeping else
+               f", CREEP (forward clearance {forward_clearance:.3f}m inside "
                f"the {self.forward_stop_clearance:.3f}m reserve; crawling out)"
                if creeping else ""))
         # A trip that found a gap prefixes the *why* (the same detail the
@@ -2124,7 +2281,8 @@ class GapFollowNode(Node):
         # cannot be mistaken for a cap.
         intent_factors = [
             schema.factor('curve cap', normal_speed),
-            schema.factor('creep cap' if creeping else 'clearance cap',
+            schema.factor('flank creep' if flank_creeping
+                          else 'creep cap' if creeping else 'clearance cap',
                           clearance_speed),
         ]
         if used_fallback:
@@ -2621,6 +2779,13 @@ class GapFollowNode(Node):
         return now, min(self.command_slew_max_dt, max(0.0, elapsed))
 
     def _publish_drive(self, steering_angle: float, speed: float, now=None):
+        if self.reverse is not None:
+            override = self._reverse_override(speed)
+            if override is not None:
+                # Straight, at most reverse_escape_speed, no ramp. Every command goes through here, so the deadman
+                # (_scan_step stops first, and the machine is also given it) gates this one like any other.
+                self.steering_basis = 0.0
+                steering_angle, speed = 0.0, override
         if now is None:
             now = self.get_clock().now()
         if math.isfinite(speed) and math.isfinite(steering_angle):
@@ -2705,6 +2870,11 @@ class GapFollowNode(Node):
         decision_log_period_sec), so an expensive explanation costs nothing
         on the ticks in between.
         """
+        if self._rev_report is not None:
+            state, reason = 'reverse_escape', self._rev_report['detail']
+            desired_steering = commanded_steering = 0.0
+            desired_speed = commanded_speed = self._rev_report['speed']
+            factors, targets, wedge = (), (), None
         if self.intent_pub is None or self._intent_failures.disabled:
             return
         now = self.get_clock().now().nanoseconds / 1e9
@@ -2771,6 +2941,9 @@ class GapFollowNode(Node):
     def _log_decision(self, state: str, detail: str, steering_angle: float,
                       speed: float, command_published: bool = True):
         """Log state transitions immediately and steady decisions periodically."""
+        if self._rev_report is not None:
+            state, detail = 'reverse_escape', self._rev_report['detail']
+            steering_angle, speed = 0.0, self._rev_report['speed']
         now = self.get_clock().now()
         state_changed = state != self.last_decision_state
         period_elapsed = (

@@ -393,6 +393,39 @@ gap_follow_node:
     # max(min_speed, 0.5), checked at startup), a pure config change with
     # no code implication.
     escape_creep_speed: 0.40
+    # Crawl away from a wall alongside the body, while the road ahead is open.
+    # Added 2026-11-12: rb1 20261111-155542 sat 8.3 s (87.6-95.9 s) with the
+    # left wall 0.20 m from the LiDAR (4-5 cm off the body), 0.82 m free ahead
+    # and the rack pointing away; swept_path_clearance read 0.00 for every
+    # steering angle because a return inside its band beside the body gives
+    # along < 0, and the forward cone read clear, so no creep. rb2
+    # 20261111-142254 lost 13.6 s the same way (plan section 1.2). With this
+    # on, the crawl (escape_creep_speed) is allowed when the body rectangle,
+    # widened by flank_creep_margin a side and driven along the arc the rack
+    # will drive this tick, meets no scan return within flank_creep_length (m).
+    # A wall touching the body, or steering into it, still stops. 0 = off.
+    flank_creep_length: 0.50
+    flank_creep_margin: 0.02
+
+    # --- Reverse escape (reverse_escape.py, docs/gap-follow.md#reverse-escape) ---
+    # Back out of a nose-in stop: something close ahead, no forward arc clears it, the car stopped (rb2
+    # 20261111-142254, 104.6-118.2 s: 13.6 s parked 0.22 m from a return). After reverse_escape_wait_sec of that it
+    # drives straight back at reverse_escape_speed over ground it drove across in the last 3 s, at most
+    # reverse_escape_max_distance (and no further than it came), only while the rear quarters (95-130 deg each side,
+    # clear of the body by reverse_escape_rear_quarter_clearance) read clear. The LiDAR sees +-135 deg, not directly
+    # behind. OFF: no car turns it on yet. Not modelled by the simulators (gap_mirror).
+    enable_reverse_escape: false
+    reverse_escape_speed: 0.30
+    reverse_escape_max_distance: 0.35
+    reverse_escape_max_time: 1.6
+    reverse_escape_wait_sec: 1.0
+    reverse_escape_settle_sec: 0.3
+    reverse_escape_cooldown_sec: 4.0
+    reverse_escape_max_attempts: 2
+    reverse_escape_rearm_progress: 3.0
+    reverse_escape_rear_quarter_clearance: 0.10
+    reverse_escape_rear_band_lo_deg: 95.0
+    reverse_escape_rear_band_hi_deg: 130.0
 
     # --- Cornering anticipation ---
     # An extra speed cap from how much the chosen gap's near-only bearing
@@ -615,6 +648,19 @@ gap_follow_node:
     # without it. To turn the whole layer off, memory included, use
     # enable_opponent_awareness: false here, or opponent_awareness:=false at launch.
     opponent_follow_memory_sec: 1.0  # s, inclusive hold, released one scan later
+    # Static confirmation: a track whose radial residual (d(range)/dt + v cos b + omega laser_x sin b,
+    # median of >= 4 samples in the last 0.6 s) is below this is a wall or a parked object, not a car to
+    # follow, so it contributes no follow cap (it stays an obstacle for everything else). Missing
+    # samples never confirm. 0.0 turns it off. Measured on rb1 runs 20261111-155542 and -153721,
+    # tools/run_analysis/results/2026-11-13-static-confirmation-gate.md: 0.35 confirms 0.80 / 0.86 of
+    # wall-following ticks and 1 of 159 truly moving ticks. The follow cap is lifted only for objects
+    # measured not to move.
+    opponent_follow_static_radial_speed: 0.35  # m/s
+    # And across the line of sight (range * d(bearing)/dt - v sin b + omega (laser_x cos b + range)), which a
+    # car crossing in front breaks and a wall does not: confirmed only when BOTH medians are below their
+    # limit. 1.5 is the smallest T with >= 0.75 of wall ticks confirmed on both rb1 runs (0.763 / 0.852;
+    # T=1.2: 0.650 / 0.773), tools/run_analysis/results/2026-11-13-static-confirmation-gate.md. 0 never confirms.
+    opponent_follow_static_tangential_speed: 1.5  # m/s
     opponent_follow_lateral: 0.45    # m, |y| within which a car ahead is "in the path"
     opponent_relevant_lateral: 1.0   # m, |y| beyond which a moving car is ignored
     # Steering limit for starting a pass. 0.10 rad is shipped, chosen by the R4

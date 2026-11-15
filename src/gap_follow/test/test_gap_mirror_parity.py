@@ -779,3 +779,44 @@ def test_an_old_yaml_without_the_memory_replays_with_it_off(tmp_path):
     assert gap_mirror.node_params(old, fill_legacy=True)['opponent_follow_memory_sec'] == 0.0
     # The shipped file says what the car does now: the hold is on.
     assert gap_mirror.node_params()['opponent_follow_memory_sec'] == 1.0
+
+
+@pytest.mark.parametrize('name, kwargs, creeps', [
+    ('wall 5 cm off the flank, open road', dict(wall_left=0.20), True),
+    ('wall touching the body', dict(wall_left=0.15), False),
+    ('only gap is toward the wall', dict(wall_left=0.20, block=(-135.0, 24.0, 0.6)), False),
+])
+def test_mirror_matches_the_node_on_the_flank_creep(node, name, kwargs, creeps):
+    """The flank creep (Task 2 of the 2026-11-12 post-race plan) lives in the
+    node and in the simulator's copy; they must agree on the creep, on the
+    touching wall and on steering into the wall."""
+    from test_gap_follow_flank_creep_node import _scan
+    joy = Joy()
+    joy.buttons = [0] * 5
+    joy.buttons[4] = 1
+    published = []
+    node.drive_pub.publish = lambda msg: published.append(msg)
+    scan = _scan(**kwargs)
+    params = gap_mirror.node_params()
+    params['command_slew_max_dt'] = DT
+    node.command_slew_max_dt = DT
+    mirror = gap_mirror.GapController(params, _Lidar(scan))
+    node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+    for step in range(8):
+        node.joy_callback(joy)
+        odom = Odometry()
+        node.odom_callback(odom)
+        node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+        mirror.steering_basis = node.steering_basis
+        mirror.last_commanded_speed = node.last_commanded_speed
+        mirror.previous_target_idx = node.previous_target_idx
+        mirror.last_command_time = step - 1
+        node.scan_callback(scan)
+        expected_steering, expected_speed = mirror.command(
+            np.asarray(scan.ranges), 0.0, step)
+        drive = published[-1].drive
+        assert drive.steering_angle == pytest.approx(expected_steering, abs=TOLERANCE), (
+            f'{name}, tick {step}: steering')
+        assert drive.speed == pytest.approx(expected_speed, abs=TOLERANCE), (
+            f'{name}, tick {step}: speed')
+    assert (published[-1].drive.speed > 0.0) == creeps, name
