@@ -43,3 +43,10 @@ start line, not from positions) would settle it.
 Reproduce (needs the run, which stays on car 2): `rb python3 tools/run_analysis/laps.py <run> --line
 tools/f1tenth_sim/maps/car2_course_2026_11_11_centerline.csv`; the simulator lap is `eval_gap.run_track` with the
 settings above.
+
+## Correction (2026-11-14, evening)
+
+The simulator lap above (11.0 s, 2.77-2.83 m/s) is a **standing-start** lap; the real run's 2.71 m/s is over 107 s
+of mostly flying laps. The simulator's flying laps are 10.10-10.25 s at about 3.0 m/s, so the time-trial arm is
+about 10% optimistic, not 1-4%. The conclusion that the localisation-based 11.9 s is not a measurement stands; the
+claim that the simulator "agrees on speed" does not.

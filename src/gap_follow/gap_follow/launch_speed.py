@@ -68,3 +68,16 @@ def speed_cap_overrides(yaml_params, requested):
 #: default (docs/gap-follow.md#speed-on-the-real-course-2026-10-30).
 TIME_TRIAL = {'aim_depth_bias': 1.0, 'max_lateral_accel': 3.0,
               'enable_opponent_awareness': False}
+
+
+#: Per-car additions to TIME_TRIAL (2026-11-14). Car 2: a softer steering gain and a faster command
+#: slew -- 2-7% faster on 14 of 16 simulator courses with zero contact (race-day course 11.00 -> 10.78 s
+#: standing, 10.18 -> 9.88 s flying; asb_sharp +0.4%, min clearance 0.150 -> 0.100 m there),
+#: tools/run_analysis/results/2026-11-14-gap-follow-pace.md. Car 1 keeps the shared values: the same
+#: change made contact on three courses with its slower servo (1.75 rad/s) and 0.33 rad steering limit.
+TIME_TRIAL_BY_CAR = {'rb2': {'steering_gain': 0.8, 'max_steering_rate': 4.0}}
+
+
+def time_trial_overrides(car_id):
+    """time_trial:=true's parameter overrides for ``car_id``: TIME_TRIAL plus that car's additions."""
+    return {**TIME_TRIAL, **TIME_TRIAL_BY_CAR.get(car_id, {})}
