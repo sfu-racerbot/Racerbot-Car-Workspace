@@ -16,7 +16,7 @@ from pure_pursuit import pass_planner as pp
 from test_pass_planner import LINE, LIMITS, corridor, pose_behind
 
 STOPPED_LIMITS = replace(LIMITS, wall_margin=0.06, car_margin=0.06, long_margin=0.08, steering_headroom=0.95,
-                         spacing=0.05, body_grid=(17, 9))   # as pure_pursuit_node._pass_limits(stopped=True)
+                         spacing=0.05, body_grid=(17, 9), exact_car=True, steer_window=0.3)   # as the node's stopped limits
 PARKED = pp.StalledOpponent(rear_arc=10.0, lateral=0.0, speed_bound=0.1, age=0.0)
 
 

@@ -3187,7 +3187,7 @@ class PurePursuitNode(Node):
                              car_margin=self.stopped_bypass_car_margin,
                              long_margin=max(self.stopped_bypass_car_margin, limits.keep_long_margin),
                              steering_headroom=self.stopped_bypass_steering_headroom,
-                             spacing=0.05, body_grid=(17, 9))
+                             spacing=0.05, body_grid=(17, 9), exact_car=True, steer_window=0.3)
         return limits
 
     def _pass_stopped(self, line, now, point):
