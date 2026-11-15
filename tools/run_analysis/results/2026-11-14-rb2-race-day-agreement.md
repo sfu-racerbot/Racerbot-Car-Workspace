@@ -50,3 +50,32 @@ The simulator lap above (11.0 s, 2.77-2.83 m/s) is a **standing-start** lap; the
 of mostly flying laps. The simulator's flying laps are 10.10-10.25 s at about 3.0 m/s, so the time-trial arm is
 about 10% optimistic, not 1-4%. The conclusion that the localisation-based 11.9 s is not a measurement stands; the
 claim that the simulator "agrees on speed" does not.
+
+## Second correction (2026-11-15): the time-trial arm agrees on speed; "10% optimistic" was a measuring error
+
+Both the table's "path 30.4-31.0 m per lap" and the evening correction's "about 3.0 m/s" came from summing the
+distance between consecutive `x, y` samples of `eval_gap`'s trace. Those are the controller's **estimated** pose
+(`std_state`, with the plant's 2 cm white pose noise), not ground truth: on 7 cm steps the noise lengthens the path by
+about 10%. Integrating the plant's true speed instead (same run: rb2, shared time trial, `sfu_course_2026_11_11_rb2`,
+seed 12345, 4 laps) gives 82.4 m over 30.6 s of flying laps against 90.6 m from the noisy positions.
+
+Speed while driving, ticks commanded above 1.5 m/s:
+
+| | commanded | true |
+|---|---|---|
+| real 135934 (`/drive`; `/odom` / 1.0167) | 2.66 m/s | 2.73 m/s |
+| simulator, flying laps | 2.56 m/s | 2.64 m/s (2.69 over all flying ticks) |
+
+The simulator is 1-3% *slower* than the car, not 10% faster. The steering it commands is the same too: mean |steering|
+0.166 rad real against 0.185, p90 0.42 both, 0.96 direction changes per second both. Binding shares (`intent_report.py`)
+are curve cap 49%, clearance 27%, acceleration ceiling 24% on the car, matching Fable's simulator count (41-49% curve).
+
+A speed-loop refit on this run (`fit_speed_loop.py`, wider grid: accel gain 10, max 5.0, brake 4 / 4, delay 3) lowers
+the 1-D replay error by 12-14% against the race-day floor's loop on all three race-day runs (two out of sample), but
+makes the closed-loop simulator faster still (standing 11.0 -> 10.78 s), so it is not adopted on that evidence alone.
+
+**The real lap, without localisation:** the autocorrelation of `/drive` steering over the 109 s LB hold peaks at a lag of
+9.70 s (r 0.78) and again at 19.40 s, so the car's flying laps were about **9.70 s**, against the simulator's 10.1-10.25
+s. The car drove a shorter path (about 26.5 m at 2.73 m/s, against the simulator's 27.5 m) at about the same speed. For
+the time trial the simulator is therefore 4-5% **slow**, not optimistic. It also means car 2's gap-follow time trial
+(9.70 s) was faster on race day than its map racer (10.05 s flying).

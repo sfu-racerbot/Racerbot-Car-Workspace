@@ -720,3 +720,29 @@ def test_no_pass_starts_before_a_full_acceleration_window():
     # window spans ~0.35 s: still gated, and still idle.
     assert states[0.5] == ('idle', True, True)
     assert d._pass_state == 'pass'            # a full window of a car that is not speeding up
+
+
+def test_the_car_behind_is_the_striker_in_a_car_contact():
+    # Oracle: definition in race_metrics -- lead = ego - opponent - signed head start; lead < 0 means we are
+    # behind, so a contact then is ours. Head start 3 m (opponent ahead) and -3 m (ego_ahead: opponent behind).
+    behind = row(.1, ego_progress=10.0, opp_progress=8.0, car_contact=[0, 1])        # lead -1: we hit it
+    level = row(.2, ego_progress=11.0, opp_progress=8.0, car_contact=[0, 1])         # lead 0: it hit us
+    got = race.race_metrics([behind, level], .1, 40, 4)
+    assert (got['ego_striking_contact_ticks'], got['opponent_striking_contact_ticks']) == (1, 1)
+    ahead = [dict(r, head_start=-3.0) for r in (row(.1, ego_progress=10.0, opp_progress=13.5, car_contact=[0, 1]),
+                                                row(.2, ego_progress=10.0, opp_progress=12.9, car_contact=[0, 1]))]
+    got = race.race_metrics(ahead, .1, 40, 4)                     # leads -0.5 (we hit it) and +0.1 (it hit us)
+    assert (got['ego_striking_contact_ticks'], got['opponent_striking_contact_ticks']) == (1, 1)
+    clean = race.race_metrics([row(.1, ego_progress=10.0, opp_progress=8.0)], .1, 40, 4)
+    assert clean['ego_striking_contact_ticks'] == clean['opponent_striking_contact_ticks'] == 0
+
+
+def test_after_lapping_a_car_the_lead_is_wrapped_and_a_stopped_car_never_strikes():
+    # Oracle: definition in race_metrics. 40 m lap. We have lapped it (unwrapped lead +38.5 m = -1.5 m wrapped):
+    # we are behind it again, so the contact is ours. A contact with a car moving 0.1 m/s is ours even when it is
+    # behind us (lead +0.5 m).
+    lapped = row(.1, ego_progress=44.5, opp_progress=3.0, car_contact=[0, 1], opp_speed=2.0)    # 44.5-3-3 = 38.5
+    stopped = row(.2, ego_progress=10.0, opp_progress=6.5, car_contact=[0, 1], opp_speed=0.1)   # lead +0.5
+    moving = row(.3, ego_progress=10.0, opp_progress=6.5, car_contact=[0, 1], opp_speed=0.5)    # lead +0.5
+    got = race.race_metrics([lapped, stopped, moving], .1, 40, 4)
+    assert (got['ego_striking_contact_ticks'], got['opponent_striking_contact_ticks']) == (2, 1)

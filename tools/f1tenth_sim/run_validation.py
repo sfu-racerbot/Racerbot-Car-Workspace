@@ -78,6 +78,8 @@ OVERTAKE_MIN_SIDE_CLEARANCE = 0.70
 # Stand-off the scripted opponent keeps from whatever is in front of it.
 OPPONENT_RESERVE_DISTANCE = 0.5
 SAFETY_MODES = ("fallback", "map")
+# The node's law parameter prefixes (pure_pursuit_node, the loop before make_law).
+LAW_PARAM_PREFIXES = ('stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
 
 # Which fidelity fixes are in force. Set from --fidelity in main(); the
 # module-level default keeps probe scripts that import this file honest.
@@ -655,6 +657,11 @@ class PathFollower:
             params = {'min_lookahead': min_lookahead,
                       'max_lookahead': max_lookahead,
                       'lookahead_speed_gain': lookahead_gain}
+            # As pure_pursuit_node builds _law_params: every law's dotted parameters from the car's
+            # effective pure_pursuit.yaml (shared, then its calibration and tuning overlays), so car 1's
+            # tuned delay_lqr.servo_* reach the law. Until 2026-11-15 these were dropped here.
+            params.update({k: v for k, v in PURE_PURSUIT_PARAMS.items()
+                           if k.split('.', 1)[0] in LAW_PARAM_PREFIXES and '.' in k})
             params.update(law_params or {})
             law = tracking_laws.make_law(law_name, self.VEHICLE_LIMITS, params)
         self.law = law

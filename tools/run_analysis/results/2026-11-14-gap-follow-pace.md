@@ -68,3 +68,31 @@ What helped: a softer `steering_gain` with a faster command slew.
 Zero contact before and after on every course; minimum clearance on the race-day course 0.150 -> 0.100 m. Two small
 regressions: asb_sharp +0.05 s, car1_course_2026_10_26 flying +0.13 s. Car 1 keeps the shared time trial: the same
 change made contact on course_2026_10_30, its _scans version and asb_sharp with car 1's calibration.
+
+## Update 2026-11-15: #71 reverted after the floor matrix
+
+The suite above ran each course on one floor. `tools/f1tenth_sim/floor_matrix.py` (#79) runs every map course on car 2's
+own calibration and on the race-day floor `sfu_course_2026_11_11_rb2`, each at grip scale 0.85, 1.0 and 1.15, 3 seeds,
+2 laps from a standing start, and compares cell by cell (no new stall or contact, minimum chassis clearance no lower
+than the reference's minus 0.03 m):
+
+    python3 tools/f1tenth_sim/floor_matrix.py --car rb2 --time-trial \
+        --arm 'shared:steering_gain=1.0,max_steering_rate=2.0' --arm 'p71:' \
+        --track maps --floors car,sfu_course_2026_11_11_rb2 --grip 0.85,1.0,1.15 --seeds 3
+
+#71 was worse in 32 of 72 cells. The ones that decide it, all on the race-day floor:
+
+| course, grip | shared time trial | #71 |
+|---|---|---|
+| `course_2026_10_30`, 0.85 / 1.0 | 0 contact, 0.05 m | 3 / 2 of 3 contact |
+| `course_2026_10_30_scans`, 0.85 | 0 contact | 3 of 3 contact |
+| `car2_course_2026_11_06b`, 1.0 | 0 contact, 0.10 m | 2 of 3 contact |
+| `car2_course_2026_11_06a(_scans)`, 0.85 | 2 / 1 stalls | 3 / 3 stalls |
+| `car2_course_2026_11_11` (race day), 1.0 | 0.15 m | 0.10 m |
+
+It is faster where it finishes (room 5.9 -> 5.5 s, 10-30 on car 2's own floor 16.25 -> 15.58 s), but the gain does not
+survive a floor change, so `TIME_TRIAL_BY_CAR` is empty again; the per-car mechanism stays, and the time trial's
+opponent-awareness refusal now always wins over a per-car entry.
+
+The shared time trial is not clean either on the race-day floor: contact on `course_2026_10_30_scans` (1 of 3 at
+grip 1.0, 3 of 3 at 1.15), on `course_2026_10_30` at 1.15 (1 of 3), and on `levine_obs` on both floors. That is open.
