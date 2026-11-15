@@ -3474,8 +3474,9 @@ class PurePursuitNode(Node):
                 self.overtake_active = True
                 self.last_opponent_status = f'overtake rejoining on a checked path at {cap:.2f}m/s'
                 return
-        if parked_lead is not None and parked_lead >= limits.clear_margin:
-            # Past the parked car by the rejoin margin: nothing of this manoeuvre is left to protect.
+        if parked_lead is not None and parked_lead >= limits.long_margin:
+            # Past the parked car's latched front by the planning margin: it is parked (a sighting outside its
+            # footprint would have released the latch), so the moving-car rejoin margin does not apply.
             self.last_opponent_status = f'overtake complete: {parked_lead:.2f}m past the parked car'
             self._pass_reset_after(now)
             return
