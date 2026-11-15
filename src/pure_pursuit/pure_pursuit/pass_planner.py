@@ -479,6 +479,9 @@ class Manoeuvre:
         return replace(self, s_return=math.inf)
 
 
+HOLD_EASE = 1.0     # metres over which a held bypass eases its end slope to zero
+
+
 @dataclass(frozen=True)
 class Bypass:
     """A stopped car's bypass: a crawl path found by rollout (crawl_rollout), anchored to the line once as offsets
@@ -513,13 +516,21 @@ class Bypass:
         # point, which build() reads as unsteerable.
         spline = CubicSpline(self.s_rel, self.d, bc_type='natural')
         d = spline(np.clip(r, 0.0, end))
+        slope = float(spline(end, 1))
+        t5 = lambda t: (1 - 10 * t ** 3 + 15 * t ** 4 - 6 * t ** 5, t - 6 * t ** 3 + 8 * t ** 4 - 3 * t ** 5,
+                        10 * t ** 3 - 15 * t ** 4 + 6 * t ** 5)
+        if not math.isfinite(self.back):
+            # Held: ease the path's end slope out over HOLD_EASE metres (no kink), then keep that offset.
+            t = np.clip((r - end) / HOLD_EASE, 0.0, 1.0)
+            h0, h1, h5 = t5(t)
+            hold = self.d[-1] * h0 + slope * HOLD_EASE * h1 + (self.d[-1] + slope * HOLD_EASE / 2) * h5
+            return np.where(r > end, hold, d)
         if math.isfinite(self.back):
             # Back to the line by a quintic Hermite that starts with the path's own offset and slope (no kink
             # where the path ends) and ends on the line with zero slope and curvature.
             t = np.clip((r - end) / self.back, 0.0, 1.0)
-            h0 = 1 - 10 * t ** 3 + 15 * t ** 4 - 6 * t ** 5
-            h1 = t - 6 * t ** 3 + 8 * t ** 4 - 3 * t ** 5
-            ret = self.d[-1] * h0 + float(spline(end, 1)) * self.back * h1
+            h0, h1, _ = t5(t)
+            ret = self.d[-1] * h0 + slope * self.back * h1
             d = np.where(r > end, ret, d)
         return d
 
@@ -693,11 +704,11 @@ def explain(plan, speed, opponent, line, limits):
     return ''
 
 
-CAR_BUFFER = 0.02
+CAR_BUFFER = 0.0
 
 
 def crawl_rollout(line, pose, opponent, walls, limits, *, levels=5, segments=None, seg=0.5, step=None, beam=40,
-                  crawl=1.0, rate=2.5, past=0.3):
+                  crawl=1.0, rate=2.5, past=None):
     """A crawl path round a stopped car, or None.
 
     Beam search over piecewise-constant steering: ``segments`` pieces of ``seg`` metres (None: enough to clear
@@ -709,12 +720,14 @@ def crawl_rollout(line, pose, opponent, walls, limits, *, levels=5, segments=Non
     its body's bounding box clears the opponent's reachable box (opponent_box, full reach) as _overlaps() judges
     it, in the frame of the line's tangent at the box; it succeeds once the
     rear face is ``past`` metres beyond the box's front with the heading within 0.6 rad of the line's. Of the
-    successes the one with the most clearance wins. Returns the rear-axle points (n x 2), the first being ``pose``.
+    successes the one with the most clearance wins. ``past`` defaults to clear_margin. Returns the rear-axle points (n x 2), the first being ``pose``.
     The shapes the shift-and-hold manoeuvre allows (a constant offset, ramps of at least min_shift) do not fit
     beside a car parked in a bend 1-2 m ahead; on the 2026-11-11 course every stall seed has such a path.
     """
     # One rollout pose per plan sample (None: limits.spacing), so build() checks the poses checked here.
     step = limits.spacing if step is None else step
+    # Far enough past the box that the rejoin's worst-case lead (clear_margin) can be met where the path ends.
+    past = limits.clear_margin if past is None else past
     lo, hi, half = opponent_box(opponent, math.inf, limits)
     if not (math.isfinite(lo) and math.isfinite(hi)):
         return None
@@ -727,9 +740,9 @@ def crawl_rollout(line, pose, opponent, walls, limits, *, levels=5, segments=Non
     # The rollout charges what build() will, so a path it finds survives build()'s check.
     wall_need = limits.wall_margin + build_slack(limits, math.tan(limits.steering * limits.steering_headroom)
                                                  / limits.wheelbase)
-    # 85% of what build() allows: at a crawl the rack reaches its angle within a sample, and build()'s
-    # three-point curvature estimate overshoots that step by ~13% (1.18 against 1.04 1/m, 2026-11-15).
-    steer = np.linspace(-1.0, 1.0, levels) * limits.steering * limits.steering_headroom * 0.85
+    # 95% of what build() allows: build()'s three-point curvature of the spline through these points reads up to
+    # 2.7% above the curvature the rollout commanded (measured on the synthetic straight, 2026-11-15).
+    steer = np.linspace(-1.0, 1.0, levels) * limits.steering * limits.steering_headroom * 0.95
     slew = rate * step / crawl
     # state rows: x, y, yaw, delta, clearance; paths as lists of points
     x0, y0, yaw0 = (float(v) for v in pose)
@@ -769,7 +782,6 @@ def crawl_rollout(line, pose, opponent, walls, limits, *, levels=5, segments=Non
             lat_half = limits.width / 2 * np.abs(np.cos(rel)) + limits.length / 2 * np.abs(np.sin(rel))
             car = np.maximum(np.abs(lxc) - (half_len + long_half + limits.long_margin),
                              np.abs(lyc) - (half + lat_half + limits.car_margin))
-            # 2 cm for the spline through these points (and its headings) differing from the rollout itself.
             ok = alive & ~won & (wall >= wall_need) & (car >= CAR_BUFFER)
             alive = alive & (won | ok)
             C = np.where(ok, np.minimum(C, np.minimum(wall - wall_need, car - CAR_BUFFER)), C)

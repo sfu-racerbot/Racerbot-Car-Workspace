@@ -59,10 +59,15 @@ def test_bypass_lateral_passes_through_every_path_point_with_continuous_curvatur
     assert np.max(np.abs(np.diff(second))) < 0.5      # no jump in d'' between neighbours (1/m per step)
 
 
-def test_a_held_bypass_keeps_its_last_offset_for_good():
-    m = pp.Bypass(5.0, (0.0, 1.0, 2.0), (0.1, 0.5, 0.4), 2.0, 1, 0.5).held()
+def test_a_held_bypass_eases_its_end_slope_out_then_keeps_its_offset():
+    # Straight path, slope 0.2: held, it rises 0.2 * HOLD_EASE / 2 more over HOLD_EASE and stays (closed form).
+    m = pp.Bypass(5.0, (0.0, 1.0, 2.0), (0.1, 0.3, 0.5), 2.0, 1, 0.5).held()
     assert m.back == math.inf
-    np.testing.assert_allclose(m.lateral(np.array([7.0, 9.0, 20.0]), LINE), [0.4, 0.4, 0.4], atol=1e-12)
+    end = 0.5 + 0.2 * pp.HOLD_EASE / 2
+    np.testing.assert_allclose(m.lateral(np.array([7.0, 7.0 + pp.HOLD_EASE, 20.0]), LINE), [0.5, end, end], atol=1e-12)
+    eps = 1e-4
+    d = lambda s: float(m.lateral(np.array([s]), LINE)[0])
+    assert (d(7.0 + eps) - d(7.0 - eps)) / (2 * eps) == pytest.approx(0.2, abs=1e-3)     # no kink where it ends
 
 
 def test_the_return_leaves_the_path_with_its_slope_and_arrives_flat():
