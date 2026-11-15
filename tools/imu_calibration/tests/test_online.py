@@ -11,11 +11,20 @@ T0 = 1000.0   # generate_offline's host-clock epoch
 DRIFT = np.radians(0.02)   # gyro bias creeps 0.02 deg/s every second (~1.2 deg/s per minute): a warming sensor
 
 
-def _run(scenario, online=True, lidar=None, lidar_hz=10.0, latency=0.06, outlier_at=None, seed=0):
+YAW = np.array([0.0, 0.0, 1.0])   # the car's yaw axis, car frame
+
+
+def _run(scenario, online=True, lidar=None, lidar_hz=10.0, latency=0.06, outlier_at=None, seed=0, drift_axis=YAW):
     cfg = load_config()
     truth = default_truth(cfg)
     for st in truth.values():
-        st.gyro_bias_drift = np.array([0.0, 0.0, DRIFT])
+        # The drift is a creep of the car's yaw-rate reading, so it is injected along the car axis
+        # ``drift_axis`` and expressed in each sensor's own frame (SensorTruth adds it in the sensor
+        # frame; R is sensor -> car). Injecting it on each sensor's own z, as this did until 2026-11-15,
+        # is yaw drift only for a sensor mounted level: both cars' BNO085s have z horizontal
+        # (src/racerbot_car/cars/<id>/imu/car.yaml rpy_deg), so only the VESC IMU's share was yaw and
+        # the fused estimate converged to about half the asserted value on both cars.
+        st.gyro_bias_drift = st.R.T @ (DRIFT * np.asarray(drift_axis, dtype=float))
     streams, traj, truth = generate_offline(cfg, scenario, truth=truth, seed=seed)
     calibs = {n: ImuCalibration(np.linalg.inv(s.scale), s.acc_bias, s.gyro_bias) for n, s in truth.items()}
     pipe = Pipeline(cfg, names=list(truth), calibs=calibs, offsets={"bno": expected_sync_offset(truth)},
@@ -81,3 +90,12 @@ def test_late_lidar_pose_is_moved_forward():
     errs = [np.hypot(o["est"]["x"] - traj.truth(o["t"] - T0)["x"], o["est"]["y"] - traj.truth(o["t"] - T0)["y"])
             for o in outs[len(outs) // 4:]]
     assert np.sqrt(np.mean(np.square(errs))) < 0.08, np.sqrt(np.mean(np.square(errs)))   # 2 m/s * 80 ms = 16 cm uncompensated
+
+
+def test_drift_about_a_horizontal_car_axis_is_not_yaw_bias():
+    """The converse of the two tests above: the same creep about the car's roll axis is not a yaw-rate error, so
+    the online yaw-bias estimate must stay inside the same 0.1 deg/s bound of zero (oracle: invariant, a rotation
+    about x has no yaw component)."""
+    outs, _, _ = _run("stopgo", drift_axis=[1.0, 0.0, 0.0])
+    est_bias = outs[-1]["est"]["gyro_bias"]
+    assert abs(est_bias) < np.radians(0.1), np.degrees(est_bias)
