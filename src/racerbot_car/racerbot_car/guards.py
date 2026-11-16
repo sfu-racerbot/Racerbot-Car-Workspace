@@ -63,6 +63,8 @@ SAFETY_FLOOR = {
     'emergency_arc_clearance', 'emergency_arc_length', 'emergency_hard_stop_distance',
     # Arc braking cap (2026-11-14): a longer response is the conservative direction.
     'arc_braking_response_sec',
+    # Following (2026-11-16): a longer assumed response brakes for a car ahead earlier.
+    'following_response_sec',
 }
 
 
