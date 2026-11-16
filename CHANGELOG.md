@@ -35,7 +35,7 @@ The neural racer's safety wrapper now has `gap_follow`'s flank creep (PR #52). I
 - `test_safety_wrapper.py`: the creep beside a wall, the recorded latch (with and without the creep, and steering into the wall), touching, steering into the wall (including the arc asked for before the slew reaches it), a wall ahead, a small but non-zero braking cap, the creep as a ceiling, the never-raises invariant beside walls, and the config bounds.
 - `test_wall_alongside_the_body_stops` (added 2026-11-11, not on `main` before) now runs with the creep off: it isolates the braking cap, and its baseline is the latch the creep removes, as `gap_follow`'s test did in PR #52.
 - `test_latency.py::test_latched_tick_within_budget`: the tick beside a wall, where the creep traces the body's arc every tick.
-- `check_mutations.py`: 14 new breaks, each caught. 59 of 70 caught on the pit PC; the 11 missed need ROS or the gym, as before.
+- `check_mutations.py`: 14 new breaks, each caught. 60 of 71 caught on the pit PC; the 11 missed need ROS (7) or the gym (4), as before.
 
 ## 2026-11-11: the first neural racer model, and a braking cap it can drive with
 

@@ -29,22 +29,22 @@ python -m neural_racer_train.export --from-export <spec-2 model dir> <out dir> -
 
 ### How it does (simulation only)
 
-**Re-benched 2026-11-16 on `main` 041568a's simulator**, against `main` 041568a's `gap_follow`: solo, 3-lap races, 3 runs per course, speed cap 5.05 m/s, the shipped 2.0 m/s² cap, car 1's profile, with the flank creep. Mean lap time and finishes:
+**Re-benched 2026-11-16 on `main` 041568a's simulator** (`rr.py solo`): 3-lap races, 3 seeded runs per course, car 1's profile. The model runs at speed cap 5.05 m/s and the shipped 2.0 m/s² cornering cap, with the flank creep. `main` 041568a's `gap_follow` runs at its own shipped settings (`gap_follow.yaml`: `max_speed` 5.0, `max_lateral_accel` 2.5). Mean lap time and finishes:
 
 | Course | Neural, default | gap_follow, default | Neural, Nov 6 floor | gap_follow, Nov 6 floor |
 |---|---|---|---|---|
 | car1_course_2026_10_26 | 3/3, 11.89 s | 3/3, 10.49 s | 3/3, 12.51 s | 3/3, 12.23 s |
-| car2_course_2026_11_06a | 3/3, 14.44 s | 3/3, 11.61 s | 3/3, 13.35 s | 3/3, 12.99 s |
+| car2_course_2026_11_06a | 3/3, 14.50 s | 3/3, 11.61 s | 3/3, 13.34 s | 3/3, 12.99 s |
 | car2_course_2026_11_06b | 3/3, 9.02 s | 0/3 (contact) | 3/3, 9.35 s | 0/3 (contact) |
-| course_2026_10_30 | 3/3, 18.23 s | 3/3, 17.41 s | 3/3, 19.18 s | 3/3, 18.97 s |
-| room_2026_07_27 | 3/3, 6.62 s | 3/3, 7.14 s | 3/3, 7.07 s | 3/3, 8.12 s |
+| course_2026_10_30 | 3/3, 18.26 s | 3/3, 17.41 s | 3/3, 19.18 s | 3/3, 18.97 s |
+| room_2026_07_27 | 3/3, 6.62 s | 3/3, 7.14 s | 3/3, 7.08 s | 3/3, 8.12 s |
 | levine_blocked | 0/3 (contact) | 3/3, 18.45 s | 0/3 (contact) | 3/3, 20.09 s |
 | car2_course_2026_11_11 | 0/3 (contact) | 3/3, 11.32 s | 0/3 (contact) | 3/3, 12.10 s |
 | **Finished** | **15/21** | **18/21** | **15/21** | **18/21** |
 
-Race-day course on car 2's race-day floor (`sfu_course_2026_11_11_rb2`): neural 0/3 (stuck), progress [6.0, 6.0, 6.0] m; gap_follow 3/3, 12.14 s.
+On car 2's race-day floor (`sfu_course_2026_11_11_rb2`, car 2's profile), race-day course: neural 0/3 (stuck), at 6.0 m every run; gap_follow 3/3, 12.14 s.
 
-- **`gap_follow` is more reliable and mostly faster** at the shipped cap. The model is faster only in the small room, and finishes car 2's Nov 6b course, where `gap_follow` makes contact.
+- **`gap_follow` is more reliable and mostly faster**, each at its shipped settings (its cornering cap is 2.5, the model's 2.0). The model is faster only in the small room, and finishes car 2's Nov 6b course, where `gap_follow` makes contact.
 - **It fails the race-day course** (`car2_course_2026_11_11`) in every run: a wall contact about 6 m in on car 1's physics, and stuck at 6 m on car 2's race-day floor.
 - **The simulator moved since the Nov 11 numbers below.** The same model now finishes car 2's Nov 6a course on default physics (0/3 then) but not `levine_blocked` (3/3 then), and both racers lap about 10 % faster than below.
 - **The flank creep** fired on car 2's Nov 6a course on default physics only, and cut 1.3–1.7 s off each 3-lap run there. No finish or contact changed.
