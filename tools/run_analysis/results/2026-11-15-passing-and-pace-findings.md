@@ -95,3 +95,20 @@ course suite (`course_suite/run.py`, 11 courses with laps, 3 seeds, floor `sfu_c
 
 So the map racer's longer real path is not explained by the clearance floors; what gap follow does differently
 (cutting corners on its own sightlines) remains open.
+
+**Correction (2026-11-16, later).** "Not explained by the clearance floors" overstates it. On the race-day course the
+shipped floors build no line at all from the suite's mapping lap (every candidate short of the 0.30 m tight floor by
+0.14-0.19 m), so that course has no shipped row; there 0.12 / 0.18 ran 10.02 s against 0.16 / 0.24's 10.25 s (-2.2%),
+zero contact. The suite runs on the 2026-11-06 floor and records no clearance. And the simulator's clearance scale is
+not the car's: on the race-day course and floor, chassis to nearest scan return over flying laps is
+
+| | min | p1 | median |
+|---|---|---|---|
+| gap follow, car | 0.042 m | 0.126 m | 0.255 m |
+| gap follow, simulator (3 seeds) | 0.131-0.139 m | 0.148-0.153 m | 0.366-0.373 m |
+| map racer, car | 0.061 m | 0.135 m | 0.351 m |
+| map racer, simulator (3 seeds) | 0.124-0.137 m | 0.150-0.170 m | 0.388-0.397 m |
+
+The simulated gap follow keeps 0.11 m further from walls than the car (its longer path and the 4-5% it runs slow),
+and both simulated tails are cleaner. Until the simulated world matches the car on this scale, clearance-only verdicts
+in the simulator (the parked speed-ups) cannot be ranked.
