@@ -886,7 +886,8 @@ def bypass_entry(line, pose, speed, opponent, walls, limits, *, nominal):
     return None, None, None, why
 
 
-BYPASS_SHARES = (0.95, 0.88, 0.80)
+BYPASS_SHARES = (0.95, 0.88, 0.80)   # crawl_rollout steering shares bypass_entry tries, largest first (smallest-first
+# was no better on 2026-11-16: parked the same, stalled 12348 worse)
 
 
 def exact_frenet(line, x, y, iterations=4):

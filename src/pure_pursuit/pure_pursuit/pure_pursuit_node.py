@@ -357,7 +357,7 @@ class PurePursuitNode(Node):
         self.declare_parameter('stopped_detect_move', 0.15)
         self.declare_parameter('stopped_release_move', 0.30)
         self.declare_parameter('stopped_speed_bound', 0.1)
-        self.declare_parameter('stopped_bypass_max_speed', 1.0)
+        self.declare_parameter('stopped_bypass_max_speed', 0.5)
         self.declare_parameter('stopped_bypass_wall_margin', 0.06)
         self.declare_parameter('stopped_bypass_car_margin', 0.06)
         self.declare_parameter('stopped_bypass_steering_headroom', 0.95)
