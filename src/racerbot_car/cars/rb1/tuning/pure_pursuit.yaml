@@ -12,3 +12,5 @@ pure_pursuit_node:
     enable_opponent_overtake: false
     # why: car 1's speed loop coasts through a small overspeed and reaches a lowered command in a median 0.52 s, so it must brake for a car ahead before the emergency tier
     enable_opponent_following: true
+    # why: car 1 reaches a lowered speed command in a median 0.52 s, not car 2's 0.45 (same runs as above); with 0.45 its two-car braking races hit the emergency tier for 118 ticks, with 0.52 for none (race_two, 2026-11-16)
+    following_response_sec: 0.52
