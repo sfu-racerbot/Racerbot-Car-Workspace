@@ -64,3 +64,34 @@ contact at 0.1 s.
 
 Both cars, race-day course, 8 scenarios x 6 seeds: zero contact of any kind in 96 races, zero passes. Against a
 stalled car nobody finishes; against a 60% car we follow it for the whole race.
+
+## Update 2026-11-16: path length over flying laps, real wall clearance, tighter builder floors
+
+Re-measured over whole flying laps only (steering-autocorrelation lap period; true wheel distance inside the
+longest stretch without a stop, launch lap excluded):
+
+| run | flying laps | lap | path per lap | speed |
+|---|---|---|---|---|
+| 20261111-135934, gap-follow time trial | 9 | 9.70 s | 26.64 m | 2.75 m/s |
+| 20261111-152132, map racer | 12 | 10.05 s | 29.27 m | 2.91 m/s |
+
+Chassis to nearest LiDAR return over those laps (body outline in the laser frame, the 15-17 beams that always
+return under 0.5 m, the car itself, excluded):
+
+| run | min | p1 | p5 | median | time under 0.16 m |
+|---|---|---|---|---|---|
+| gap-follow time trial | 0.042 m | 0.126 m | 0.139 m | 0.255 m | 9.4% |
+| map racer | 0.061 m | 0.135 m | 0.177 m | 0.351 m | 3.2% |
+
+Gap follow runs about 0.1 m nearer the walls and drives a 9% shorter path. The builder keeps the line's body
+0.22 m (0.30 m where the steering is tight) from walls. Tightening those floors does not reproduce the gain in the
+course suite (`course_suite/run.py`, 11 courses with laps, 3 seeds, floor `sfu_course_2026_11_06`):
+
+| builder floors | flying lap vs shipped, median | contact |
+|---|---|---|
+| 0.22 / 0.30 (shipped) | - | none |
+| 0.16 / 0.24 | -0.4% | `course_2026_10_30_scans` 3 of 3 |
+| 0.12 / 0.18 | -0.2% | `asb_sharp`, `car1_course_2026_10_26` 3 of 3; `indoor_tight` 2 of 3; 10-30 3 of 3 |
+
+So the map racer's longer real path is not explained by the clearance floors; what gap follow does differently
+(cutting corners on its own sightlines) remains open.
