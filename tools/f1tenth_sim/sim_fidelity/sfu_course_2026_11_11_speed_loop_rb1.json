@@ -1,0 +1,430 @@
+{
+ "car": "rb1",
+ "runs": [
+  "20261111-155542",
+  "20261111-153721"
+ ],
+ "method": "Every LB hold of each run gives the commanded speed (/drive) and the wheel speed (/odom), resampled on\nthe plant's 0.025 s control grid (command held, wheel speed interpolated). The speed loop ALONE is replayed, one\ndimension, no steering and no map: v[k+1] = v[k] + sim_fidelity.actuation.speed_loop_accel(cal, cmd[k - delay],\nv[k]) * dt, the same function the plant calls. So that model error cannot drift over a long hold, the replay\nrestarts at the real wheel speed every 0.25 s and runs 1.0 s ahead (moving horizon). Score = RMS of (replayed -\nreal) wheel speed over every horizon sample whose command is at least 0.3 m/s, every run pooled; the same RMS\nover the accelerating samples (command > real + 0.2) and the braking samples (real > command + 0.2) is reported\nbeside it. The grid is the product of the six parameters below; the chosen set has the lowest score.",
+ "grid": {
+  "speed_loop_accel_gain": [
+   10.0,
+   14.0,
+   20.0,
+   30.0
+  ],
+  "speed_loop_accel_max": [
+   5.0,
+   5.5,
+   6.0
+  ],
+  "speed_loop_brake_deadband": [
+   0.0,
+   0.2,
+   0.3,
+   0.4
+  ],
+  "speed_loop_brake_gain": [
+   2.0,
+   3.0,
+   4.0
+  ],
+  "speed_loop_brake_max": [
+   3.0,
+   4.0
+  ],
+  "speed_delay_ticks": [
+   1,
+   2,
+   3
+  ]
+ },
+ "shared": {
+  "speed_loop_accel_gain": 5.0,
+  "speed_loop_accel_max": 4.5,
+  "speed_loop_brake_deadband": 0.0,
+  "speed_loop_brake_gain": 4.0,
+  "speed_loop_brake_max": 4.0,
+  "speed_delay_ticks": 2,
+  "all": 0.3611528891491206,
+  "n_all": 39705,
+  "accel": 0.3153149752673437,
+  "n_accel": 7673,
+  "brake": 0.38450862512092104,
+  "n_brake": 23276
+ },
+ "best_without_deadband": {
+  "speed_loop_accel_gain": 14.0,
+  "speed_loop_accel_max": 5.5,
+  "speed_loop_brake_deadband": 0.0,
+  "speed_loop_brake_gain": 2.0,
+  "speed_loop_brake_max": 4.0,
+  "speed_delay_ticks": 2,
+  "all": 0.23060596448727802,
+  "n_all": 39705,
+  "accel": 0.23826638656240343,
+  "n_accel": 7673,
+  "brake": 0.234382072883676,
+  "n_brake": 23276
+ },
+ "top": [
+  {
+   "speed_loop_accel_gain": 20.0,
+   "speed_loop_accel_max": 5.5,
+   "speed_loop_brake_deadband": 0.2,
+   "speed_loop_brake_gain": 3.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22228321244685012,
+   "n_all": 39705,
+   "accel": 0.24164621757655752,
+   "n_accel": 7673,
+   "brake": 0.2164031542580439,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 20.0,
+   "speed_loop_accel_max": 5.0,
+   "speed_loop_brake_deadband": 0.2,
+   "speed_loop_brake_gain": 3.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22248537712095592,
+   "n_all": 39705,
+   "accel": 0.23760754831630707,
+   "n_accel": 7673,
+   "brake": 0.2175839892841763,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 20.0,
+   "speed_loop_accel_max": 6.0,
+   "speed_loop_brake_deadband": 0.2,
+   "speed_loop_brake_gain": 3.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22347331739530815,
+   "n_all": 39705,
+   "accel": 0.24916984577396845,
+   "n_accel": 7673,
+   "brake": 0.21587046155546016,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 20.0,
+   "speed_loop_accel_max": 5.5,
+   "speed_loop_brake_deadband": 0.3,
+   "speed_loop_brake_gain": 4.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22387755931317285,
+   "n_all": 39705,
+   "accel": 0.24305199102821917,
+   "n_accel": 7673,
+   "brake": 0.2153632173855823,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 20.0,
+   "speed_loop_accel_max": 5.0,
+   "speed_loop_brake_deadband": 0.3,
+   "speed_loop_brake_gain": 4.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22411073795823255,
+   "n_all": 39705,
+   "accel": 0.23906948800025937,
+   "n_accel": 7673,
+   "brake": 0.21659593892714887,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 14.0,
+   "speed_loop_accel_max": 5.5,
+   "speed_loop_brake_deadband": 0.2,
+   "speed_loop_brake_gain": 3.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22500711051393052,
+   "n_all": 39705,
+   "accel": 0.23355877267463476,
+   "n_accel": 7673,
+   "brake": 0.22159778241583028,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 20.0,
+   "speed_loop_accel_max": 6.0,
+   "speed_loop_brake_deadband": 0.3,
+   "speed_loop_brake_gain": 4.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22505460279165293,
+   "n_all": 39705,
+   "accel": 0.25059096156935134,
+   "n_accel": 7673,
+   "brake": 0.21478217938423214,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 30.0,
+   "speed_loop_accel_max": 5.0,
+   "speed_loop_brake_deadband": 0.2,
+   "speed_loop_brake_gain": 3.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22508069403549494,
+   "n_all": 39705,
+   "accel": 0.2520804238460795,
+   "n_accel": 7673,
+   "brake": 0.21683906114143192,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 14.0,
+   "speed_loop_accel_max": 5.5,
+   "speed_loop_brake_deadband": 0.2,
+   "speed_loop_brake_gain": 3.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 2,
+   "all": 0.22553858556940864,
+   "n_all": 39705,
+   "accel": 0.23998166100838592,
+   "n_accel": 7673,
+   "brake": 0.22413571230655646,
+   "n_brake": 23276
+  },
+  {
+   "speed_loop_accel_gain": 14.0,
+   "speed_loop_accel_max": 5.0,
+   "speed_loop_brake_deadband": 0.2,
+   "speed_loop_brake_gain": 3.0,
+   "speed_loop_brake_max": 4.0,
+   "speed_delay_ticks": 3,
+   "all": 0.22565036481270814,
+   "n_all": 39705,
+   "accel": 0.2307102379640073,
+   "n_accel": 7673,
+   "brake": 0.2230833253397682,
+   "n_brake": 23276
+  }
+ ],
+ "chosen": {
+  "speed_loop_accel_gain": 20.0,
+  "speed_loop_accel_max": 5.5,
+  "speed_loop_brake_deadband": 0.2,
+  "speed_loop_brake_gain": 3.0,
+  "speed_loop_brake_max": 4.0,
+  "speed_delay_ticks": 3
+ },
+ "chosen_scores": {
+  "all": 0.22228321244685012,
+  "n_all": 39705,
+  "accel": 0.24164621757655752,
+  "n_accel": 7673,
+  "brake": 0.2164031542580439,
+  "n_brake": 23276
+ },
+ "tables": {
+  "real": {
+   "braking": {
+    "0.2-0.5": {
+     "n": 2071,
+     "median": -0.0878975203203769,
+     "p25": -0.8958257248542312,
+     "p75": 0.7575367600756278,
+     "p90": 1.5193388670836772
+    },
+    "0.5-1.0": {
+     "n": 2966,
+     "median": -1.0597296898871233,
+     "p25": -2.0334378967878735,
+     "p75": -0.026198199989098114,
+     "p90": 0.8954366102793765
+    },
+    "1.0-1.5": {
+     "n": 1107,
+     "median": -2.3130351560155527,
+     "p25": -3.363057267068823,
+     "p75": -1.017048083664529,
+     "p90": 0.4576438524237538
+    },
+    "1.5-inf": {
+     "n": 1086,
+     "median": -2.651731539719413,
+     "p25": -4.149441092931818,
+     "p75": -1.070882972741326,
+     "p90": 1.0063377016266162
+    }
+   },
+   "step_down": {
+    "n": 62,
+    "reached": 33,
+    "time": {
+     "n": 33,
+     "median": 0.5230021476745605,
+     "p25": 0.44278407096862793,
+     "p75": 0.6127381324768066,
+     "p90": 0.7276347160339356
+    }
+   },
+   "overshoot": {
+    "n": 138,
+    "max_over": {
+     "n": 138,
+     "median": 1.5600869265523287,
+     "p25": 1.1458586791364276,
+     "p75": 2.261881188118812,
+     "p90": 2.6522081453257265
+    },
+    "time_over": {
+     "n": 138,
+     "median": 0.7474656105041504,
+     "p25": 0.5877897143363953,
+     "p75": 0.8577613234519958,
+     "p90": 0.9020313024520874
+    }
+   },
+   "jitter": {
+    "n": 8630,
+    "median": 0.09195280075073242,
+    "p25": 0.006450653076171875,
+    "p75": 0.14809024333953857,
+    "p90": 0.4153450131416323
+   }
+  },
+  "shared": {
+   "braking": {
+    "0.2-0.5": {
+     "n": 1626,
+     "median": -1.11464584537331,
+     "p25": -1.5598626886712554,
+     "p75": -0.6222223393893928,
+     "p90": 0.5488870328228179
+    },
+    "0.5-1.0": {
+     "n": 1248,
+     "median": -2.3257329571542407,
+     "p25": -3.0139831073205894,
+     "p75": -1.3057295164924654,
+     "p90": 0.12575515800787393
+    },
+    "1.0-1.5": {
+     "n": 546,
+     "median": -3.6130871470629033,
+     "p25": -4.000000000000002,
+     "p75": -1.7969948901400212,
+     "p90": -0.2318004876153057
+    },
+    "1.5-inf": {
+     "n": 380,
+     "median": -3.23302453572311,
+     "p25": -3.999999999999986,
+     "p75": -0.8395535422044387,
+     "p90": 1.3796563336488723
+    }
+   },
+   "step_down": {
+    "n": 67,
+    "reached": 61,
+    "time": {
+     "n": 61,
+     "median": 0.35000000000002274,
+     "p25": 0.25,
+     "p75": 0.42500000000001137,
+     "p90": 0.5
+    }
+   },
+   "overshoot": {
+    "n": 138,
+    "max_over": {
+     "n": 138,
+     "median": 1.2444126242507185,
+     "p25": 0.8163295911738195,
+     "p75": 1.8367611528913788,
+     "p90": 2.0692286542138776
+    },
+    "time_over": {
+     "n": 138,
+     "median": 0.4749999999999943,
+     "p25": 0.349999999999973,
+     "p75": 0.575000000000017,
+     "p90": 0.6824999999999946
+    }
+   },
+   "jitter": {
+    "n": 8506,
+    "median": 0.08958637714385986,
+    "p25": 0.002747774124145508,
+    "p75": 0.15038400888442993,
+    "p90": 0.41249215602874756
+   }
+  },
+  "chosen": {
+   "braking": {
+    "0.2-0.5": {
+     "n": 1839,
+     "median": -0.48183640492847735,
+     "p25": -0.8185487471274877,
+     "p75": -0.11530897687918706,
+     "p90": 1.364418177552487
+    },
+    "0.5-1.0": {
+     "n": 2312,
+     "median": -1.1957130018119932,
+     "p25": -1.7053377067160058,
+     "p75": -0.5826322625249369,
+     "p90": 0.9060572227306162
+    },
+    "1.0-1.5": {
+     "n": 995,
+     "median": -2.5352860841467706,
+     "p25": -3.1460741268493067,
+     "p75": -1.2996515324719815,
+     "p90": 0.08202003212476254
+    },
+    "1.5-inf": {
+     "n": 829,
+     "median": -3.0000000000011395,
+     "p25": -3.9839422173426975,
+     "p75": -1.1133668473422809,
+     "p90": 1.0679375744793709
+    }
+   },
+   "step_down": {
+    "n": 67,
+    "reached": 33,
+    "time": {
+     "n": 33,
+     "median": 0.6499999999999986,
+     "p25": 0.5499999999999972,
+     "p75": 0.7749999999999915,
+     "p90": 0.8949999999999989
+    }
+   },
+   "overshoot": {
+    "n": 138,
+    "max_over": {
+     "n": 138,
+     "median": 1.6579305755136837,
+     "p25": 1.155999554347546,
+     "p75": 2.282265720316881,
+     "p90": 2.5526596166051343
+    },
+    "time_over": {
+     "n": 138,
+     "median": 0.75,
+     "p25": 0.5999999999999837,
+     "p75": 0.8499999999999943,
+     "p90": 0.9250000000000114
+    }
+   },
+   "jitter": {
+    "n": 8885,
+    "median": 0.08484530448913574,
+    "p25": 0.0,
+    "p75": 0.14405548572540283,
+    "p90": 0.4030282258987431
+   }
+  }
+ }
+}

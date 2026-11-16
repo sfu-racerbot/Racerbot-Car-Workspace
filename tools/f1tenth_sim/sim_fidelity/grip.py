@@ -59,6 +59,9 @@ class GripEnvelope:
     # not put the whole friction circle into the longitudinal axis. See the
     # tuning note in tools/f1tenth_sim/README.md.
     longitudinal_coupling: float = 1.0
+    # The floor's grip relative to the calibration: 0.85 is a floor 15% slicker. The plant's
+    # set_grip_scale changes it mid-run (a grip schedule, 2026-11-14).
+    scale: float = 1.0
     limited_steps: int = 0
     total_steps: int = 0
     max_demanded_lateral: float = 0.0
@@ -72,7 +75,7 @@ class GripEnvelope:
         demand is given priority, which is the usual approximation and the
         conservative one here: it is what makes trail-braking cost grip.
         """
-        limit = self.friction_accel_limit
+        limit = self.friction_accel_limit * self.scale
         used = longitudinal_accel * self.longitudinal_coupling
         remaining = limit * limit - used * used
         budget = math.sqrt(remaining) if remaining > 0.0 else 0.0
@@ -157,17 +160,30 @@ class ProgressiveGrip:
     total_steps: int = 0
     max_demanded_lateral: float = 0.0
     max_allowed_lateral: float = 0.0
+    # True for a measured curve whose delivered column falls past a peak (rb2, 2026-11-11:
+    # 2.94 m/s^2 at 3.75 asked, 2.7 beyond). The default still refuses one, so a typo in a
+    # table cannot make the tyres weaker as they are pushed harder unnoticed.
+    falling: bool = False
+    # How much of the longitudinal demand competes for grip, 0 to 1, as GripEnvelope's: lateral is
+    # limited to sqrt(peak^2 - (coupling * a_long)^2), peak the curve's largest delivered value. 0 (the
+    # default, and every floor so far) takes no share: grip_by_long_accel measured braking costing nothing.
+    longitudinal_coupling: float = 0.0
+    # The floor's grip relative to the measured curve (see GripEnvelope.scale).
+    scale: float = 1.0
 
     def __post_init__(self):
+        if not (math.isfinite(self.longitudinal_coupling) and 0.0 <= self.longitudinal_coupling <= 1.0):
+            raise ValueError(f"longitudinal_coupling must be in [0, 1], got {self.longitudinal_coupling!r}")
         asked = [row[0] for row in self.curve]
         delivered = [row[1] for row in self.curve]
-        if len(asked) < 2 or asked != sorted(asked) or delivered != sorted(delivered):
-            raise ValueError(f"grip curve must be ascending in both columns, got {self.curve!r}")
+        if len(asked) < 2 or asked != sorted(asked) or (not self.falling and delivered != sorted(delivered)):
+            columns = "asked" if self.falling else "both columns"
+            raise ValueError(f"grip curve must be ascending in {columns}, got {self.curve!r}")
         self._asked, self._delivered = asked, delivered
 
     def deliver(self, asked: float) -> float:
-        """What the tyres deliver for ``asked``; past the table it stays at the last value."""
-        return float(np.interp(asked, self._asked, self._delivered))
+        """What the tyres deliver for ``asked``, times ``scale``; past the table it stays at the last value."""
+        return float(np.interp(asked, self._asked, self._delivered)) * self.scale
 
     def apply(self, steering: float, speed: float, longitudinal_accel: float = 0.0) -> float:
         """The wheel angle that turns the car as hard as the tyres actually will."""
@@ -176,6 +192,10 @@ class ProgressiveGrip:
             return steering
         demanded = abs(math.tan(steering)) * speed * speed / self.wheelbase
         allowed = self.deliver(demanded)
+        if self.longitudinal_coupling > 0.0:
+            used = self.longitudinal_coupling * longitudinal_accel
+            peak = max(self._delivered) * self.scale
+            allowed = min(allowed, math.sqrt(max(0.0, peak ** 2 - used * used)))
         self.max_demanded_lateral = max(self.max_demanded_lateral, demanded)
         self.max_allowed_lateral = max(self.max_allowed_lateral, allowed)
         if allowed < demanded:
@@ -184,8 +204,8 @@ class ProgressiveGrip:
 
     def report(self) -> dict:
         return {
-            "grip_limit_mps2": round(self._delivered[-1], 3),
-            "grip_limit_g": round(self._delivered[-1] / 9.81, 3),
+            "grip_limit_mps2": round(max(self._delivered), 3),
+            "grip_limit_g": round(max(self._delivered) / 9.81, 3),
             "grip_limited_steps": self.limited_steps,
             "grip_limited_fraction": (round(self.limited_steps / self.total_steps, 4)
                                       if self.total_steps else 0.0),

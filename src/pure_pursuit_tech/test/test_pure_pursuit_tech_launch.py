@@ -24,7 +24,7 @@ def launch_module():
     # cited spec: max_steering_angle in each car's
     # src/racerbot_car/cars/<car>/calibration/pure_pursuit.yaml
     ('rb1', 0.33),
-    ('rb2', 0.349),
+    ('rb2', 0.42),     # 0.349 -> 0.42 on 2026-11-07 (cf26bfc)
 ])
 def test_car_limits_are_this_cars_calibration(launch_module, car, cap):
     # cited spec: wheelbase 0.36 m, shared src/pure_pursuit/config/pure_pursuit.yaml

@@ -409,6 +409,127 @@ def swept_path_clearance(clean: np.ndarray, valid: np.ndarray,
     return max(0.0, nearest)
 
 
+def escape_arc_clearance(clean: np.ndarray, valid: np.ndarray, angles: np.ndarray,
+                         arc_steerings, reach: float, gap_side: float, speed: float,
+                         steering_rate: float, latency: float, lateral_limit: float,
+                         half_width: float, car_length: float, wheelbase: float,
+                         laser_offset_x: float, laser_offset_y: float, max_length: float,
+                         max_steering_angle: float, candidates: int = 4) -> float:
+    """The braking ceiling's clearance, crediting a slightly tighter arc toward the gap.
+
+    The shortest ``swept_path_clearance`` over ``arc_steerings`` (the arcs the car is on and is
+    being steered onto, as before) is the baseline, returned unchanged when ``reach`` is 0 or the gap
+    is dead ahead (``gap_side`` 0). Otherwise each arc ``reach * k / candidates`` (k = 1..candidates)
+    further toward ``gap_side`` from the last of ``arc_steerings`` (the rack's steering) is also
+    checked, if the car could hold it (``speed^2 * curvature <= lateral_limit``), and is charged the
+    distance driven before the rack gets there: ``speed * (latency + |change| / steering_rate)``. The
+    largest of the baseline and the charged candidates is returned.
+
+    Why: approaching a hairpin the current arc runs into the outer wall, so the ceiling brakes for a
+    wall the car is about to turn away from, though a tighter arc it can drive is clear (advisor's
+    Phase 4 sweep, 2026-11-14: clearance-bound time 3.3 -> 1.2 s per lap). Only arcs the car can
+    hold at its current speed count, so a grip-limited corner is not credited.
+    """
+    for name, value in (('reach', reach), ('gap_side', gap_side), ('speed', speed),
+                        ('steering_rate', steering_rate), ('latency', latency),
+                        ('lateral_limit', lateral_limit), ('max_steering_angle', max_steering_angle)):
+        if not math.isfinite(value):
+            raise ValueError(f'{name} must be finite')
+    if reach < 0.0 or steering_rate <= 0.0 or latency < 0.0 or lateral_limit <= 0.0 or candidates < 1:
+        raise ValueError('reach and latency must be non-negative, steering_rate and lateral_limit positive, '
+                         'candidates at least 1')
+    arc_steerings = tuple(arc_steerings)
+    if not arc_steerings:
+        raise ValueError('arc_steerings must not be empty')
+
+    def free(steering):
+        return swept_path_clearance(clean, valid, angles, math.tan(steering) / wheelbase, half_width,
+                                    car_length, wheelbase, laser_offset_x, laser_offset_y, max_length)
+
+    best = min(free(s) for s in arc_steerings)
+    if reach == 0.0 or gap_side == 0.0 or not math.isfinite(best):
+        return best
+    start = float(arc_steerings[-1])
+    side = math.copysign(1.0, gap_side)
+    speed = max(0.0, speed)
+    for k in range(1, candidates + 1):
+        steering = min(max_steering_angle, max(-max_steering_angle, start + side * reach * k / candidates))
+        change = abs(steering - start)
+        if change <= 0.0:
+            continue
+        if speed * speed * abs(math.tan(steering)) / wheelbase > lateral_limit:
+            break                               # tighter still is tighter still: none further can be held
+        charged = free(steering) - speed * (latency + change / steering_rate)
+        best = max(best, charged)
+    return best
+
+
+def body_arc_free_distance(clean: np.ndarray, valid: np.ndarray, angles: np.ndarray,
+                           curvature: float, half_width: float, car_length: float,
+                           wheelbase: float, laser_offset_x: float,
+                           laser_offset_y: float = 0.0,
+                           max_length: float = 1.0, step: float = 0.02) -> float:
+    """Distance base_link can travel along a constant-curvature arc before any
+    valid scan point lies inside the body rectangle. inf if none within
+    max_length. 0.0 only if a point is inside the rectangle at the start.
+
+    The rectangle is x in [rear, front], |y| <= half_width in base_link, with
+    front = wheelbase/2 + car_length/2 and rear = wheelbase/2 - car_length/2
+    (the model ``swept_path_clearance`` uses). Scan points are fixed in the
+    starting base_link frame and the body moves. Unlike
+    ``swept_path_clearance``, a point alongside the body but outside the
+    rectangle is not an obstacle unless the body moves into it. REP-103:
+    positive curvature turns left.
+    """
+    ranges = np.asarray(clean, dtype=np.float64)
+    validity = np.asarray(valid, dtype=bool)
+    beam_angles = np.asarray(angles, dtype=np.float64)
+    if not (ranges.shape == validity.shape == beam_angles.shape):
+        raise ValueError('ranges, validity, and angles must have matching shapes')
+    for name, value in (('curvature', curvature), ('half_width', half_width),
+                        ('car_length', car_length), ('wheelbase', wheelbase),
+                        ('laser_offset_x', laser_offset_x),
+                        ('laser_offset_y', laser_offset_y),
+                        ('max_length', max_length), ('step', step)):
+        if not math.isfinite(value):
+            raise ValueError(f'{name} must be finite')
+    for name, value in (('half_width', half_width), ('car_length', car_length),
+                        ('wheelbase', wheelbase), ('max_length', max_length),
+                        ('step', step)):
+        if value <= 0.0:
+            raise ValueError(f'{name} must be positive')
+
+    front = wheelbase / 2.0 + car_length / 2.0
+    rear = wheelbase / 2.0 - car_length / 2.0
+
+    usable = validity & (ranges > 0.0) & np.isfinite(ranges) & np.isfinite(beam_angles)
+    if not np.any(usable):
+        return math.inf
+    px = ranges[usable] * np.cos(beam_angles[usable]) + laser_offset_x
+    py = ranges[usable] * np.sin(beam_angles[usable]) + laser_offset_y
+
+    travel = np.arange(0.0, max_length + 0.5 * step, step)
+    travel = travel[travel <= max_length + 1e-12]
+    if abs(curvature) < 1e-6:
+        bx = travel
+        by = np.zeros_like(travel)
+        heading = np.zeros_like(travel)
+    else:
+        heading = curvature * travel
+        bx = np.sin(heading) / curvature
+        by = (1.0 - np.cos(heading)) / curvature
+    cos_h = np.cos(heading)[:, None]
+    sin_h = np.sin(heading)[:, None]
+    dx = px[None, :] - bx[:, None]
+    dy = py[None, :] - by[:, None]
+    local_x = cos_h * dx + sin_h * dy
+    local_y = -sin_h * dx + cos_h * dy
+    hit = ((local_x >= rear) & (local_x <= front) & (np.abs(local_y) <= half_width)).any(axis=1)
+    if not hit.any():
+        return math.inf
+    return float(travel[int(np.argmax(hit))])
+
+
 def arc_guard_steering(clean: np.ndarray, valid: np.ndarray,
                        angles: np.ndarray, desired_steering: float,
                        required_length: float, half_width: float,

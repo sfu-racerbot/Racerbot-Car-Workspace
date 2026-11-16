@@ -48,6 +48,11 @@ NOT_MIRRORED = {
     # sample to time out (docs/gap-follow.md#steering-damping-gyro).
     "imu_topic", "imu_status_topic", "imu_timeout_sec",
     'fused_odom_topic', 'wheel_odom_topic', 'imu_traction_timeout_sec',
+    # Reverse escape (2026-11-13): the simulators never command negative speed, so the mirror does not model it.
+    'enable_reverse_escape', 'reverse_escape_speed', 'reverse_escape_max_distance', 'reverse_escape_max_time',
+    'reverse_escape_wait_sec', 'reverse_escape_settle_sec', 'reverse_escape_cooldown_sec',
+    'reverse_escape_max_attempts', 'reverse_escape_rearm_progress', 'reverse_escape_rear_quarter_clearance',
+    'reverse_escape_rear_band_lo_deg', 'reverse_escape_rear_band_hi_deg',
 }
 
 
@@ -124,6 +129,8 @@ REQUIRED_PARAMS = frozenset((
     "enable_swept_clearance",
     "enable_ttc",
     "escape_creep_speed",
+    "flank_creep_length",
+    "flank_creep_margin",
     "aim_depth_bias",
     "aim_depth_bias_fallback",
     "fallback_min_gap_distance",
@@ -195,14 +202,24 @@ REQUIRED_PARAMS = frozenset((
     "opponent_steer_gain",
     "opponent_steer_rate_max",
     "opponent_follow_memory_sec",
+    "opponent_follow_static_radial_speed",
+    "opponent_follow_static_tangential_speed",
+    "swept_clearance_reach",
+    "swept_clearance_reach_rate",
 ))
 
+
+STATIC_GATE_PARAMS = ("opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed",
+                      # escape-arc credit (2026-11-14): 0 is the behaviour before it existed
+                      "swept_clearance_reach", "swept_clearance_reach_rate")
 
 # Parameters added after the first real-car run of the October 2026 rework,
 # with the value that reproduces the behaviour from before they existed. Lets
 # an older YAML (git show <commit>:src/gap_follow/config/gap_follow.yaml) be
 # replayed against the run it drove -- see tools/run_analysis/replay.py.
 LEGACY_VALUES = {
+    'swept_clearance_reach': 0.0,
+    'swept_clearance_reach_rate': 2.0,
     'enable_imu_impact_stop': False,
     'imu_impact_threshold': 33.7257297468959,
     'imu_impact_min_samples': 1,
@@ -248,6 +265,9 @@ LEGACY_VALUES = {
     "enable_opponent_awareness": False,
     **{f"opponent_{name}": getattr(opponent_tracking.OpponentParams(), name)
        for name in opponent_tracking.OpponentParams.__dataclass_fields__},
+    # Static confirmation (2026-11-13) did not exist: 0.0 never confirms, the old behaviour.
+    "opponent_follow_static_radial_speed": 0.0,
+    "opponent_follow_static_tangential_speed": 0.0,
     # The follow-cap memory (2026-10-28) did not exist: 0 is no hold, the old behaviour.
     "opponent_follow_memory_sec": 0.0,
     # The launch boost (2026-10-30) did not exist: off. Its limits are inert
@@ -307,6 +327,9 @@ class GapController:
     """
 
     def __init__(self, params: dict, lidar):
+        # Parameter sets recorded before the static-confirmation gate existed (replay fixtures, older runs) have
+        # the gate off, exactly as LEGACY_VALUES says; every other missing parameter is still an error.
+        params = {**{name: LEGACY_VALUES[name] for name in STATIC_GATE_PARAMS}, **params}
         missing = sorted(REQUIRED_PARAMS - set(params))
         if missing:
             raise KeyError(f"GapController is missing parameters: {missing}")
@@ -542,8 +565,10 @@ class GapController:
         # gap_follow_node: speed only, on the same tick, before the no_safe_gap stop.
         # The alongside-abort ceiling is added after the memory, never held by it.
         if self.opponents is not None:
+            self.opponents.follow_memory.clear_if_static(self.opponents.static_track_ids())   # as in gap_follow_node
             follow_cap, held = self.opponents.follow_memory.update(
-                follow_cap, step * CONTROL_DT)
+                follow_cap, step * CONTROL_DT,
+                self.opponents.follow_cap_track if follow_cap != math.inf else None)
             follow_cap = min(follow_cap, alongside_cap)
             if held:
                 self.opponent_mode = ("follow_memory" if alongside_cap == math.inf
@@ -673,13 +698,13 @@ class GapController:
         braking_clearance = forward_clearance
         if p["enable_swept_clearance"]:
             swept_hw = p["car_width"] / 2.0 + p["swept_clearance_margin"]
-            braking_clearance = min(
-                gap_logic.swept_path_clearance(
-                    window, window_valid, beam_angles, curvature, swept_hw,
-                    p["car_length"], p["wheelbase"], p["laser_offset_x"],
-                    p["laser_offset_y"], p["swept_clearance_max_length"])
-                for curvature in (limited_curvature,
-                                  math.tan(steering) / p["wheelbase"]))
+            braking_clearance = gap_logic.escape_arc_clearance(
+                window, window_valid, beam_angles, (desired_steering, steering),
+                p["swept_clearance_reach"], desired_steering, float(current_speed),
+                min(p["max_steering_rate"], p["swept_clearance_reach_rate"]), p["braking_latency_sec"],
+                lateral_limit, swept_hw,
+                p["car_length"], p["wheelbase"], p["laser_offset_x"],
+                p["laser_offset_y"], p["swept_clearance_max_length"], p["max_steering_angle"])
             tel["arc_clear"] = braking_clearance
         clearance_speed = gap_logic.braking_speed_limit(
             braking_clearance, p["forward_stop_clearance"],
@@ -693,6 +718,23 @@ class GapController:
                 gap_logic.braking_speed_limit(
                     forward_clearance, creep_reserve,
                     p["max_braking_decel"], p["max_speed"]))
+
+        # Flank creep, as in gap_follow_node: crawl away from a wall alongside
+        # when the body's own arc is clear; never on an emergency/TTC tick,
+        # and not a launch.
+        if (p["flank_creep_length"] > 0.0 and clearance_speed <= 0.0
+                and not creeping and not (emergency_tripped or ttc_tripped)
+                and gap_logic.body_arc_free_distance(
+                    window, window_valid, beam_angles,
+                    math.tan(steering) / p["wheelbase"],
+                    p["car_width"] / 2.0 + p["flank_creep_margin"],
+                    p["car_length"], p["wheelbase"], p["laser_offset_x"],
+                    p["laser_offset_y"],
+                    max_length=p["flank_creep_length"]) == math.inf):
+            clearance_speed = p["escape_creep_speed"]
+            creeping = True
+            launching = False
+            self.launch_boost.end("flank_creep")
 
         desired_speed = min(normal_speed, clearance_speed)
         binding = 'curve' if normal_speed <= clearance_speed else 'clearance'

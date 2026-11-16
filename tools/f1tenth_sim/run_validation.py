@@ -78,6 +78,8 @@ OVERTAKE_MIN_SIDE_CLEARANCE = 0.70
 # Stand-off the scripted opponent keeps from whatever is in front of it.
 OPPONENT_RESERVE_DISTANCE = 0.5
 SAFETY_MODES = ("fallback", "map")
+# The node's law parameter prefixes (pure_pursuit_node, the loop before make_law).
+LAW_PARAM_PREFIXES = ('stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
 
 # Which fidelity fixes are in force. Set from --fidelity in main(); the
 # module-level default keeps probe scripts that import this file honest.
@@ -298,6 +300,32 @@ def _emergency_escape(scan, body_clearance: float, clearance_floor: float, param
     return steering, escape_speed
 
 
+def _flank_creep_clear(scan, steering: float, body_clearance: float, params) -> bool:
+    """pure_pursuit_node's flank-creep gate in _reactive_override's body-contact tier: creep is on
+    (flank_creep_length and emergency_escape_speed positive), the body is not touching
+    (body_clearance > 0), and racing_math.body_arc_free_distance finds the body rectangle, widened by
+    flank_creep_margin a side, clear along the arc of ``steering`` for flank_creep_length over the
+    body_clearance_fov_deg window (sanitized as _sanitized_window: NaN 0, inf max_range; validity from
+    the raw ranges)."""
+    length = float(params.get('flank_creep_length', 0.0))
+    if not (length > 0.0 and float(params['emergency_escape_speed']) > 0.0 and body_clearance > 0.0):
+        return False
+    lo, hi = cone_indices(math.radians(float(params['body_clearance_fov_deg'])) / 2.0, _CAR_ID)
+    if hi <= lo:
+        return False
+    raw = np.asarray(scan[lo:hi + 1], dtype=float)
+    max_range = float(params['max_range'])
+    window = np.clip(np.nan_to_num(raw, nan=0.0, posinf=max_range, neginf=0.0), 0.0, max_range)
+    free = racing_math.body_arc_free_distance(
+        window, _valid_returns(raw), _beam_angles(lo, hi),
+        math.tan(steering) / float(params['wheelbase']),
+        float(params['car_width']) / 2.0 + float(params['flank_creep_margin']),
+        float(params['car_length']), float(params['wheelbase']),
+        float(params['laser_offset_x']), float(params['laser_offset_y']),
+        max_length=length)
+    return free == math.inf
+
+
 def _arc_clearance(scan, steering: float, applied_steering: float, params) -> float:
     """pure_pursuit_node._arc_clearance: Tier 1's swept-path free distance.
 
@@ -348,6 +376,11 @@ def apply_map_safety(scan, steering: float, speed: float, car_id=None, *,
                 scan, body, float(params['body_contact_escape_clearance']), params)
             if crawl is not None:
                 return crawl[0], crawl[1], "escape"
+        elif _flank_creep_clear(scan, steering, body, params):
+            # pure_pursuit_node's flank creep (2026-11-12): a wall alongside that the body is not touching, with
+            # the body's own rectangle clear along the steered arc for flank_creep_length, is crawled away from at
+            # the escape speed, steering left to the tracking law (rb2 20261111-152132 latched 30.5 s without it).
+            return steering, float(params['emergency_escape_speed']), "creep"
         return steering, 0.0, "stop"
     # Tier 1: the swept path on both arcs, or a return inside the raw cone backstop.
     applied = steering if applied_steering is None else applied_steering
@@ -361,6 +394,28 @@ def apply_map_safety(scan, steering: float, speed: float, car_id=None, *,
             return crawl[0], crawl[1], "escape"
         return steering, 0.0, "stop"
     return steering, speed, "none"
+
+
+def map_arc_braking_cap(scan, steering: float, applied_steering=None, car_id=None) -> float:
+    """pure_pursuit_node's arc braking cap for a tick whose emergency tiers passed (apply_map_safety
+    returned "none"): computed from the same tier-1 swept-path clearance, applied by the caller as the
+    node's control loop does (speed and hard ceiling lowered). inf when off or nothing is within the horizon."""
+    _ensure_config(car_id)
+    params = PURE_PURSUIT_PARAMS
+    applied = steering if applied_steering is None else applied_steering
+    return arc_braking_cap(_arc_clearance(scan, steering, applied, params), params)
+
+
+def arc_braking_cap(arc_free: float, params) -> float:
+    """pure_pursuit_node's arc braking cap: the speed from which the car, after
+    arc_braking_response_sec at that speed and then braking at arc_braking_decel, stops
+    with emergency_arc_clearance still free along its own swept path. inf when the cap is
+    off or the path is clear over the whole emergency_arc_length horizon."""
+    if not params.get('enable_arc_braking_cap', False) or not math.isfinite(arc_free):
+        return math.inf
+    return racing_math.delayed_braking_speed_limit(
+        arc_free, float(params['emergency_arc_clearance']), float(params['arc_braking_decel']),
+        float(params['arc_braking_response_sec']))
 
 
 def lap_times_from_counts(times, counts) -> list[float]:
@@ -602,6 +657,11 @@ class PathFollower:
             params = {'min_lookahead': min_lookahead,
                       'max_lookahead': max_lookahead,
                       'lookahead_speed_gain': lookahead_gain}
+            # As pure_pursuit_node builds _law_params: every law's dotted parameters from the car's
+            # effective pure_pursuit.yaml (shared, then its calibration and tuning overlays), so car 1's
+            # tuned delay_lqr.servo_* reach the law. Until 2026-11-15 these were dropped here.
+            params.update({k: v for k, v in PURE_PURSUIT_PARAMS.items()
+                           if k.split('.', 1)[0] in LAW_PARAM_PREFIXES and '.' in k})
             params.update(law_params or {})
             law = tracking_laws.make_law(law_name, self.VEHICLE_LIMITS, params)
         self.law = law
@@ -970,10 +1030,13 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                   max_speed: Optional[float] = None,
                   max_lateral_accel: Optional[float] = None,
                   safety: str = "fallback", laps: int = 1,
-                  steering_limit: float | None = None) -> dict:
+                  steering_limit: float | None = None,
+                  grip_schedule=()) -> dict:
     """One solo lap of pure pursuit. The optional arguments default to the selected
     car's own: its calibration, the track's own line planned at the PathPlan defaults,
-    and pure_pursuit.yaml's speed and lateral limits."""
+    and pure_pursuit.yaml's speed and lateral limits. ``grip_schedule``: ((sim time s, grip
+    scale), ...) applied to the floor as the time passes (FidelityPlant.set_grip_scale): a
+    (0.0, 0.85) entry is a floor 15% slicker throughout, a later one a mid-run change."""
     global STEERING_LIMIT
     if safety not in SAFETY_MODES:
         raise ValueError(f"safety must be one of {SAFETY_MODES}")
@@ -998,6 +1061,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     # clock, and the scenario's 0.5m limit would fail the comparison before
     # the car had turned a wheel.
     obs, _ = plant.reset(plan_initial_pose(plan, line))
+    schedule = sorted((float(t), float(k)) for t, k in grip_schedule)
     follower = PathFollower(plan, law_name=law_name, law_params=law_params,
                             car_id=car_id, steering_limit=steering_limit)
     command_shaper = CommandShaper(car_id, max_speed, max_lateral_accel)
@@ -1045,10 +1109,13 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             if safety == "map":
                 # The rack's last commanded angle is the arc the car is on (the node's
                 # steering_basis, read before _shape_normal_command this tick).
+                applied = command_shaper.previous_steering
                 steering, speed, safety_result = apply_map_safety(
-                    ego["scan"], steering, speed, car_id=car_id,
-                    applied_steering=command_shaper.previous_steering)
+                    ego["scan"], steering, speed, car_id=car_id, applied_steering=applied)
+                arc_cap = (map_arc_braking_cap(ego["scan"], steering, applied, car_id)
+                           if safety_result == "none" else math.inf)
             else:
+                arc_cap = math.inf
                 steering, speed, safety_result = apply_fallback_safety(
                     ego["scan"], steering, speed, car_id=car_id)
             avoid_steps += int(safety_result == "avoid")
@@ -1061,16 +1128,22 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
 
             if safety_result == "avoid":
                 hard_speed_cap = 1.0
-            elif safety_result == "escape":
-                # The node clamps its ceiling to the override speed as well:
+            elif safety_result in ("escape", "creep"):
+                # The node clamps its ceiling to the override speed as well (flank creep included):
                 # hard_speed_cap = min(hard_speed_cap, speed_override).
                 hard_speed_cap = min(command_shaper.max_speed,
                                      float(PURE_PURSUIT_PARAMS['emergency_escape_speed']))
             else:
                 hard_speed_cap = command_shaper.max_speed
+            if arc_cap < speed:
+                # pure_pursuit_node: the arc braking cap lowers the command and the hard ceiling.
+                speed = arc_cap
+                hard_speed_cap = min(hard_speed_cap, arc_cap)
             steering, speed = command_shaper.command(
                 steering, speed, hard_speed_cap,
                 measured_speed=ego["std_state"][3])
+            while schedule and step * CONTROL_DT >= schedule[0][0]:
+                plant.set_grip_scale(schedule.pop(0)[1])
             obs, _reward, done, _truncated, info = plant.step(
                 [(steering, speed)]
             )

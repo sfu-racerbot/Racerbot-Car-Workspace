@@ -67,15 +67,15 @@ def test_wrapper_values_match_gap_follow(car):
 
 
 # Wrapper values that deliberately differ from gap_follow's, each pinned to its own value
-# (None: paired with gap_follow on that car as usual).
+# (None: paired with gap_follow on that car as usual). Same as car 2's rb2/neural-racer-plus-main.
 DELIBERATE = {
-    # gap_follow's forward_stop_clearance went 0.20 -> 0.12 (2026-11-07). The policies were
+    # gap_follow's forward_stop_clearance went 0.20 -> 0.12 (58ced23, 2026-11-07). The policies were
     # trained with 0.20, and a sim what-if (2026-11-08: two policies, 0.20 vs 0.12) changed nothing.
     'reserve_distance': lambda car: 0.20,
     # gap_follow reads 5.0 m of swept path; the training sim's wrapper reads 3.0.
     'swept_clearance_max_length': lambda car: 3.0,
-    # Car 2's gap_follow went to 0.42 rad (2026-11-07); its neural_racer overlay keeps 0.349,
-    # since the policy never asks for more than observation.STEER_LIMIT (0.33).
+    # Car 2's gap_follow went to 0.42 rad (cf26bfc, 2026-11-07); its neural_racer overlay keeps 0.349
+    # (CLAUDE.md), since the policy never asks for more than observation.STEER_LIMIT (0.33).
     'max_steering_angle': lambda car: 0.349 if car == 'rb2' else None,
 }
 

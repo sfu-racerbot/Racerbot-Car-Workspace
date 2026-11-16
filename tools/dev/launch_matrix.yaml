@@ -12,6 +12,8 @@ entries:
   - {id: neural-racer, package: neural_racer, launch: neural_racer_launch.py, args: ['model_hash:=capture-placeholder']}
   - {id: waypoint-recorder, package: pure_pursuit, launch: waypoint_recorder_launch.py, args: []}
   - {id: pure-pursuit, package: pure_pursuit, launch: pure_pursuit_launch.py, args: []}
+  - {id: pure-pursuit-tech, package: pure_pursuit_tech, launch: pure_pursuit_tech_launch.py, args: []}
+  - {id: opponent-perception, package: opponent_perception, launch: opponent_perception_launch.py, args: ['config_file:=/capture/placeholder.yaml']}
   - {id: odom-calibration, package: odom_calibration, launch: odom_calibration_launch.py, args: []}
   - {id: sim-bringup, package: racerbot_sim, launch: sim_bringup_launch.py, args: []}
   - {id: sim-auto-map, package: racerbot_sim, launch: sim_auto_map_race_launch.py, args: []}

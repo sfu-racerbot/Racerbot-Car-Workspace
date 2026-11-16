@@ -209,6 +209,11 @@ pure_pursuit_node:
     # ceiling and every safety stage still apply. 0 = the profile speed at the
     # car. Per-car values belong in the car's tuning overlay.
     speed_lead_time: 0.0
+    # Launch-lap speed scale: after LB is pressed from standstill (below 0.5 m/s) the profiled speed is
+    # multiplied by launch_speed_scale for the next launch_scale_distance metres driven (0 = one line
+    # length), then back to 1. 1.0 = off; refused outside (0.5, 1.0]. launch_scale.py.
+    launch_speed_scale: 1.0
+    launch_scale_distance: 0.0
 
     # Frozen-localization watchdog. pose_timeout_sec above cannot catch a
     # pose that keeps *arriving* on time while no longer *tracking* the car
@@ -305,6 +310,32 @@ pure_pursuit_node:
     # here would reject every body_contact escape before it started. Must
     # sit below emergency_stop_clearance to ever be reachable at all.
     body_contact_escape_clearance: 0.0
+    # Crawl away from a wall alongside the body while the body's own arc is
+    # clear. Added 2026-11-12: rb2 20261111-152132 stopped 30.5 s (19.0-49.5 s)
+    # in body_contact with the right wall 0.18 m from the LiDAR (2.5 cm off
+    # the body) and 0.63 m free ahead; a flank contact never escapes (the
+    # directional gate). With this on, a non-touching flank contact crawls at
+    # emergency_escape_speed when the body rectangle, widened by
+    # flank_creep_margin a side (the stop floor is emergency_stop_clearance
+    # 0.03, so the body plus 1 cm), driven along the steering being asked for,
+    # meets no return within flank_creep_length (m). Touching the wall, or
+    # steering into it, still stops. 0 = off. Plan section 1.2.
+    flank_creep_length: 0.50
+    flank_creep_margin: 0.01
+    # Arc braking cap (2026-11-14). Tier 1 stops at a fixed emergency_arc_clearance
+    # whatever the speed. Off the line the tracking law can reach 1.4 m/s toward a
+    # wall inside the arc horizon (flank creep handing back at full lock, simulator
+    # on rb2 20261111-152132's latch pose: contact on 3 of 3 seeds) and arrive at the
+    # stop too fast. With this on, speed is capped so that holding it for
+    # arc_braking_response_sec and then braking at arc_braking_decel (m/s^2, the
+    # measured physical braking, as following_brake) still stops with
+    # emergency_arc_clearance free along the swept path; beyond emergency_arc_length
+    # nothing is capped, so a clear racing line never is (race-day line, both cars:
+    # identical laps). Only lowers speed.
+    # tools/run_analysis/results/2026-11-14-map-racer-stuck-case.md
+    enable_arc_braking_cap: true
+    arc_braking_decel: 3.0
+    arc_braking_response_sec: 0.25
     scan_timeout_sec: 0.5
     max_range: 10.0   # range readings beyond this (and inf/NaN) are clipped/filled before any math touches them
 

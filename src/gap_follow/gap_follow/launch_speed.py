@@ -68,3 +68,17 @@ def speed_cap_overrides(yaml_params, requested):
 #: default (docs/gap-follow.md#speed-on-the-real-course-2026-10-30).
 TIME_TRIAL = {'aim_depth_bias': 1.0, 'max_lateral_accel': 3.0,
               'enable_opponent_awareness': False}
+
+
+#: Per-car additions to TIME_TRIAL. None today. Car 2's steering_gain 0.8 / max_steering_rate 4.0
+#: (2026-11-14, #71) was 2-7% faster on its own suite but failed the floor matrix (2026-11-15,
+#: tools/f1tenth_sim/floor_matrix.py, 12 courses x {own, race-day floor} x grip 0.85/1.0/1.15 x 3 seeds):
+#: new contacts on both 10-30 courses and new stalls on 06a/06b on the race-day floor, clearance down
+#: 0.15 -> 0.10 m on the race-day course; tools/run_analysis/results/2026-11-14-gap-follow-pace.md.
+TIME_TRIAL_BY_CAR = {}
+
+
+def time_trial_overrides(car_id):
+    """time_trial:=true's parameter overrides for ``car_id``: TIME_TRIAL plus that car's additions. The time
+    trial's refusal of opponent awareness always wins: a time trial is one car alone."""
+    return {**TIME_TRIAL, **TIME_TRIAL_BY_CAR.get(car_id, {}), 'enable_opponent_awareness': False}

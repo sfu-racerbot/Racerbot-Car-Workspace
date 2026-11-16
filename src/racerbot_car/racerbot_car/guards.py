@@ -47,7 +47,11 @@ class TuningOverlayError(RuntimeError):
 SAFETY_TRUE = {'enable_deadman', 'enable_ttc', 'enable_swept_clearance'}
 SAFETY_FIXED = {'deadman_button'}
 SAFETY_CEILING = {'max_speed', 'profile_max_speed', 'profile_max_brake',
-                  'ttc_min_closing_speed'}
+                  'ttc_min_closing_speed',
+                  # Launch-lap scale (2026-11-13): a lower value slows the first lap; the node refuses above 1.0.
+                  'launch_speed_scale',
+                  # Arc braking cap (2026-11-14): assuming harder braking allows more speed near walls.
+                  'arc_braking_decel'}
 SAFETY_FLOOR = {
     'ttc_threshold_sec', 'ttc_path_margin', 'car_width', 'car_length',
     'optimize_car_width', 'emergency_stop_clearance', 'forward_stop_clearance',
@@ -57,6 +61,10 @@ SAFETY_FLOOR = {
     # Tier 1 arc check (2026-11-07): a larger clearance or horizon or backstop is the
     # conservative direction, so an overlay may only raise them.
     'emergency_arc_clearance', 'emergency_arc_length', 'emergency_hard_stop_distance',
+    # Arc braking cap (2026-11-14): a longer response is the conservative direction.
+    'arc_braking_response_sec',
+    # Following (2026-11-16): a longer assumed response brakes for a car ahead earlier.
+    'following_response_sec',
 }
 
 

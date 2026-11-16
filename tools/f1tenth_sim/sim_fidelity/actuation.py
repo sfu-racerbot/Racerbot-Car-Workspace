@@ -26,6 +26,8 @@ of the limit cycle, and free in run time.
 from __future__ import annotations
 
 import math
+
+import numpy as np
 from collections import deque
 from dataclasses import dataclass
 
@@ -95,3 +97,39 @@ def speed_loop_accel_ceiling(accel_max: float, fade_from: float, no_load: float,
     if not (math.isfinite(no_load) and no_load > fade_from):
         raise ValueError("no_load must be finite and above fade_from")
     return accel_max * max(no_load - speed, 0.0) / (no_load - fade_from)
+
+
+def accel_table_ceiling(table, speed: float) -> float:
+    """The speed loop's acceleration ceiling at wheel ``speed`` from a measured table ((speed, accel), ...):
+    linear between points, flat beyond the ends. Speeds strictly ascending, accelerations finite and positive,
+    at least two points (opt-in per floor: ``Calibration.accel_by_speed``)."""
+    rows = [tuple(row) for row in table]
+    if len(rows) < 2:
+        raise ValueError("an acceleration table needs at least two points")
+    if not all(math.isfinite(x) for row in rows for x in row):
+        raise ValueError("an acceleration table must be finite")
+    if any(b[0] <= a[0] for a, b in zip(rows, rows[1:])):
+        raise ValueError("acceleration table speeds must be strictly ascending")
+    if any(row[1] <= 0.0 for row in rows):
+        raise ValueError("acceleration table values must be positive")
+    return float(np.interp(speed, [row[0] for row in rows], [row[1] for row in rows]))
+
+
+def speed_loop_accel(cal, command: float, measured: float) -> float:
+    """The acceleration (m/s^2) the car's speed loop delivers toward ``command`` from wheel speed ``measured``:
+    proportional each way with its own gain and limit. Accelerating, the ceiling is the measured table
+    (``cal.accel_by_speed``) or ``speed_loop_accel_max`` with its fade-off. Braking starts only once the speed
+    is more than ``speed_loop_brake_deadband`` above the command: rb1's VESC coasts through a 0.2-0.5 m/s
+    excess (median -0.01 m/s^2, tools/run_analysis/results/2026-11-13-corner-entry-study.md). Pure: the plant
+    (``FidelityPlant._measured_speed_loop``) and the fitting tool (tools/run_analysis/fit_speed_loop.py)
+    both call this one function."""
+    diff = command - measured
+    if diff >= 0.0:
+        if cal.accel_by_speed:
+            ceiling = accel_table_ceiling(cal.accel_by_speed, measured * cal.odom_speed_scale)
+        else:
+            ceiling = speed_loop_accel_ceiling(cal.speed_loop_accel_max, cal.speed_loop_accel_fade_from,
+                                               cal.speed_loop_accel_no_load, measured)
+        return min(cal.speed_loop_accel_gain * diff, ceiling)
+    excess = max(0.0, -diff - cal.speed_loop_brake_deadband)
+    return max(-cal.speed_loop_brake_gain * excess, -cal.speed_loop_brake_max)

@@ -7,7 +7,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-from gap_follow.launch_speed import TIME_TRIAL, speed_cap_overrides
+from gap_follow.launch_speed import speed_cap_overrides, time_trial_overrides
 from gap_follow.launch_imu import select_imu_hardware
 from racerbot_car.layers import effective_values, layered, launch_car_id
 
@@ -169,7 +169,7 @@ def generate_launch_description(imu_probe=None):
                          'enable_imu_impact_stop': impact,
                          'enable_launch_boost': boost},
                         speed,
-                        TIME_TRIAL if time_trial else {},
+                        time_trial_overrides(car_id) if time_trial else {},
                         {'odom_topic': FUSED_ODOM} if fused else {}],
         )]
         if damping or grip or fused or understeer or traction or impact:

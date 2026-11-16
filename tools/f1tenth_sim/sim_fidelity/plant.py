@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .actuation import SteeringServo, TransportDelay, speed_loop_accel_ceiling
+from .actuation import SteeringServo, TransportDelay, speed_loop_accel
 from .calibration import CarCalibration, calibration_for_car
 from .grip import GripEnvelope, ProgressiveGrip, longitudinal_accel
 from .sensing import OdomSensor, PoseSensor, ScanSensor
@@ -243,6 +243,12 @@ class FidelityPlant:
         self.control_dt = control_dt
         self.params = env.unwrapped.sim.vehicle_params
         self._disable_gym_collision_response()
+        # Saturating tyres replace gym's linear ones for every car (they share one params array); the
+        # steering clamp is then off, since the tyres themselves limit the cornering.
+        self._tyres = calibration.tyre_model if profile.grip_envelope else None
+        if self._tyres is not None:
+            from .tyres import make_dynamics
+            env.unwrapped.sim.dynamics_fn = make_dynamics(self._tyres)
         # Only the car under test gets sensor error. The traffic scenario's
         # opponent is a scripted reference trajectory rather than a vehicle
         # being validated, and noising it would perturb the baseline the ego
@@ -250,7 +256,9 @@ class FidelityPlant:
         self.degrade_agents = degrade_agents
 
         self.grip = [
-            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase)
+            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase,
+                            falling=calibration.grip_curve_falls,
+                            longitudinal_coupling=calibration.longitudinal_grip_coupling)
             if calibration.grip_curve is not None
             else GripEnvelope(
                 friction_accel_limit=calibration.friction_accel_limit,
@@ -359,9 +367,18 @@ class FidelityPlant:
         if self.profile.body_collisions:
             self.env.unwrapped.sim.ttc_threshold = -math.inf
 
-    def reset(self, poses: np.ndarray):
+    def reset(self, poses: np.ndarray, speeds=None):
+        """Place the cars at ``poses`` (x, y, yaw); ``speeds`` (true, m/s) puts them there already moving."""
         self._disable_gym_collision_response()
-        obs, info = self.env.reset(options={"poses": poses})
+        options = {"poses": poses}
+        if speeds is not None:
+            poses = np.asarray(poses, dtype=float)
+            states = np.zeros((len(poses), self.env.unwrapped.model.state_dim))
+            states[:, 0:2] = poses[:, 0:2]           # gym's single-track state: x, y, steering, v, yaw, yaw rate, slip
+            states[:, 3] = np.asarray(speeds, dtype=float)
+            states[:, 4] = poses[:, 2]
+            options = {"states": states}
+        obs, info = self.env.reset(options=options)
         self._contacted = set()
         self.chassis_contact_steps = 0
         for index in range(self.num_agents):
@@ -409,7 +426,7 @@ class FidelityPlant:
             if self.profile.speed_loop_model:
                 speed = self._measured_speed_loop(speed, measured_speed)
 
-            if self.profile.grip_envelope:
+            if self.profile.grip_envelope and self._tyres is None:
                 accel = longitudinal_accel(speed, measured_speed, self.params)
                 steering = self.grip[index].apply(steering, measured_speed, accel)
 
@@ -436,17 +453,13 @@ class FidelityPlant:
         reproduces that; gym's gains are inverted here so the plant's own
         integrator and accel limit still apply unchanged.
         """
-        cal = self.calibration
         diff = command - measured
         if measured <= 0.0 and command <= 0.0:
             return command
+        accel = speed_loop_accel(self.calibration, command, measured)
         if diff >= 0.0:
-            ceiling = speed_loop_accel_ceiling(cal.speed_loop_accel_max, cal.speed_loop_accel_fade_from,
-                                               cal.speed_loop_accel_no_load, measured)
-            accel = min(cal.speed_loop_accel_gain * diff, ceiling)
             gym_gain = 10.0 * self.params.a_max / self.params.v_max
         else:
-            accel = max(cal.speed_loop_brake_gain * diff, -cal.speed_loop_brake_max)
             gym_gain = 10.0 * self.params.a_max / -self.params.v_min
         return measured + accel / gym_gain
 
@@ -502,6 +515,20 @@ class FidelityPlant:
                     touching.add(index)
                     break
         return touching
+
+    def chassis_map_clearance(self, index: int = 0) -> float:
+        """Metres from the agent's real chassis outline (corners and edge midpoints) to the nearest occupied map cell: the
+        distance transform ``_wall_contact`` thresholds at zero, as a number. nan before the first scan has built the map."""
+        simulator = self.env.unwrapped.sim
+        scan_sim = simulator.scan_sims[0]
+        if scan_sim.dt is None:
+            return math.nan
+        field = scan_sim.dt if self._contact_dt is None else self._contact_dt
+        corners = self._chassis_outline(index)
+        samples = np.vstack((corners, (corners + np.roll(corners, -1, 0)) / 2.0))
+        return min(float(self._distance_transform(
+            float(x), float(y), scan_sim.orig_x, scan_sim.orig_y, scan_sim.orig_c, scan_sim.orig_s,
+            scan_sim.map_height, scan_sim.map_width, scan_sim.map_resolution, field)) for x, y in samples)
 
     def _chassis_contact(self) -> set[int]:
         """Agents whose real chassis overlap, checked all round the car.
@@ -563,6 +590,17 @@ class FidelityPlant:
             agent["scan"] = self.scan_sensors[index].update(agent["scan"])
             degraded[key] = agent
         return degraded
+
+    def set_grip_scale(self, scale: float, index: int | None = None) -> None:
+        """Make the floor ``scale`` times as grippy as calibrated from the next step on, for one car or all (a
+        grip schedule: a mid-run change, or a slicker or grippier floor from the start). Acts on the grip model
+        that limits cornering (GripEnvelope or ProgressiveGrip); off without the grip envelope or with tyre_model."""
+        if not (math.isfinite(scale) and scale > 0.0):
+            raise ValueError(f"grip scale must be finite and positive, got {scale!r}")
+        if not self.profile.grip_envelope or self._tyres is not None:
+            raise ValueError("this plant has no grip model to scale (grip_envelope off, or tyre_model set)")
+        for i in (range(self.num_agents) if index is None else [index]):
+            self.grip[i].scale = float(scale)
 
     def truth(self, index: int = 0) -> np.ndarray:
         """Ground-truth standard state, for metrics and assertions only."""

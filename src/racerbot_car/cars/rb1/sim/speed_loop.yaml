@@ -1,0 +1,20 @@
+# Car 1's VESC speed loop as the simulator models it (tools/f1tenth_sim/sim_fidelity/actuation.speed_loop_accel,
+# read by sim_fidelity.calibration.car_speed_loop). Only the simulator reads this file; it changes nothing on the car.
+#
+# why: car 1 accelerates harder than the shared fit (run 20261019-200703) and coasts through a small overspeed. On its
+# 2026-11-11 race runs it decelerated a median 0.09 m/s^2 for a 0.2-0.5 m/s speed excess, 1.06 for 0.5-1.0, 2.31
+# for 1.0-1.5 and 2.65 beyond, and after a hard ramp overshot the command by a median 1.56 m/s for 0.75 s
+# (tools/run_analysis/results/2026-11-13-corner-entry-study.md). With the shared values the simulator braked at
+# 1.1-3.6 m/s^2 for the same excesses and overshot 1.24 m/s for 0.47 s, so it shed speed the car keeps.
+source: >-
+  fitted to rb1 runs 20261111-155542 and 20261111-153721 by tools/run_analysis/fit_speed_loop.py (one-dimensional
+  replay of the speed loop against /drive and wheel speed, 1 s horizons restarted every 0.25 s); wheel-speed RMS
+  0.222 m/s against 0.361 with the shared values; grid and scores in
+  tools/f1tenth_sim/sim_fidelity/sfu_course_2026_11_11_speed_loop_rb1.json;
+  tools/run_analysis/results/2026-11-14-rb1-speed-loop.md
+speed_loop_accel_gain: 20.0
+speed_loop_accel_max: 5.5
+speed_loop_brake_deadband: 0.2
+speed_loop_brake_gain: 3.0
+speed_loop_brake_max: 4.0
+speed_delay_ticks: 3

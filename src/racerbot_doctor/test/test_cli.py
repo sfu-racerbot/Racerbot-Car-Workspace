@@ -45,8 +45,14 @@ def test_doctor_lists_overrides_with_reasons(tmp_path, monkeypatch):
 
 
 def test_doctor_says_no_overrides_when_none(monkeypatch, tmp_path):
+    # A copy of the profiles with car 1's tuning overlay removed: the shipped car 1 has one since 2026-11-14
+    # (pure_pursuit.yaml, PR #63), and this test is about the no-overlay case, not about the shipped car.
+    import shutil
     from racerbot_car import identity
-    monkeypatch.delenv('RACERBOT_CARS_DIR', raising=False)
+    root = pathlib.Path(__file__).resolve().parents[3]
+    shutil.copytree(root / 'src/racerbot_car/cars', tmp_path / 'cars')
+    shutil.rmtree(tmp_path / 'cars/rb1/tuning', ignore_errors=True)
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path / 'cars'))
     monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing'))
     code, text, _ = _run(['--no-live'], healthy_snap())
     assert code == 0

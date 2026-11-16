@@ -136,6 +136,19 @@ collapses to 0.0 m/s² in the traffic scenario. Setting it to 0.7 keeps the
 minimum budget at 4.9 m/s² and the clamp never binds. We left the default
 honest and documented the trade rather than quietly weakening the physics.
 
+**Tyres that can let go (`tyres.py`, off by default, 2026-11-14).** The clamp
+above gives the envelope but never loss of control: at the limit the car runs
+wide. Setting `CarCalibration.tyre_model` to a `TyreModel(peak_front,
+peak_rear, shape, coupling)` swaps gym's dynamics function for the same
+single-track model with a saturating per-axle force (magic formula, the same
+slope as gym's linear tyre at zero slip, so nothing changes below the limit)
+and turns the steering clamp off. A rear that saturates first spins the car; a
+front that saturates first runs it wide (`tests/test_tyres.py`). No car or
+floor sets it yet. `event_replay.py --tyres FRONT,REAR,SHAPE` tries one; with
+car 1's measured peak it does not reproduce the 2026-11-11 U-turn contact,
+which turned out not to be a spin
+(`tools/run_analysis/results/2026-11-14-rb1-u-turn-contact.md`).
+
 ### 3. A steering servo that settles (`actuation.py`)
 
 `pid_steer` has no proportional term at all: `sv = sign(error) · sv_max`,
@@ -197,6 +210,21 @@ gym's own gains through the same path reproduces gym (0.422 vs 0.420 m/s
 RMS against the run), which is how the conversion was checked. The fit
 itself is `tools/run_analysis/fit_sim.py`; speed error against the run fell
 from 0.46 to 0.24 m/s.
+
+**Per car since 2026-11-14.** Those numbers are now the shared default
+(`SHARED_SPEED_LOOP` in `calibration.py`). A car whose profile has
+`src/racerbot_car/cars/<id>/sim/speed_loop.yaml` uses its own values instead
+(`car_speed_loop`); the file names any of the six loop fields and a `source`.
+Car 1 has one, fitted by `tools/run_analysis/fit_speed_loop.py` to its
+2026-11-11 race runs: it accelerates harder (gain 20 /s up to 5.5 m/s²) and,
+unlike the shared loop, coasts through a small overspeed. The loop brakes
+only once the speed is more than `speed_loop_brake_deadband` (0.2 m/s on car 1)
+above the command, then at 3 /s up to 4 m/s². Its delay is 3 ticks. Speed
+error against the two runs fell from 0.361 to 0.222 m/s. After a hard ramp the
+simulated car now overshoots the command by 1.66 m/s for 0.75 s, like the real
+one (1.56 m/s, 0.75 s); the shared loop gave 1.24 m/s for 0.47 s. Details:
+`tools/run_analysis/results/2026-11-14-rb1-speed-loop.md`. Car 2 keeps the
+shared loop unless a floor profile sets one.
 
 ### 12. Gym's collision response is switched off (2026-10-20)
 

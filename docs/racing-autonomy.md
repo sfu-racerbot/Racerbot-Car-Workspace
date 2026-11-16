@@ -96,6 +96,13 @@ python3 -m pure_pursuit.race_line --run-dir "$RUN_DIR"
 
 **Working when:** the last result line starts `choice:` and names the selected source, and both CSV files exist.
 
+**How long it takes.** The build runs on the CPU and does not use the GPU. Its cost is the minimum-time optimizer, which can make hundreds of solver runs over the three starting lines and their repair rounds. Two changes on 2026-11-10 made it about 10× faster without changing what it computes:
+
+- **Batched gradient.** The solver's gradient is now worked out in one pass over every control point (`min_time_line.forward_difference_gradient`). It takes the same steps SciPy took when it called the cost once per point.
+- **Parallel starts.** The three starts run in parallel processes (`race_line._start_results`). They give exactly the lines they give when run one after another.
+
+Car 2's 2026-10-30 course took 1238 s on one core before these changes, and 118 s after them, on the dev box. The optimizer is sensitive to rounding: moving its start by 1e-12 m moved its result by up to 3% on a test course, before and after this change. So the check is the course suite, not line-for-line equality. A control whose bounds have closed onto it during a repair now gets a zero gradient; SciPy gave it NaN, which ended those repair solves early.
+
 `--car rb1` or `--car rb2` selects a car explicitly when working offline; otherwise the tool uses the current car. `race_line_mode` can also require `recorded`, `min_curvature` or `min_time`; a required mode refuses a failed candidate instead of choosing another source.
 
 ### Limitations
@@ -182,6 +189,42 @@ Against the shipped 5 m/s `gap_follow` reference, the map racer is about 3% fast
 The earlier probe-built lines gave 11.40–11.47 s on 06a and 8.67–8.77 s on 06b, nine seeds each with zero contact and stop ticks. The probe-built 06b line was about 0.1 s faster because it skipped the final dense check. The accepted shipped line gives up that time to pass the final clearance requirement.
 
 These are no-ROS simulator runs of the shipped line and controller math, not a full ROS launch or physical-car validation. **Before driving: static checks, wheels off the ground, then the capped low-speed floor test. Hold LB whenever the car should move.**
+
+## Racing on another car's map
+
+**Car 1 cannot map a course yet.** A replay of its 2026-11-11 race run through the real `map_course` launch
+(`tools/run_analysis/replay_map_course.py data/rb1/racerbot_runs/20261111-153721 --from-seconds 103`) closed three laps,
+but the map failed its own check: mean scan fit 0.89 against the 0.90 it needs, and one stretch at 0.37 where the car
+got lost. So car 1 races on a map car 2 made, with a line built for car 1.
+
+A mapping run's line carries the car that built it: `raceline_profiled.csv` is planned with that car's grip,
+acceleration and braking delay. Copy only the course, then build the line for the car that will race it:
+
+```bash
+python3 -m pure_pursuit.race_line --car rb1 \
+    --from-run-dir data/rb2/racerbot_auto/<car 2's run> --run-dir data/rb1/racerbot_auto/<new name>
+```
+
+`--from-run-dir` copies the map (yaml and image), `raceline_raw.csv` and `start_pose.yaml`, never the other car's
+built line. It refuses a `--run-dir` that already holds files and writes `adopted_from.yaml` naming the source. The
+line is then built with `--car`'s layered limits. Race it with `race_launch.py run_dir:=<the new directory>` as usual.
+Copy the course to car 1 first (`data/` is per car and the run is on car 2).
+
+**Car 1's limits** (`cars/rb1/calibration/auto_map_race.yaml`, `cars/rb1/tuning/pure_pursuit.yaml`), from its race
+runs:
+- planning lateral 3.2 m/s², from the 3.56 it sustained;
+- acceleration 5.0 m/s², its speed loop;
+- planned speed delay 0.35 s: its VESC coasts through a small overspeed and reaches a lowered command in a median
+  0.52 s;
+- `delay_lqr` with its measured servo, 12/s at 1.75 rad/s;
+- overtaking off and following on, as on car 2.
+
+The online ceiling stays at the shared 2.5 m/s².
+
+**Simulator only, not driven.** On `car2_course_2026_11_11` with car 1's fitted speed loop, over 6 seeds and 3 laps,
+there was no contact and no safety stop. First laps were 10.65-10.78 s and flying laps 10.12-10.25 s, against car 1's
+gap follow at 11.74 s in the same simulator and 10.8-12.2 s on the day. Planning at 3.5 m/s², or with a 3.0 online
+ceiling, made contact. Floor ladder F3 comes first (plan section 9).
 
 ## Following traffic on car 2: stage 1
 
@@ -1463,6 +1506,7 @@ Seven independent checks, each capable of unilaterally forcing a stop or a steer
 | Opponent detection + overtake steering | Another car detected and being closed on within `overtake_trigger_gap` (default 3.0m of *track* distance) | Not a safety check at all — a racing one. See [Racing against opponents](#racing-against-opponents-detection-tracking-and-overtaking) below. Always subordinate to the two checks after it |
 | Reactive avoidance (steer around) | An unmapped return in the 60° cone is under 1.5m; before a map is ready, raw range is under the 0.6m fallback (cut from 0.7m on 2026-08-25) | Map subtraction prevents ordinary walls from continuously triggering the traffic layer. A committed pass bypasses the generic 1m/s cap, while the emergency tier remains active |
 | Emergency swept-path stop (always wins; 2026-11-07) | The body's own swept path is blocked: on the arc the car is on (the rack's last commanded steering) or the arc it is being steered onto (this tick's steering), the free distance from the body's front edge is under `emergency_arc_clearance` (default 0.14m), over the same +/-90deg window as the footprint check; or a return sits inside `emergency_hard_stop_distance` (default 0.25m) in the 60deg cone, at any steering; or `/scan` itself is stale/missing | Replaces the 2026-08-25 raw-range rule, which stopped a car whose path was clear at 0.35m in the 60deg cone (in a full-lock turn the cone points at the wall the car is turning away from). A directional escape (`emergency_escape`) applies here too. Returns behind the sensor (beyond +/-90deg) are not read, on purpose: see [The emergency swept-path check](#the-emergency-swept-path-check-2026-11-07). Simulator-validated only; not yet driven |
+| Arc braking cap (only lowers speed; 2026-11-14) | Tier 1 passed but the body's swept path (the same two arcs, 1 m horizon) meets a return: the speed is capped so that, holding it for `arc_braking_response_sec` (0.25 s) and then braking at `arc_braking_decel` (3.0 m/s², measured), the car still stops with `emergency_arc_clearance` free (`racing_math.delayed_braking_speed_limit`; at most about 1.6 m/s, nothing beyond the horizon) | Tier 1 alone stops at a fixed 0.14 m whatever the speed. After a flank creep the tracking law steered full lock back to the line, reached 1.4 m/s toward the next wall and hit it (simulator, rb2 20261111-152132's stop; `tools/run_analysis/results/2026-11-14-map-racer-stuck-case.md`). Never engaged on either car's race-day line. On in `pure_pursuit.yaml` (`enable_arc_braking_cap`); the node's own default is off. Simulator-validated only; not yet driven |
 | Unhandled exception | Anything in the control step raises | `control_loop()` wraps the whole step in try/except; on *any* exception it publishes a stop command *before* re-raising, so an unexpected bug can't leave the last (possibly full-speed) command sitting on `/drive` forever |
 
 **Every stop in this table is published immediately and unshaped.** The acceleration and steering rate limits described in [Online command shaping](#online-command-shaping) sit on the *normal* command path only. A zero-speed command never passes through them, because rate-limiting a stop into a nonzero command would defeat the whole table.
@@ -1854,6 +1898,8 @@ All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that fi
 | `max_speed` / `min_speed` | `4.0` / `0.5` | Hard safety ceiling/floor, independent of the `.csv` |
 | `max_lateral_accel` | `2.5` | m/s²; online cornering ceiling on the *commanded* curvature, see [Speed](#speed-the-profile-then-two-online-ceilings) |
 | `speed_lead_time` | `0.0` | s, 0-1; command the profile speed this far ahead when it is higher, so a lagging speed loop accelerates earlier. Never brakes early. Car 2: 0.25 |
+| `launch_speed_scale` | `1.0` | (0.5, 1.0], 1.0 = off. After LB is pressed from standstill (measured speed below 0.5 m/s, stale odometry counts as standing) the profiled speed is multiplied by this for the next `launch_scale_distance` metres driven, then back to 1. Applied before the speed clip and every cap, so it can only lower a command; not applied while recovering. Counted per fresh-odometry tick; a press while rolling neither arms nor clears it. Simulator-validated only (`launch_scale.py`) |
+| `launch_scale_distance` | `0.0` | m, >= 0; 0 = one line length |
 | `max_acceleration` | `6.0` | m/s²; cap on how fast a speed command may *rise*. Deliberately loose — too tight and the car cannot recover from a safety stop |
 | `max_braking_decel` | `8.0` | m/s²; cap on how fast a *normal* command may fall. Emergency stops are never rate-limited |
 | `max_steering_rate` | `1.0` | rad/s; steering slew limit between commands |
@@ -1870,6 +1916,9 @@ All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that fi
 | `emergency_stop_distance` | `0.35` | Meters; the avoidance brake reserve and the committed-pass speed cap. No longer the Tier 1 hard stop since 2026-11-07 (that is `emergency_arc_clearance` and `emergency_hard_stop_distance`). Cut from 0.4 on 2026-08-25, untested on the car |
 | `emergency_arc_clearance` | `0.14` | Meters; Tier 1 trips when the body's swept path is blocked closer than this, measured from the front edge. `0.35 - 0.21`: straight ahead this is the old 0.35m LiDAR rule. Shared floor: a tuning overlay may only raise it |
 | `emergency_arc_length` | `1.0` | Meters; the arc's horizon. Must be finite and at least `emergency_arc_clearance`, or the node refuses to start. Shared floor |
+| `enable_arc_braking_cap` | `true` (node default `false`) | Cap the speed by the stopping distance along the swept path inside the arc horizon; see the reactive tier table |
+| `arc_braking_decel` | `3.0` | m/s²; the physical braking the cap assumes (car 2 measured, as `following_brake`). Shared ceiling: an overlay may only lower it |
+| `arc_braking_response_sec` | `0.25` | Seconds the car is assumed to hold its speed before braking. Shared floor: an overlay may only raise it |
 | `emergency_hard_stop_distance` | `0.25` | Meters; raw backstop anywhere in the 60deg cone, at any steering. Shared floor |
 | `scan_timeout_sec` | `0.5` | LIDAR staleness watchdog |
 | `enable_obstacle_avoidance` | `true` | Steer around something close instead of just stopping, when there's room |

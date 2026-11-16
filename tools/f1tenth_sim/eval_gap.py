@@ -182,14 +182,23 @@ def _reverse_laps(plant) -> float:
 
 
 def run_track(track: str, params: dict, seed: int, timeout_s: float,
-              reverse: bool = False, calibration=None, car_id=None) -> dict:
-    """One lap of ``track``. ``reverse`` starts facing backwards, so the
-    indoor layouts (all counter-clockwise) get exercised with right turns."""
-    plant = make_plant(track, seed, calibration=calibration, car_id=car_id)
+              reverse: bool = False, calibration=None, car_id=None, trace=None,
+              max_laps: int = 1, grip_scale: float | None = None) -> dict:
+    """``max_laps`` laps of ``track`` (default one, from a standing start). ``reverse`` starts facing
+    backwards, so the indoor layouts (all counter-clockwise) get exercised with right turns.
+    ``lap_times_s`` lists each completed lap's own time: the first includes the standing start, the
+    rest are flying laps. ``grip_scale`` scales the floor's calibrated grip (FidelityPlant.set_grip_scale)."""
+    if max_laps < 1:
+        raise ValueError("max_laps must be at least 1")
+    if reverse and max_laps != 1:
+        raise ValueError("reverse runs count one lap only")
+    plant = make_plant(track, seed, calibration=calibration, car_id=car_id, max_laps=max_laps)
     line = plant.env.unwrapped.track.raceline
     start = np.array([[line.xs[0], line.ys[0],
                        line.yaws[0] + (math.pi if reverse else 0.0)]], dtype=float)
     obs, _ = plant.reset(start)
+    if grip_scale is not None:      # a slicker or grippier floor than calibrated, from the start (#74)
+        plant.set_grip_scale(grip_scale)
     lidar = plant.env.unwrapped.sim.scan_sims[0]
     # Use the config's lidar for geometry: angle_min/increment come from the env.
     class _Lidar:
@@ -202,6 +211,7 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
 
     max_steps = int(math.ceil(timeout_s / CONTROL_DT))
     started = time.monotonic()
+    trace_rows = [] if trace else None
     stop_steps = 0
     min_forward = math.inf
     corridor_offsets = []
@@ -224,6 +234,8 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
     last_true_speed = None
     # Per tick, the ids of the tracks marked moving (awareness on only).
     moving_per_tick = []
+    lap_marks = []          # sim time at which each lap completed
+    min_chassis_map = math.inf   # the plant's own chassis-to-map clearance, never the controller's view
 
     for step in range(max_steps):
         ego = obs["agent_0"]
@@ -240,6 +252,9 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
                                                float(state[5]), float(state[3]),
                                                params['wheelbase'], 0.3))
         steerings.append(steering)
+        if trace_rows is not None:
+            trace_rows.append((step * CONTROL_DT, state[0], state[1], state[4], plant.truth(0)[3], speed_meas, cmd_speed, steering,
+                               ctrl.binding_cap or "", plant.chassis_map_clearance(0), ctrl.telemetry.get("min_clear", math.nan)))
         if ctrl.opponents is not None:
             moving_per_tick.append(moving_track_ids(ctrl.opponents.tracker.tracks))
         stop_steps += int(ctrl.stopped)
@@ -285,12 +300,22 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
             min_forward = min(min_forward, fs)
 
         obs, _r, done, _t, info = plant.step([(steering, cmd_speed)])
+        chassis = plant.chassis_map_clearance(0)
+        if math.isfinite(chassis):
+            min_chassis_map = min(min_chassis_map, chassis)
+        while not reverse and float(info["lap_counts"][0]) > len(lap_marks):
+            lap_marks.append(float(info["sim_time"]))
         if reverse and _reverse_laps(plant) >= 1.0:
             break
         if done or obs["agent_0"]["collision"]:
             break
 
     laps = _reverse_laps(plant) if reverse else float(info["lap_counts"][0])
+    if trace_rows is not None:
+        cols = list(zip(*trace_rows)) if trace_rows else [[]] * 11
+        names = ("t", "x", "y", "yaw", "v_true", "v_meas", "cmd_speed", "steering", "binding_cap", "chassis_clearance", "controller_min_clear")
+        np.savez(trace, **{n: (np.asarray(c, dtype=str) if n == "binding_cap" else np.asarray(c, dtype=float))
+                           for n, c in zip(names, cols)})
     plant_report = plant.report()
     plant.close()
     wall_time = time.monotonic() - started
@@ -306,6 +331,7 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
         "laps": laps,
         "collision": collision,
         "sim_time_s": round(float(info["sim_time"]), 2),
+        "lap_times_s": [round(b - a, 3) for a, b in zip([0.0] + lap_marks, lap_marks)],
         "wall_time_s": round(wall_time, 2),
         "steps": step + 1,
         "stop_steps": stop_steps,
@@ -320,6 +346,8 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
         "stop_reasons": stop_reasons,
         "min_body_clearance_m": (round(min_body_clear, 3)
                                  if math.isfinite(min_body_clear) else None),
+        "min_chassis_map_clearance_m": (round(min_chassis_map, 3)
+                                        if math.isfinite(min_chassis_map) else None),
         "speed_shed_mps": round(speed_shed, 2),
         "hard_brake_ticks": hard_brake_ticks,
         "steering_reversals_per_s": round(reversals, 3),
@@ -433,8 +461,9 @@ def parse_set(values, car_id=None):
 
 
 def _job(job):
-    track, seed, params, timeout, reverse, car_id, calibration = job
-    return run_track(track, params, seed, timeout, reverse, calibration=calibration, car_id=car_id)
+    track, seed, params, timeout, reverse, car_id, calibration, *extra = job
+    return run_track(track, params, seed, timeout, reverse, calibration=calibration, car_id=car_id,
+                     trace=extra[0] if extra else None)
 
 
 def main(argv=None) -> int:
@@ -454,6 +483,9 @@ def main(argv=None) -> int:
     parser.add_argument("--set", action="append", default=[],
                         help="override a parameter, name=value (repeatable)")
     parser.add_argument("--output", help="write JSON results here")
+    parser.add_argument("--trace", help="write each run's per-tick trace (t, x, y, yaw, true and measured speed, commanded speed, "
+                                        "steering, binding cap, independent chassis-to-map clearance) to this .npz; with several runs "
+                                        "_<track>_<seed> is inserted before the suffix. Off by default; the results are unchanged")
     parser.add_argument("--reverse", action="store_true",
                         help="drive each track the other way round")
     parser.add_argument("--friction", type=float,
@@ -470,6 +502,10 @@ def main(argv=None) -> int:
     calibration = with_friction(args.friction, with_floor(args.floor, calibration_for_car(car_id)))
     jobs = [(track, args.seed + k, params, args.timeout, args.reverse, car_id, calibration)
             for track in selected for k in range(args.seeds)]
+    if args.trace:
+        out = Path(args.trace)
+        jobs = [(*job, str(out if len(jobs) == 1 else out.with_name(f"{out.stem}_{job[0]}_{job[1]}{out.suffix or '.npz'}")))
+                for job in jobs]
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             results = list(pool.map(_job, jobs))

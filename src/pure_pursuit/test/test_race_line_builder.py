@@ -244,9 +244,11 @@ def test_min_time_keeps_the_fastest_passing_start(course):
     assert best.ok and alone.ok
     # oracle: invariant, the single start is one of those tried, and the kept result is the fastest.
     assert best.est_lap_s <= alone.est_lap_s
-    # oracle: recorded measurement, this fixture with the default config (2026-11-09): shortest start
-    # 10.818 s, minimum-curvature start 11.337 s, recorded start 14.106 s.
-    assert alone.est_lap_s - best.est_lap_s >= 0.3   # s
+    # oracle: recorded measurement, this fixture with the default config and the guarded re-centering
+    # (2026-11-12): shortest start 10.885 s, minimum-curvature start 11.159 s, recorded start 12.673 s.
+    # Re-recorded for guarded re-centering (PR #50); the previous margin 0.3 s was measured on the
+    # unguarded centerline (2026-11-09: 10.818, 11.337, 14.106 s); ruled by the tech lead 2026-11-12.
+    assert alone.est_lap_s - best.est_lap_s >= 0.20   # s; measured gap 0.274
     assert 'start shortest of: recorded' in best.reason
     # oracle: independent, the kept line still passes the builder's own final check.
     field = grid.clearance_field()
