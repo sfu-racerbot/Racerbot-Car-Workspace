@@ -59,7 +59,9 @@ def test_wrapper_values_match_gap_follow(car):
              'reserve_distance': 'forward_stop_clearance', 'wheelbase': 'wheelbase',
              'laser_offset_x': 'laser_offset_x', 'forward_fov_deg': 'forward_fov_deg',
              'swept_clearance_margin': 'swept_clearance_margin',
-             'swept_clearance_max_length': 'swept_clearance_max_length'}
+             'swept_clearance_max_length': 'swept_clearance_max_length',
+             'flank_creep_length': 'flank_creep_length', 'flank_creep_margin': 'flank_creep_margin',
+             'escape_creep_speed': 'escape_creep_speed'}
     pinned = {k: DELIBERATE[k](car) for k in DELIBERATE if DELIBERATE[k](car) is not None}
     mismatched = {k: (p[k], g[v]) for k, v in pairs.items() if k not in pinned and p[k] != g[v]}
     assert mismatched == {}

@@ -13,7 +13,7 @@
 - **Runs on the car's CPU in plain NumPy.** No PyTorch or GPU on the Jetson. Measured on car 1's Jetson, one core: the whole tick (observation, network, safety wrapper) takes **3.90 ms median, 4.03 ms p99**, 16% of the 25 ms tick.
 - **Shadow mode is the default.** Until you pass `shadow:=false`, it publishes only on `/neural_racer/shadow_drive`, never on `/drive`. It refuses a shadow topic that reaches the motor (`/drive`, `/teleop`, `/ackermann_cmd`, `/commands/...`).
 - **It only loads approved models.** A model must be in `~/.ros/neural_racer/models/manifest.yaml`, put there by `approve_model` after its hash, its observation spec and a 1e-5 golden check against PyTorch all pass. Driving `/drive` also needs both referee reports to say pass.
-- **The network is never the last word.** A deterministic wrapper runs around it every tick: the LB deadman, input freshness, NaN checks, clipping, a steering-rate limit, `gap_follow`'s own LiDAR braking cap (imported from `gap_logic`, not copied), and a cornering cap. Each step can only lower the speed.
+- **The network is never the last word.** A deterministic wrapper runs around it every tick: the LB deadman, input freshness, NaN checks, clipping, a steering-rate limit, `gap_follow`'s own LiDAR braking cap and flank creep (imported from `gap_logic`, not copied), and a cornering cap. Each step can only lower the speed.
 - **The camera is pre-wired, not used.** The network has a camera slot whose weights start at exactly zero, so adding a camera later changes nothing until it is trained. `camera_enabled: true` is refused until Phase C exists.
 
 ### Why it exists
@@ -47,27 +47,30 @@ ros2 run neural_racer approve_model ~/.ros/neural_racer/incoming/<hash> --shadow
 
 ## Running in shadow mode
 
+**Build it** with `gap_follow`: the wrapper imports `gap_follow`'s braking geometry (`gap_logic`), so `gap_follow` must be built even when its node doesn't run.
+
+```bash
+colcon build --symlink-install --packages-up-to neural_racer
+source /opt/ros/jazzy/setup.bash && source install/setup.bash
+```
+
+### Beside `gap_follow`, which drives
+
 **Terminal 1** — bringup, as usual:
 
 ```bash
 ros2 launch f1tenth_stack bringup_launch.py
 ```
 
-**Terminal 2** — the IMU, from [imu_bridge](../imu_bridge/README.md), the same `/imu/data` every other node reads:
-
-```bash
-ros2 launch imu_bridge vehicle_state_launch.py
-```
-
-**Working when:** `ros2 topic echo /imu/status --once` shows `"state": "ok"`. Keep the car still for about 3 s after starting, for the gyro bias and the gravity check. If it shows `fault`, its `reason` names the problem ([The `/imu/status` verdict](../imu_bridge/README.md#the-imustatus-verdict)).
-
-**Terminal 3** — `gap_follow`, which is the one driving:
+**Terminal 2** — `gap_follow`, which is the one driving. Its launch also starts the IMU stack (`imu:=true` by default), the same `/imu/data` the network reads, so don't start `vehicle_state_launch.py` as well, or the IMU stack runs twice:
 
 ```bash
 ros2 launch gap_follow gap_follow_launch.py
 ```
 
-**Terminal 4** — the network, in shadow mode:
+**Working when:** `ros2 topic echo /imu/status --once` shows `"state": "ok"`. Keep the car still for about 3 s after starting, for the gyro bias and the gravity check. If it shows `fault`, its `reason` names the problem ([The `/imu/status` verdict](../imu_bridge/README.md#the-imustatus-verdict)).
+
+**Terminal 3** — the network, in shadow mode:
 
 ```bash
 ros2 launch neural_racer neural_racer_launch.py model_hash:=<hash>
@@ -76,6 +79,20 @@ ros2 launch neural_racer neural_racer_launch.py model_hash:=<hash>
 **Working when:** the log says `SHADOW -> /neural_racer/shadow_drive`, and `ros2 topic hz /neural_racer/shadow_drive` reads about 40 Hz while LB is held.
 
 **If it doesn't:** a `REFUSING TO DRIVE:` line names the reason.
+
+### On its own, with nothing driving
+
+The network alone, with no `gap_follow`: nothing publishes `/drive`, so the car doesn't move even with LB held. Use it to check the network's output with the wheels off the ground, or with the car pushed by hand.
+
+```bash
+ros2 launch f1tenth_stack bringup_launch.py                       # terminal 1
+ros2 launch imu_bridge vehicle_state_launch.py                    # terminal 2: the IMU stack; keep the car still ~3 s
+ros2 launch neural_racer neural_racer_launch.py model_hash:=<hash>   # terminal 3
+```
+
+**Working when:** the same checks as above.
+
+**For it to drive** (`shadow:=false max_speed:=1.0` on terminal 3), the model needs a full approval, with passing `selection_report.json` and `referee_report.json` (see [Approving a model](#approving-a-model)). With a shadow-only approval the node refuses: `REFUSING TO DRIVE: model refused`.
 
 ## Tests
 
@@ -93,6 +110,6 @@ export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 python3 -m pytest src/neural_racer/test/ -v
 ```
 
-**Working when:** 141 tests pass. Every node test publishes on `/test_only/drive`, and `test_no_test_here_builds_a_node_on_the_real_drive` enforces it.
+**Working when:** every test passes. Unsourced, the ROS-free set is 153 tests. Two of them are the Jetson timing gates in `test_latency.py`, which fail on a busy dev box. Every node test publishes on `/test_only/drive`, and `test_no_test_here_builds_a_node_on_the_real_drive` enforces it.
 
 `tools/neural_racer/check_mutations.py` proves the key tests fail against a deliberate break of the code they cover (`CLAUDE.md` Hard rule 1).

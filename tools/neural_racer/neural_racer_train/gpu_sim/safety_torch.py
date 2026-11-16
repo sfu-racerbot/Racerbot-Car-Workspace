@@ -2,7 +2,8 @@
 
 Training runs the same wrapper as the car, and every tick it overrides the
 network costs reward, so the policy learns not to need it (plan A6). The
-braking cap's clearance is gap_logic.swept_path_clearance, batched;
+braking cap's clearance is gap_logic.swept_path_clearance, batched, and the
+flank creep's test is gap_logic.body_arc_free_distance, batched;
 tests/test_observation_parity.py holds this to the NumPy wrapper.
 """
 import math
@@ -22,6 +23,10 @@ class SafetyTorch:
         self.window = slice(int(idx[0]), int(idx[-1]) + 1)      # contiguous: the scan is ordered
         a = torch.as_tensor(angles[self.window], dtype=torch.float32, device=device)
         self.cos, self.sin = torch.cos(a), torch.sin(a)
+        # the flank creep's travel samples: gap_logic.body_arc_free_distance's 0.02 m step
+        travel = np.arange(0.0, cfg.flank_creep_length + 0.01, 0.02)
+        self.travel = torch.as_tensor(travel[travel <= cfg.flank_creep_length + 1e-12],
+                                      dtype=torch.float32, device=device)
         # gap_follow's escape creep (gap_follow_node.py, escape_creep_speed): inside the reserve, up to
         # this speed on the braking formula with half the reserve. 0 = off, as the car's wrapper is;
         # set only by experiments asking whether the car's wrapper should have it (2026-11-02)
@@ -57,6 +62,43 @@ class SafetyTorch:
         nearest = torch.where(in_band, along, torch.full_like(along, math.inf)).amin(dim=-1)
         return torch.where(nearest > c.swept_clearance_max_length, torch.full_like(nearest, math.inf),
                            nearest.clamp(min=0.0))
+
+    def body_arc_free(self, ranges, valid, steer, mask, chunk: int = 256):
+        """gap_logic.body_arc_free_distance(...) == inf with the flank creep's
+        settings, batched, for the cars in `mask` only (False elsewhere): the
+        body rectangle, widened by flank_creep_margin a side, driven
+        flank_creep_length along the arc `steer` drives, meets no usable return
+        in the forward window. ranges/valid (E, C, B), steer and mask (E, C)."""
+        c = self.cfg
+        out = torch.zeros_like(mask)
+        rows = mask.nonzero(as_tuple=True)
+        if rows[0].numel() == 0:
+            return out
+        hw = c.car_width / 2.0 + c.flank_creep_margin
+        front = c.wheelbase / 2.0 + c.car_length / 2.0
+        rear = c.wheelbase / 2.0 - c.car_length / 2.0
+        r_all = ranges[rows][:, self.window]
+        ok_all = valid[rows][:, self.window] & (r_all > 0.0)
+        k_all = torch.tan(steer[rows]) / c.wheelbase
+        t = self.travel
+        free = []
+        for i in range(0, r_all.shape[0], chunk):           # bounds memory: chunk x T x B
+            r, ok, k = r_all[i:i + chunk], ok_all[i:i + chunk], k_all[i:i + chunk, None]
+            px = (r * self.cos + c.laser_offset_x)[:, None, :]
+            py = (r * self.sin)[:, None, :]
+            straight = k.abs() < 1e-6
+            ks = torch.where(straight, torch.ones_like(k), k)
+            heading = torch.where(straight, torch.zeros_like(k), k * t)                  # (M, T)
+            bx = torch.where(straight, t.expand_as(heading), torch.sin(heading) / ks)
+            by = torch.where(straight, torch.zeros_like(heading), (1.0 - torch.cos(heading)) / ks)
+            ch, sh = torch.cos(heading)[..., None], torch.sin(heading)[..., None]
+            dx, dy = px - bx[..., None], py - by[..., None]
+            lx = ch * dx + sh * dy
+            ly = -sh * dx + ch * dy
+            hit = ok[:, None, :] & (lx >= rear) & (lx <= front) & (ly.abs() <= hw)
+            free.append(~hit.flatten(1).any(dim=1))
+        out[rows] = torch.cat(free)
+        return out
 
     def braking_limit(self, clearance, max_speed):
         c = self.cfg
@@ -94,6 +136,13 @@ class SafetyTorch:
         steer = torch.minimum(torch.maximum(asked, prev_steer - step), prev_steer + step)
         clearance = torch.minimum(self.swept_clearance(ranges, valid, asked), self.swept_clearance(ranges, valid, steer))
         brake = self.braking_limit(clearance, max_speed)
+        if c.flank_creep_length > 0.0:
+            # the car wrapper's step 5b: with the braking cap at zero, a crawl if the body's own
+            # path is free along the arc asked for and the slew-limited one
+            free = self.body_arc_free(ranges, valid, asked, (brake <= 0.0) & ~bad)
+            differ = free & ((steer - asked).abs() > 0.0)
+            free = free & (~differ | self.body_arc_free(ranges, valid, steer, differ))
+            brake = torch.where(free, torch.full_like(brake, c.escape_creep_speed), brake)
         a_lat = c.max_lateral_accel if max_lateral_accel is None else max_lateral_accel
         unbraked = torch.minimum(speed, curvature_speed(steer, c.wheelbase, a_lat))
         v = torch.minimum(unbraked, brake)

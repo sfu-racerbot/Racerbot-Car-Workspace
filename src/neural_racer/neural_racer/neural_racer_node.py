@@ -35,7 +35,7 @@ from sensor_msgs.msg import Imu, Joy, LaserScan
 from std_msgs.msg import String
 
 from neural_racer import model_store, observation as obs, preview
-from neural_racer.safety_wrapper import SafetyWrapper, WrapperConfig, scan_angles
+from neural_racer.safety_wrapper import SafetyWrapper, WrapperConfig, config_problem, scan_angles
 
 # Topics a shadow-mode node must never publish on: each one reaches the motor.
 COMMAND_TOPICS = ('/drive', '/teleop', '/ackermann_cmd', '/auto_map/drive', '/auto_race/drive')
@@ -87,7 +87,8 @@ class NeuralRacerNode(Node):
                      'laser_offset_x', 'reserve_distance', 'max_braking_decel',
                      'braking_latency_sec', 'max_lateral_accel', 'max_steering_rate',
                      'command_slew_max_dt', 'max_invalid_fraction', 'forward_fov_deg',
-                     'swept_clearance_margin', 'swept_clearance_max_length'):
+                     'swept_clearance_margin', 'swept_clearance_max_length',
+                     'flank_creep_length', 'flank_creep_margin', 'escape_creep_speed'):
             p(name, getattr(defaults, name))
 
         v = lambda name: self.get_parameter(name).value   # noqa: E731
@@ -114,7 +115,8 @@ class NeuralRacerNode(Node):
                 'laser_offset_x', 'reserve_distance', 'max_braking_decel',
                 'braking_latency_sec', 'max_lateral_accel', 'max_steering_rate',
                 'command_slew_max_dt', 'max_invalid_fraction', 'forward_fov_deg',
-                'swept_clearance_margin', 'swept_clearance_max_length')}))
+                'swept_clearance_margin', 'swept_clearance_max_length',
+                'flank_creep_length', 'flank_creep_margin', 'escape_creep_speed')}))
 
         # --- refusals: the node then publishes only zero commands ------------
         self.refusal = None
@@ -128,6 +130,8 @@ class NeuralRacerNode(Node):
             self.refusal = 'camera_enabled: the camera input is not implemented yet (Phase C)'
         elif not (math.isfinite(self.max_speed) and 0.0 <= self.max_speed <= 6.37):
             self.refusal = f'max_speed {self.max_speed} outside [0, 6.37] m/s (firmware cap)'
+        elif config_problem(self.wrapper.cfg) is not None:
+            self.refusal = config_problem(self.wrapper.cfg)
         self.policy, self.card = None, {}
         if self.refusal is None:
             try:

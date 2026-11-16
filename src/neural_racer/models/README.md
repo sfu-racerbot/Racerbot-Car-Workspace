@@ -2,7 +2,7 @@
 
 > **Who this is for:** anyone putting a trained neural racer on car 1, or checking how good it is.
 > **Read first:** [neural_racer's README](../README.md) (approval, shadow mode, safety) and the [plan's B0](../../../docs/superpowers/specs/2026-10-23-neural-racer-plan.md#getting-a-model-from-fir-to-the-car).
-> **You'll be able to:** approve the current model and run it in shadow mode beside `gap_follow`, and know what it does and doesn't do yet.
+> **You'll be able to:** approve the current model and run it in shadow mode, beside `gap_follow` or on its own, and know what it does and doesn't do yet.
 
 Each folder is one exported model, exactly as `neural_racer_train.export` wrote it: `weights.npz`, `model_card.yaml` and `golden.npz`. The folder's name is the first 16 hex digits of `weights.npz`'s SHA-256. `approve_model` checks it, so don't edit the files.
 
@@ -23,13 +23,33 @@ Each folder is one exported model, exactly as `neural_racer_train.export` wrote 
 python -m neural_racer_train.export --from-export <spec-2 model dir> <out dir> --car-spec 1 --a-lat 2.5
 ```
 
-**It needs this branch's safety wrapper.** On `main`'s wrapper it finishes no time trial, 0 of 18. The braking cap read the nearest return in any direction, so on our 1.0–1.5 m wide courses it held the car to about 0.7 m/s on 798 of 800 ticks, and the car stalled within 12 m. This branch's wrapper reads `gap_follow`'s swept path instead: how far the body can drive along the arc it is steering.
+**It needs the swept-path safety wrapper that came with it** (2026-11-11). On the wrapper before that it finished no time trial, 0 of 18. The braking cap read the nearest return in any direction, so on our 1.0–1.5 m wide courses it held the car to about 0.7 m/s on 798 of 800 ticks, and the car stalled within 12 m. The wrapper now reads `gap_follow`'s swept path instead: how far the body can drive along the arc it is steering.
 
 **Why this one:** it finishes the most simulated time trials of any neural model we've benchmarked, and it's the fastest of the reliable ones. The newer league-v2 snapshots (Nov 9) did no better.
 
 ### How it does (simulation only)
 
-These are runs in the calibrated CPU simulator (`tools/f1tenth_sim`, car 1's profile), 3-lap races, speed cap 5.05 m/s (the VESC limit). They're on this branch's car code (v1 observation, swept-path wrapper), against `main` 2fb626e's `gap_follow`, 3 runs per course.
+**Re-benched 2026-11-16 on `main` 041568a's simulator**, against `main` 041568a's `gap_follow`: solo, 3-lap races, 3 runs per course, speed cap 5.05 m/s, the shipped 2.0 m/s² cap, car 1's profile, with the flank creep. Mean lap time and finishes:
+
+| Course | Neural, default | gap_follow, default | Neural, Nov 6 floor | gap_follow, Nov 6 floor |
+|---|---|---|---|---|
+| car1_course_2026_10_26 | 3/3, 11.89 s | 3/3, 10.49 s | 3/3, 12.51 s | 3/3, 12.23 s |
+| car2_course_2026_11_06a | 3/3, 14.44 s | 3/3, 11.61 s | 3/3, 13.35 s | 3/3, 12.99 s |
+| car2_course_2026_11_06b | 3/3, 9.02 s | 0/3 (contact) | 3/3, 9.35 s | 0/3 (contact) |
+| course_2026_10_30 | 3/3, 18.23 s | 3/3, 17.41 s | 3/3, 19.18 s | 3/3, 18.97 s |
+| room_2026_07_27 | 3/3, 6.62 s | 3/3, 7.14 s | 3/3, 7.07 s | 3/3, 8.12 s |
+| levine_blocked | 0/3 (contact) | 3/3, 18.45 s | 0/3 (contact) | 3/3, 20.09 s |
+| car2_course_2026_11_11 | 0/3 (contact) | 3/3, 11.32 s | 0/3 (contact) | 3/3, 12.10 s |
+| **Finished** | **15/21** | **18/21** | **15/21** | **18/21** |
+
+Race-day course on car 2's race-day floor (`sfu_course_2026_11_11_rb2`): neural 0/3 (stuck), progress [6.0, 6.0, 6.0] m; gap_follow 3/3, 12.14 s.
+
+- **`gap_follow` is more reliable and mostly faster** at the shipped cap. The model is faster only in the small room, and finishes car 2's Nov 6b course, where `gap_follow` makes contact.
+- **It fails the race-day course** (`car2_course_2026_11_11`) in every run: a wall contact about 6 m in on car 1's physics, and stuck at 6 m on car 2's race-day floor.
+- **The simulator moved since the Nov 11 numbers below.** The same model now finishes car 2's Nov 6a course on default physics (0/3 then) but not `levine_blocked` (3/3 then), and both racers lap about 10 % faster than below.
+- **The flank creep** fired on car 2's Nov 6a course on default physics only, and cut 1.3–1.7 s off each 3-lap run there. No finish or contact changed.
+
+**Nov 11, on `main` 2fb626e's simulator**, against `main` 2fb626e's `gap_follow`, 3 runs per course:
 
 **At the shipped 2.0 m/s² cap**, mean lap time and finishes:
 
@@ -49,12 +69,13 @@ At this cap it's slower than `gap_follow` on car 1's course and about level else
 
 ### How to run it
 
-**On car 1**, with this branch pulled:
+**On either car:**
 
 ```bash
 cd ~/racerbot-ws
-colcon build --packages-select neural_racer
-source /opt/ros/jazzy/setup.bash && source install/setup.bash
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install --packages-up-to neural_racer
+source install/setup.bash
 ros2 run neural_racer approve_model src/neural_racer/models/a0eef2af0a3757b6 --shadow-only
 ```
 
@@ -62,7 +83,7 @@ ros2 run neural_racer approve_model src/neural_racer/models/a0eef2af0a3757b6 --s
 
 **If it doesn't:** a `REFUSED:` line names the reason: a hash that doesn't match, a spec mismatch, or the golden check.
 
-**Then** run it in shadow mode as in [Running in shadow mode](../README.md#running-in-shadow-mode), with this hash. `gap_follow` drives; the network only publishes on `/neural_racer/shadow_drive`:
+**Then** run it in shadow mode as in [Running in shadow mode](../README.md#running-in-shadow-mode), with this hash: beside `gap_follow`, which drives, or on its own with nothing driving. Either way the network only publishes on `/neural_racer/shadow_drive`:
 
 ```bash
 ros2 launch neural_racer neural_racer_launch.py model_hash:=a0eef2af0a3757b6
@@ -83,6 +104,6 @@ ros2 bag record /scan /odom /imu/data /imu/status /joy /drive /neural_racer/shad
 ### Before it drives `/drive`
 
 - **It needs passing reports.** `approve_model` refuses it for driving without a passing `selection_report.json` and `referee_report.json`, and this model has neither. That gate is the team's release decision. Don't work around it.
-- **Re-measure the tick on car 1's Jetson.** The swept-path braking cap adds about 0.1–0.25 ms per tick on the pit PC. Run `test_latency.py` on the Jetson; the budget is 5 ms p99.
+- **Re-measure the tick on the car's Jetson.** The swept-path braking cap adds about 0.1–0.25 ms per tick on the pit PC, and the flank creep about 0.2 ms more on a tick beside a wall. Run `test_latency.py` on the Jetson: both gates, the random-scan tick and the tick beside a wall, must be within 5 ms p99.
 - **The wrapper's stopping guarantee runs out at about 3.4 m/s.** The braking cap reads 3.0 m of swept path (`swept_clearance_max_length`) at 3.0 m/s² (`max_braking_decel`). Above that speed, the wrapper can't promise a stop for what it sees.
 - **It's been trained and tested only in simulation.** No real-car data has checked it yet.
