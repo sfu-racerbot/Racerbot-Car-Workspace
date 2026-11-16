@@ -126,3 +126,11 @@ Car 1's planner curvature limit (0.879 1/m) is below what one corner of this lin
 (0.33 rad, about 0.95 1/m) and its race-day gap-follow laps say the car can drive the course. Before floor test F3
 (car 1's map racer on car 2's map), either adopt a mapping run car 1's limits accept, or revisit car 1's planner
 steering limit and tight floor. Nothing was changed.
+
+**Correction (same day).** It depends on the recorded lap the builder starts from, not the map alone: a car 1 line on
+the same frame built from a simulated gap-follow lap (Fable's, `min_time` 9.81 s, curvature 0.862 under car 1's 0.879)
+passes. So: car 1 builds from 143428's lap and from a simulated lap, not from car 2's own recorded lap of 151125; checked
+on the dev box only (the optimizer is known to differ on x86). With that simulated-lap line, #63's evidence reruns with
+car 1's own steering-law parameters (#79): 6 seeds x 3 laps, first laps 10.60-10.65 s, flying 10.05-10.17 s, zero
+contact, zero safety-tier ticks, closest chassis-to-map 0.071-0.10 m (#63 reported 10.65-10.78 / 10.12-10.25 s with the
+shared servo values). Before F3, check that the line car 1 will race was built on the Jetson from the lap it will use.
