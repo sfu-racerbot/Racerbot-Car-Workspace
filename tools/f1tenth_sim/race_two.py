@@ -268,7 +268,7 @@ def stall_progress(opponent, seed, length):
 
 # Opponent profile factor, and our own (``ego_ahead``: we start ahead on a slower profile, a faster car behind).
 OPPONENT_FACTOR = {'map60': 0.6, 'map80': 0.8, 'map90': 0.9, 'blocker': 1.0, 'braking': 0.8, 'gap': 1.0,
-                   'solo': 1.0, 'stalled': 0.8, 'ego_ahead': 1.0}
+                   'solo': 1.0, 'stalled': 0.8, 'ego_ahead': 1.0, 'parked': 0.0}
 EGO_FACTOR = {'ego_ahead': 0.85}
 OPPONENTS = tuple(OPPONENT_FACTOR)
 DEFAULT_FLOOR = 'sfu_course_2026_11_06'
@@ -303,6 +303,10 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     gap = rv.GapController(rv.node_params(car_id=car), lidar)
     poses = np.vstack([rv.plan_initial_pose(plan, plant.env.unwrapped.track.raceline)[0]] * 2)
     start, _ = racing_math.find_nearest_index(plan.xy, poses[0, :2], closed=True)
+    if opponent == 'parked':
+        # Parked before we arrive: at one of six evenly spaced points, 4 m on plus seed-indexed sixths of a lap.
+        lap = float(np.sum(plan.seg_len))
+        head_start = 4.0 + lap * ((seed - 12345) % 6) / 6
     oi = racing_math.find_lookahead_index(plan.seg_len, start, head_start, closed=True)
     delta = plan.xy[(oi + 1) % len(xy)] - plan.xy[oi]
     poses[1] = [*plan.xy[oi], math.atan2(delta[1], delta[0])]
@@ -314,7 +318,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
     actual_head = (progress[1].arc - progress[0].arc) % progress[0].length if count == 2 else 0
     if opponent == 'ego_ahead':
         actual_head -= progress[0].length
-    stall = stall_progress(opponent, seed, progress[0].length)
+    stall = 0.0 if opponent == 'parked' else stall_progress(opponent, seed, progress[0].length)
     scan_sim = plant.env.unwrapped.sim.scan_sims[0]
 
     def wall_at(x, y):
