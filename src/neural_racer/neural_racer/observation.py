@@ -1,10 +1,11 @@
-"""Observation spec v1 for the neural racer: the one place its constants live.
+"""Observation spec v2 for the neural racer: the one place its constants live.
 
 What the network sees each tick, as fixed-scale float32 blocks
 (docs/superpowers/specs/2026-10-23-neural-racer-plan.md, section A4):
 
     scan     (4, 270)  log-range of the last three scans + validity of the newest
-    ego      (23,)     speeds, last commands, IMU, mode, speed cap, camera flags
+    ego      (24,)     speeds, last commands, IMU, mode, speed cap, camera flags,
+                       cornering cap (v2: the wrapper's max_lateral_accel)
     preview  (4, 32)   the next 16 m of the reference path (map mode only)
     race     (6,)      lap fraction, place, gaps (map mode only)
     camera   (64,)     camera embedding (zeros until the camera is added)
@@ -21,7 +22,7 @@ from collections import deque
 
 import numpy as np
 
-OBS_SPEC_VERSION = 1
+OBS_SPEC_VERSION = 2       # v2 (2026-10-28): the cornering cap appended to ego
 
 # --- scan block ---------------------------------------------------------
 N_BEAMS = 1081            # Hokuyo UST-30LX, 270 deg at 0.25 deg
@@ -39,7 +40,8 @@ STEER_LIMIT = 0.33        # rad, autonomy's max_steering_angle on car 1
 YAW_SCALE = 3.0           # rad/s
 ACC_SCALE = 9.81          # m/s^2
 CAMERA_AGE_SCALE = 0.2    # s
-EGO_DIM = 23
+A_LAT_SCALE = 5.0         # m/s^2
+EGO_DIM = 24
 EGO = {
     'speed': slice(0, 3),         # t, t-1, t-2
     'steer_cmd': slice(3, 6),     # t-1, t-2, t-3
@@ -52,6 +54,7 @@ EGO = {
     'v_cap': 20,
     'camera_present': 21,
     'camera_age': 22,
+    'a_lat': 23,                  # the cornering cap the wrapper holds the speed to
 }
 MODE_REACTIVE = 0
 MODE_MAP = 1
@@ -153,17 +156,21 @@ class History:
         return len(self.imu) > 0 and all(s is not None for s in self.imu)
 
 
-def build_observation(history: History, *, imu_present: bool, mode: int, v_cap: float,
+def build_observation(history: History, *, imu_present: bool, mode: int, v_cap: float, a_lat: float,
                       preview=None, race=None, camera=None,
                       camera_age: float = 0.0) -> dict:
     """The observation dict the policy consumes, every block float32.
 
-    Blocks a mode does not use are exactly zero, and their flags say so.
+    a_lat is the cornering cap the safety wrapper will hold the speed to
+    (WrapperConfig.max_lateral_accel), m/s^2. Blocks a mode does not use are
+    exactly zero, and their flags say so.
     """
     if mode not in (MODE_REACTIVE, MODE_MAP):
         raise ObservationError(f'unknown mode {mode!r}')
     if not (math.isfinite(v_cap) and v_cap >= 0.0):
         raise ObservationError('v_cap must be finite and non-negative')
+    if not (math.isfinite(a_lat) and a_lat > 0.0):
+        raise ObservationError('a_lat must be finite and positive')
     if not history.scans or history.valid is None:
         raise ObservationError('no scan in history')
 
@@ -188,6 +195,7 @@ def build_observation(history: History, *, imu_present: bool, mode: int, v_cap: 
         ego[EGO['imu_present']] = 1.0
     ego[EGO['mode']] = float(mode)
     ego[EGO['v_cap']] = v_cap / V_SCALE
+    ego[EGO['a_lat']] = a_lat / A_LAT_SCALE
 
     preview_block = np.zeros((4, PREVIEW_POINTS), dtype=np.float32)
     race_block = np.zeros(RACE_DIM, dtype=np.float32)

@@ -4,6 +4,8 @@
 # The CPU referee (tools/f1tenth_sim) does NOT use this list -- it runs from its
 # own .sim/python, built once on a login node by tools/f1tenth_sim/setup.sh.
 torch
+triton          # the GPU LiDAR cast (gpu_sim/lidar_triton.py); without it lidar.cast silently
+                # falls back to PyTorch, ~6x slower on an H100 (gpucheck 1030003)
 numpy==1.26.4   # must equal tools/f1tenth_sim/requirements.txt: the eval worker loads torch from this
                 # venv and the referee's numba from .sim/python into one process
 scipy

@@ -64,14 +64,16 @@ def test_trajectory_matches_fidelity_plant(arena):
     start = np.array([[0.0, 0.0, 0.3]])
     plant.reset(start)
     spec, _, pool = arena
-    p = CarParams(steering_max_left=cal.steering_max_left, steering_max_right=cal.steering_max_right,
+    # grip_model 0: the plant runs the plain calibration's friction circle, not the floor's measured curve
+    p = CarParams(grip_model=0.0, steering_max_left=cal.steering_max_left, steering_max_right=cal.steering_max_right,
                   speed_max=cal.speed_max, speed_min=cal.speed_min)
     sim = BatchedRaceSim(1, 1, pool, car=p, randomize=False, wrapper_cfg=_open_wrapper())
     # put our CoG at the ring's edge point, heading along it; compare displacements
     k = 0
     pose = np.array([[spec.centre[k, 0] - p.lr * math.cos(math.pi / 2), spec.centre[k, 1] - p.lr * math.sin(math.pi / 2), math.pi / 2]])
-    # v_cap high: the parity test compares raw physics, not the speed ladder
-    sim.reset_envs([0], [Level(slot=0, poses=pose, start_idx=np.array([k]), v_cap=10.0)])
+    # v_cap and the cornering cap high: the parity test compares raw physics, not the
+    # speed ladder (the race's a_lat_cap, not the wrapper config's, sets the cap since v4)
+    sim.reset_envs([0], [Level(slot=0, poses=pose, start_idx=np.array([k]), v_cap=10.0, a_lat_cap=1e6)])
     x0p = np.array(plant._truth[0], dtype=np.float64)
     x0s = sim.x[0, 0].double().numpy().copy()
     worst_pos = worst_yaw = 0.0
@@ -252,7 +254,9 @@ def test_sim_imu_reads_the_turn(arena):
     """Constant command on the ring's open space: after settling, the IMU yaw
     rate matches the state's, and a_y at the CoG point ~ V * w."""
     spec, _, pool = arena
-    p = CarParams(imu_gyro_noise=0.0, imu_accel_noise=0.0, imu_gyro_bias=0.0, imu_offset_x=CarParams().lr)
+    p = CarParams(imu_gyro_noise=0.0, imu_accel_noise=0.0, imu_vibration=0.0, imu_gyro_vibration=0.0,
+                  imu_gyro_bias=0.0,
+                  imu_offset_x=CarParams().lr)
     sim = BatchedRaceSim(1, 1, pool, car=p, randomize=False, wrapper_cfg=_open_wrapper())
     c = spec.centre[0]
     sim.reset_envs([0], [Level(slot=0, poses=np.array([[c[0] - 2.0, c[1], math.pi / 2]]), start_idx=np.array([0]))])
@@ -305,6 +309,84 @@ def test_passing_a_crashed_car_gains_a_place():
     assert g.tolist() == [[1, 0]]
 
 
+def _side_by_side(pool, spec, gap=0.29):
+    """Two cars at rest on the arena's centreline, overlapping by 1 cm side to side."""
+    c, t = spec.centre[0], spec.centre[1] - spec.centre[0]
+    yaw = math.atan2(t[1], t[0])
+    nx, ny = -math.sin(yaw), math.cos(yaw)
+    poses = np.array([[c[0], c[1], yaw], [c[0] + gap * nx, c[1] + gap * ny, yaw]])
+    sim = BatchedRaceSim(1, 2, pool, randomize=False)
+    sim.reset_envs([0], [Level(slot=0, poses=poses, start_idx=np.array([0, 0]), v_cap=2.0)])
+    return sim
+
+
+def test_no_fault_contact_is_charged_once_per_contact(arena):
+    """Charged every tick, a car resting against another lost 2 a tick
+    (the 2026-10-30 audit: -73 a race for a stopped car in traffic)."""
+    spec, _, pool = arena
+    sim = _side_by_side(pool, spec)
+    rewards = []
+    for _ in range(6):
+        out = sim.step(torch.zeros(1, 2, 2))
+        assert out['touch'].all() and not out['fault'].any()
+        rewards.append(float(out['reward'][0, 0]))
+    assert rewards[0] == pytest.approx(-race.RewardConfig().other_contact, abs=1e-3)
+    assert rewards[1:] == pytest.approx([0.0] * 5, abs=1e-3)
+
+
+def test_each_car_gets_its_own_share_of_the_speed_cap(arena):
+    """An overtaking level: car 1 held to half the race's cap sees half in its observation, and the
+    wrapper holds it there; car 0 keeps the whole cap."""
+    spec, _, pool = arena
+    c, t = spec.centre[0], spec.centre[1] - spec.centre[0]
+    yaw = math.atan2(t[1], t[0])
+    nx, ny = -math.sin(yaw), math.cos(yaw)
+    poses = np.array([[c[0] - nx, c[1] - ny, yaw], [c[0] + nx, c[1] + ny, yaw]])       # 2 m apart, side by side
+    sim = BatchedRaceSim(1, 2, pool, randomize=False, wrapper_cfg=_open_wrapper())
+    sim.reset_envs([0], [Level(slot=0, poses=poses, start_idx=np.array([0, 0]), v_cap=4.0,
+                               v_cap_scale=np.array([1.0, 0.5]))])
+    caps = sim.car_v_cap()[0]
+    assert torch.allclose(caps, torch.tensor([4.0, 2.0]))
+    for _ in range(120):
+        sim.step(torch.tensor([[[0.0, 5.0], [0.0, 5.0]]]))
+    v = sim.x[0, :, 3]
+    assert float(v[1]) <= 2.0 + 0.05 and float(v[0]) > 3.0
+
+
+def test_touching_a_crashed_car_costs_nothing(arena):
+    spec, _, pool = arena
+    sim = _side_by_side(pool, spec)
+    sim.alive[0, 1] = False                          # car 1 is a wreck
+    out = sim.step(torch.zeros(1, 2, 2))
+    assert out['touch'][0, 0] and float(out['reward'][0, 0]) == pytest.approx(0.0, abs=1e-3)
+
+
+def test_a_car_stopped_by_choice_stalls_after_3_s(arena):
+    """With the wrapper on, only a car it held still used to stall: stopping
+    by choice was never ended and never charged."""
+    from neural_racer_train.gpu_sim.sim import IDLE_TICKS
+    spec, _, pool = arena
+    c, t = spec.centre[0], spec.centre[1] - spec.centre[0]
+    sim = BatchedRaceSim(1, 1, pool, randomize=False)
+    sim.reset_envs([0], [Level(slot=0, poses=np.array([[c[0], c[1], math.atan2(t[1], t[0])]]),
+                               start_idx=np.array([0]), v_cap=2.0)])
+    for k in range(IDLE_TICKS):
+        out = sim.step(torch.zeros(1, 1, 2))
+        assert not bool(out['safety_stop'].any())    # nothing in the way: the wrapper never held it
+        assert bool(out['stalled'][0, 0]) == (k == IDLE_TICKS - 1)
+    assert bool(out['terminal'][0, 0]) and bool(out['crashed'][0, 0]) and bool(out['env_done'][0])
+    assert float(out['reward'][0, 0]) == pytest.approx(-race.RewardConfig().stall, abs=1e-3)
+
+
+def test_the_episode_can_end_with_seat_0(arena):
+    spec, _, pool = arena
+    for flag in (False, True):
+        sim = _side_by_side(pool, spec, gap=3.0)
+        sim.end_with_seat0 = flag
+        sim.alive[0, 0] = False                      # the learner is out; car 1 still races
+        assert bool(sim.step(torch.zeros(1, 2, 2))['env_done'][0]) == flag
+
+
 # --- isolation ------------------------------------------------------------------------------------------
 
 def test_resetting_one_env_does_not_disturb_another(arena):
@@ -314,8 +396,9 @@ def test_resetting_one_env_does_not_disturb_another(arena):
     spec, _, pool = arena
     c = spec.centre[0]
     lvl = Level(slot=0, poses=np.array([[c[0] - 2.0, c[1], math.pi / 2]]), start_idx=np.array([0]))
-    quiet = CarParams(imu_gyro_noise=0.0, imu_accel_noise=0.0, imu_gyro_bias=0.0, odom_speed_noise=0.0,
-                      lidar_noise_std=0.0, lidar_dropout_rate=0.0, imu_delay_ticks=2)
+    quiet = CarParams(imu_gyro_noise=0.0, imu_accel_noise=0.0, imu_vibration=0.0, imu_gyro_vibration=0.0,
+                      imu_gyro_bias=0.0, odom_speed_noise=0.0, lidar_noise_std=0.0, lidar_dropout_rate=0.0, lidar_sectors=0.0,
+                      imu_delay_ticks=2)
     a = BatchedRaceSim(2, 1, pool, car=quiet, randomize=False, seed=3)
     b = BatchedRaceSim(2, 1, pool, car=quiet, randomize=False, seed=3)
     a.reset_envs([0, 1], [lvl, lvl])
@@ -328,3 +411,36 @@ def test_resetting_one_env_does_not_disturb_another(arena):
             b.reset_envs([0], [lvl])                # only env 0 restarts in b
     assert torch.equal(a.x[1], b.x[1])
     assert torch.equal(a.hist.imu[1], b.hist.imu[1]) and torch.equal(a.imu_delay.buf[:, 1], b.imu_delay.buf[:, 1])
+
+
+# --- car 1's measured sensor noise -------------------------------------------------------------------
+
+def test_imu_noise_is_the_rest_noise_plus_vibration_that_grows_with_speed():
+    """Car 1's BNO085 while driving (2026-11-01): ~0.03 rad/s, ~1.0 / ~1.9 m/s^2 at 4.5 m/s."""
+    std = imu.noise_std(torch.tensor(0.004), torch.tensor(0.06), torch.tensor(1.0), torch.tensor([0.0, 4.5]))
+    assert torch.allclose(std[0], torch.tensor([0.004, 0.06, 0.06]))
+    assert torch.allclose(std[1], torch.tensor([0.034, 0.985, 1.885]), atol=1e-5)
+    quiet = imu.noise_std(torch.tensor(0.004), torch.tensor(0.06), torch.tensor(0.0), torch.tensor([4.5]))
+    assert torch.allclose(quiet[0], torch.tensor([0.004, 0.06, 0.06]))
+    # car 2's gyro shakes more and its accelerometers less: the gyro has its own scale
+    car2 = imu.noise_std(torch.tensor(0.004), torch.tensor(0.06), torch.tensor(0.3), torch.tensor([4.5]),
+                         gyro_vibration=torch.tensor(2.0))
+    assert torch.allclose(car2[0], torch.tensor([0.004 + 2.0 * 0.030, 0.06 + 0.3 * 0.925, 0.06 + 0.3 * 1.825]), atol=1e-5)
+
+
+def test_lidar_loses_beams_in_sectors_as_the_car_does():
+    angles = lidar.beam_angles(1081)
+    gen = torch.Generator().manual_seed(0)
+    E = 400
+    z = torch.zeros(E)
+    none = lidar.sector_dropout((E, 1, 1081), z, z, z, torch.full((E,), 10.0), angles, gen)
+    assert not none.any()
+    many = lidar.sector_dropout((E, 1, 1081), torch.full((E,), 3.0), z, z, torch.full((E,), 10.0), angles, gen)
+    x = torch.nn.functional.pad(many[:, 0].int(), (1, 1))
+    lengths = (torch.nonzero(x.diff() == -1)[:, 1] - torch.nonzero(x.diff() == 1)[:, 1]).float()
+    # runs of 4-60 beams (two sectors that overlap make one longer run)
+    assert lengths.min() >= 3 and 6 <= lengths.median() <= 40 and (lengths <= 61).float().mean() >= 0.9
+    at16 = lidar.sector_dropout((E, 1, 1081), z, torch.ones(E), torch.full((E,), 16.0), torch.full((E,), 20.0),
+                                angles, gen)
+    k = int(torch.argmin((angles - math.radians(16.0)).abs()))
+    assert at16[:, 0, k - 8:k + 9].all() and not at16[:, 0, :k - 12].any()      # always there, only there

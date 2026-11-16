@@ -33,6 +33,12 @@ class TrackGenConfig:
     width_min: float = 0.9
     width_max: float = 3.0
     min_radius: float = 1.3
+    # m: a corner whose centreline radius R is under this needs R + its outside
+    # width >= turn_room, so the car's turning circle fits by swinging wide
+    # (the outer front corner sweeps ~1.34 m at full lock). 0 = off: every
+    # corner then keeps min_radius (1.3 m, over the car's 1.05 m minimum)
+    turn_room: float = 0.0
+    hairpin_share: float = 0.0           # share of hairpin_loop tracks (the rest split as `shares`)
     max_obstacles: int = 4
     min_free: float = 0.8
     shares: tuple = (0.4, 0.4, 0.2)      # smooth_loop, filleted_polygon, imported
@@ -129,6 +135,54 @@ def smooth_loop(seed: int, cfg: TrackGenConfig = TrackGenConfig()) -> TrackSpec:
     return TrackSpec('smooth_loop', seed, centre, wl, wr)
 
 
+def hairpin_loop(seed: int, cfg: TrackGenConfig = TrackGenConfig()) -> TrackSpec:
+    """A long loop around a thin divider, as car 1's course is: two straights
+    joined by U-turns round the divider's ends. Each U-turn has a bulb (room on
+    the outside mid-turn) and then, just past its exit, a pinch where the outside
+    wall comes in close -- car 1's left hairpin, where a car that starts its exit
+    turn late ends up nose-on to that wall (2026-11-01). Mirrored at random, so
+    U-turns go both ways."""
+    rng = np.random.default_rng(seed)
+    w = rng.uniform(1.1, 1.8)                      # corridor width
+    d = rng.uniform(0.25, 0.8)                     # divider thickness
+    rc = (w + d) / 2                               # centreline radius round the divider's ends
+    ls = rng.uniform(4.0, 14.0)                    # straight length
+    seg = []
+    n_s = max(int(ls / SPACING), 2)
+    n_c = max(int(math.pi * rc / SPACING), 8)
+    seg.append(np.stack([np.linspace(0, ls, n_s, endpoint=False), np.zeros(n_s)], 1))
+    a = np.linspace(-math.pi / 2, math.pi / 2, n_c, endpoint=False)
+    seg.append(np.stack([ls + rc * np.cos(a), rc + rc * np.sin(a)], 1))
+    seg.append(np.stack([np.linspace(ls, 0, n_s, endpoint=False), np.full(n_s, 2 * rc)], 1))
+    a = np.linspace(math.pi / 2, 3 * math.pi / 2, n_c, endpoint=False)
+    seg.append(np.stack([rc * np.cos(a), rc + rc * np.sin(a)], 1))
+    raw = np.vstack(seg)
+    lens = [len(x) for x in seg]
+    # the outside (right, the loop running anticlockwise) widens mid-turn and pinches after each exit
+    outside = np.full(len(raw), w / 2)
+    start = 0
+    for k, n in enumerate(lens):
+        if k % 2 == 1:                             # a U-turn
+            u = np.linspace(0, 1, n)
+            outside[start:start + n] += rng.uniform(0.0, 1.0) * np.sin(math.pi * u)
+            pinch = rng.uniform(0.45, 0.95) * w / 2
+            n_p = int(rng.uniform(0.6, 1.6) / SPACING)
+            after = (start + n + np.arange(n_p)) % len(raw)
+            outside[after] = np.minimum(outside[after], w / 2 - (w / 2 - pinch) * np.sin(math.pi * np.linspace(0, 1, n_p)))
+        start += n
+    inside = np.full(len(raw), w / 2)
+    centre = resample_closed(raw)
+    idx = np.linspace(0, len(raw), len(centre), endpoint=False)
+    wr = np.interp(idx, np.arange(len(raw)), outside, period=len(raw))
+    wl = np.interp(idx, np.arange(len(raw)), inside, period=len(raw))
+    if rng.random() < 0.5:                         # clockwise: mirror, and the outside is now the left
+        centre = centre * np.array([1.0, -1.0])
+        wl, wr = wr, wl
+    th = rng.uniform(0, 2 * math.pi)
+    rot = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+    return TrackSpec('hairpin_loop', seed, centre @ rot.T, wl, wr)
+
+
 def _fillet_path(verts: np.ndarray, radii: np.ndarray):
     """Round each polygon corner with a tangent arc; None if a radius doesn't fit."""
     n = len(verts)
@@ -214,6 +268,13 @@ def check(spec: TrackSpec, cfg: TrackGenConfig = TrackGenConfig()) -> list:
     kappa = np.abs(signed_curvature(coarse))
     if np.any(kappa > 1.0 / cfg.min_radius + 1e-9):
         reasons.append(f'radius {1.0 / kappa.max():.2f} m under {cfg.min_radius} m')
+    if cfg.turn_room > 0:
+        # signed_curvature is + for a left turn, whose outside is the right
+        signed = signed_curvature(coarse)
+        radius = 1.0 / np.maximum(np.abs(signed), 1e-9)
+        outside = np.where(signed > 0, wr[::step], wl[::step])
+        if np.any((radius < cfg.turn_room) & (radius + outside < cfg.turn_room - 1e-9)):
+            reasons.append(f'a corner too tight for its width: radius + outside width under {cfg.turn_room} m')
     if np.any(wl + wr < cfg.min_free - 1e-9):
         reasons.append('free width under min_free')
     # self-contact: any two centreline points far apart along the lap must be
@@ -240,9 +301,13 @@ def generate(seed: int, cfg: TrackGenConfig = TrackGenConfig(), kind: str | None
     """A valid track from `seed` (retrying with derived seeds)."""
     rng = np.random.default_rng(seed)
     if kind is None:
-        kind = rng.choice(['smooth_loop', 'filleted_polygon'],
-                          p=np.array(cfg.shares[:2]) / sum(cfg.shares[:2]))
-    gen = {'smooth_loop': smooth_loop, 'filleted_polygon': filleted_polygon}[kind]
+        # no draw at share 0, so v1 and v2 tracks stay what their seeds always made
+        if cfg.hairpin_share > 0 and rng.random() < cfg.hairpin_share:
+            kind = 'hairpin_loop'
+        else:
+            kind = rng.choice(['smooth_loop', 'filleted_polygon'],
+                              p=np.array(cfg.shares[:2]) / sum(cfg.shares[:2]))
+    gen = {'smooth_loop': smooth_loop, 'filleted_polygon': filleted_polygon, 'hairpin_loop': hairpin_loop}[kind]
     for attempt in range(200):
         sub = int(rng.integers(2 ** 31))
         try:
@@ -340,10 +405,11 @@ def rasterize(spec: TrackSpec, resolution: float = RESOLUTION) -> RasterTrack:
     return RasterTrack(spec, occ, sdf, (float(lo[0]), float(lo[1])), resolution, lap_length(c), digest)
 
 
-def start_grid(spec: TrackSpec, n_cars: int, rng, stagger: float = 1.0):
+def start_grid(spec: TrackSpec, n_cars: int, rng, stagger: float = 1.0, order=None):
     """Grid start (team decision 2026-10-23): cars in a line along the lap,
     `stagger` m apart (a 0.535 m body plus a gap: 0.6 m left bodies
-    overlapping on bends, found by the referee 2026-10-23), alternating sides, random grid order. Returns
+    overlapping on bends, found by the referee 2026-10-23), alternating sides, random grid order --
+    or `order`, car i's grid slot (0 = front). Returns
     (poses (n, 3) x, y, yaw at the rear axle, start indices)."""
     c = spec.centre
     L = lap_length(c)
@@ -351,7 +417,7 @@ def start_grid(spec: TrackSpec, n_cars: int, rng, stagger: float = 1.0):
     nrm = normals(c)
     tangent = np.stack([nrm[:, 1], -nrm[:, 0]], axis=1)
     poses, idx = [], []
-    for slot in rng.permutation(n_cars):
+    for slot in (rng.permutation(n_cars) if order is None else order):
         back = slot * stagger
         k = (k0 - int(round(back / (L / len(c))))) % len(c)
         half = 0.25 * min(spec.w_left[k], spec.w_right[k])

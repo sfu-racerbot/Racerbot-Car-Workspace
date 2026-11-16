@@ -13,7 +13,11 @@ from neural_racer_train.model import PolicyNet
 
 
 class StackedOpponents:
-    def __init__(self, state_dicts: list, device='cpu', width=None):
+    def __init__(self, state_dicts: list, device='cpu', width=None, recurrent=None):
+        """recurrent: one flag per policy (default all True). The models are
+        stacked as recurrent ones; an MLP's (main1_mlp's) memory input is
+        zeroed instead, which is how it was trained (PolicyNet.recur) --
+        stacked as recurrent, its actions differed by up to 1.8 (audit)."""
         if not state_dicts:
             raise ValueError('StackedOpponents needs at least one policy')
         models = []
@@ -24,11 +28,13 @@ class StackedOpponents:
         self.M = len(models)
         self.params, self.buffers = stack_module_state(models)
         self.base = copy.deepcopy(models[0]).to('meta')
+        rec = [True] * self.M if recurrent is None else list(recurrent)
+        self.memory = torch.tensor([1.0 if r else 0.0 for r in rec], device=device)
 
     @torch.no_grad()
     def act(self, o: dict, h):
         """o: blocks shaped (M, B, ...), h (M, B, 128) -> (a (M, B, 2), h')."""
-        def one(params, buffers, ob, hh):
-            a, h2, _, _ = functional_call(self.base, (params, buffers), (ob, hh))
+        def one(params, buffers, ob, hh, keep):
+            a, h2, _, _ = functional_call(self.base, (params, buffers), (ob, hh * keep))
             return a, h2
-        return torch.vmap(one)(self.params, self.buffers, o, h)
+        return torch.vmap(one)(self.params, self.buffers, o, h, self.memory)

@@ -19,7 +19,7 @@ from neural_racer.policy_numpy import PolicyError, PolicyNumpy, parameter_count
 
 def _obs(rng, mode=1.0, v_cap=0.4, cam_present=0.0):
     o = {'scan': rng.random((4, 270)).astype(np.float32),
-         'ego': rng.random(23).astype(np.float32),
+         'ego': rng.random(obs.EGO_DIM).astype(np.float32),
          'preview': rng.standard_normal((4, 32)).astype(np.float32),
          'race': rng.random(6).astype(np.float32),
          'camera': rng.standard_normal(64).astype(np.float32)}
@@ -182,16 +182,16 @@ def test_gru_state_carries_and_reset_restores():
 
 
 def test_parameter_count_full_width():
-    """Closed form for the v1 layout, layer by layer (weights + biases)."""
+    """Closed form for the v2 layout, layer by layer (weights + biases)."""
     scan = (4*32*7 + 32) + (32*64*5 + 64) + (64*64*5 + 64) + (64*64*3 + 64) + (1088*256 + 256)
-    ego = (23*64 + 64) + (64*64 + 64)
+    ego = (24*64 + 64) + (64*64 + 64)
     prev = (4*32*5 + 32) + (32*32*3 + 32) + (256*64 + 64)
     race = 6*32 + 32
     fuse = 2*416 + (480*256 + 256)            # LayerNorm(416) + Linear(416 + 64 camera -> 256)
     gru = 384*256 + 384*128 + 2*384
     heads = (128*128 + 128) + (2*128 + 2) + (12*128 + 12) + (52*128 + 52)
     n = parameter_count(nr_testutil.random_weights(0))
-    assert n == scan + ego + prev + race + fuse + gru + heads == 646_274, n
+    assert n == scan + ego + prev + race + fuse + gru + heads == 646_338, n
 
 
 # --- refusals ----------------------------------------------------------------------
@@ -217,4 +217,4 @@ def test_card_width_mismatch_refused():
 
 def test_spec_constants_match_the_layout():
     assert obs.SCAN_CHANNELS == 4 and obs.N_BINS * obs.POOL <= obs.N_BEAMS
-    assert obs.EGO_DIM == 23 and obs.EGO['camera_age'] == obs.EGO_DIM - 1
+    assert obs.EGO_DIM == 24 and obs.EGO['camera_age'] == 22 and obs.EGO['a_lat'] == obs.EGO_DIM - 1

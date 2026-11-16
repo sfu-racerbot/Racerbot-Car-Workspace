@@ -73,6 +73,9 @@ mkdir -p "${RUN_DIR}" "${ARCHIVE_DIR}"
 # shellcheck source=fir_env.sh
 source "${NR_REPO}/tools/neural_racer/slurm/fir_env.sh"
 export PYTHONPATH="${NR_REPO}/tools/neural_racer:${NR_REPO}/src/neural_racer:${NR_REPO}/src/gap_follow:${PYTHONPATH:-}"
+# The PPO batch changes size every update (only replayed levels are trained
+# on), which fragments fixed-size allocator segments.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 # --- GPU utilisation log: the evidence for the >80% target -----------------
 GPU_LOG="${RUN_DIR}/gpu_util_${JOB}.csv"
@@ -97,6 +100,8 @@ EVAL_WORKERS="${NR_EVAL_WORKERS:-$(( SPARE > 0 ? SPARE : 0 ))}"
 EVAL_PID=""
 if [[ "${STAGE}" == "benchmark" ]]; then
     EVAL_WORKERS=0   # a benchmark measures the trainer alone
+elif [[ "${STAGE}" == "teacher" || "${STAGE}" == "distill" ]]; then
+    EVAL_WORKERS="${NR_EVAL_WORKERS:-0}"   # they race their own snapshots; the archive referee is the league's
 fi
 if (( EVAL_WORKERS > 0 )) && [[ -f "${NR_REPO}/tools/neural_racer/neural_racer_train/eval_worker.py" ]]; then
     OMP_NUM_THREADS=1 NUMBA_NUM_THREADS=1 nice -n 10 \

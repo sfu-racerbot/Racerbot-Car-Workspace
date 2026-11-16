@@ -13,6 +13,7 @@ published steering and speed tick by tick. Needs ROS sourced:
     export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
     python3 -m pytest src/gap_follow/test/test_gap_mirror_parity.py -v
 """
+import json
 import math
 import os
 import sys
@@ -22,7 +23,8 @@ import pytest
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
-from sensor_msgs.msg import Joy
+from sensor_msgs.msg import Imu, Joy
+from std_msgs.msg import String
 
 from gap_follow.gap_follow_node import GapFollowNode
 
@@ -113,9 +115,13 @@ def test_mirror_commands_what_the_node_commands(node):
     node.drive_pub.publish = lambda msg: published.append(msg)
 
     scans = _scene_sequence()
+    # This sequence exists to exercise corner setup, which ships OFF since
+    # 2026-10-27, so it is switched on for the node and the mirror alike.
     params = gap_mirror.node_params()
     params['command_slew_max_dt'] = DT
+    params['enable_corner_setup'] = True
     node.command_slew_max_dt = DT
+    node.enable_corner_setup = True
     mirror = gap_mirror.GapController(params, _Lidar(scans[0][0]))
     # Already rolling fast with the rack hard left while the corridor runs
     # straight: the first ticks are braked by the arc the rack is still on.
@@ -169,6 +175,77 @@ def _box_ahead(rear_x, y=0.0, length=0.58, width=0.30):
     x0, x1, hw = rear_x, rear_x + length, width / 2.0
     return [((x0, y - hw), (x0, y + hw)), ((x0, y + hw), (x1, y + hw)),
             ((x1, y + hw), (x1, y - hw)), ((x1, y - hw), (x0, y - hw))]
+
+
+def test_mirror_matches_alongside_wide_to_narrow_abort(node):
+    from test_opponent_awareness_node import _alongside_scan, _alongside_tick, OPP_SPEED
+    from gap_follow.launch_boost import LaunchBoost
+    params = gap_mirror.node_params()
+    params['command_slew_max_dt'] = DT
+    node.command_slew_max_dt = DT
+    # Mid-race, not a start: the launch boost would ignore the alongside car.
+    params['enable_launch_boost'] = False
+    node.launch_boost = LaunchBoost(False, 3.0, 5.0, 0.0)
+    mirror = gap_mirror.GapController(params, _Lidar(_alongside_scan(0)))
+    published = []
+    node.drive_pub.publish = published.append
+    for step in range(45):
+        mirror.steering_basis = 0.0
+        mirror.last_commanded_speed = 2.5
+        mirror.last_command_time = step - 1
+        mirror.previous_target_idx = node.previous_target_idx
+        actual = _alongside_tick(node, published, step, narrow=step == 44)
+        steer, speed = mirror.command(np.asarray(_alongside_scan(step, step == 44).ranges),
+                                      2.5, step)
+        # oracle: invariant -- independent node and mirror command paths agree.
+        assert actual == pytest.approx(speed, abs=TOLERANCE)  # m/s
+        assert published[-1].drive.steering_angle == pytest.approx(steer, abs=TOLERANCE)
+        if step == 43:
+            assert node.opponent_mode == mirror.opponent_mode == 'clear'
+    assert node.opponent_mode == mirror.opponent_mode == 'follow'
+    # oracle: invariant -- both commands drop below the car's true ground speed.
+    assert 0.0 < actual < OPP_SPEED
+
+
+def test_mirror_matches_the_node_when_the_alongside_car_vanishes(node):
+    """Through the abort and on until the vanished car's track is dropped:
+    both must let the abort ceiling go with the car, not hold it in memory."""
+    from test_opponent_awareness_node import (
+        _alongside_scan, _alongside_scan_car_gone, _alongside_tick, OPP_SPEED)
+    params = gap_mirror.node_params()
+    params['command_slew_max_dt'] = DT
+    node.command_slew_max_dt = DT
+    mirror = gap_mirror.GapController(params, _Lidar(_alongside_scan(0)))
+    published = []
+    node.drive_pub.publish = published.append
+    dropped_at = None
+    for step in range(45 + 40):
+        mirror.steering_basis = 0.0
+        mirror.last_commanded_speed = 2.5
+        mirror.last_command_time = step - 1
+        mirror.previous_target_idx = node.previous_target_idx
+        if step <= 44:
+            scan = _alongside_scan(step, step == 44)
+            actual = _alongside_tick(node, published, step, narrow=step == 44)
+        else:
+            scan = _alongside_scan_car_gone(step)
+            node.steering_basis = 0.0
+            node.last_commanded_speed = 2.5
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            actual = published[-1].drive.speed
+        steer, speed = mirror.command(np.asarray(scan.ranges), 2.5, step)
+        # oracle: invariant -- independent node and mirror command paths agree.
+        assert actual == pytest.approx(speed, abs=TOLERANCE), step  # m/s
+        assert node.opponent_mode == mirror.opponent_mode, step
+        if step > 44 and not node.opponents.followed_body():
+            dropped_at = step
+            break
+    # oracle: invariant -- the scenario really reached a dropped track, and
+    # neither path held the abort ceiling past it.
+    assert dropped_at is not None
+    assert node.opponent_mode != 'follow_memory'
+    assert actual > OPP_SPEED - params['opponent_abort_speed_margin']
 
 
 def test_mirror_matches_the_node_with_opponent_awareness_on():
@@ -234,3 +311,401 @@ def test_mirror_matches_the_node_with_opponent_awareness_on():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+@pytest.mark.parametrize('crossing', [False, True])
+def test_rectangle_crossing_and_overtaking_mirror_parity(crossing):
+    from test_opponent_awareness_node import _make
+    from test_opponent_tracking import _box
+    # A mid-race scene, not a start: the launch boost (on in the shipped YAML
+    # since 2026-10-30) would otherwise ignore opponents for this whole
+    # stationary-ego run and the branches compared here would never run.
+    # The launch has its own parity test below.
+    node, published = _make('-p', 'enable_opponent_awareness:=true',
+                            '-p', 'opponent_passing_margin:=0.05',
+                            '-p', 'opponent_pass_max_steering:=0.33',
+                            '-p', 'enable_launch_boost:=false')
+    try:
+        params = gap_mirror.node_params()
+        params.update(enable_opponent_awareness=True, command_slew_max_dt=DT,
+                      opponent_passing_margin=0.05, opponent_pass_max_steering=0.33,
+                      enable_launch_boost=False)
+        mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        modes = []
+        for step in range(60):
+            t = step * DT
+            # Stationary ego: real target motion establishes heading. Keep
+            # the whole crossing car within the walls: over 60 ticks its
+            # centre runs from -0.6 to +0.58 m, plus 0.29 m half-length,
+            # strictly inside the +/-1 m walls. Previously y=-0.5+t drove
+            # into the wall: detection merges at tick 45, contact at tick 49.
+            x, y = (2.5, -0.6 + 0.8 * t) if crossing else (3.0 - t, 0.0)
+            width = 2.0 if crossing else (1.52 if step < 45 else 1.06)
+            box = _box(x, y, yaw=math.pi / 2 if crossing else 0.0)
+            scan = _raycast(_corridor(width / 2, width / 2) +
+                            [((a[0] - 0.26, a[1]), (b[0] - 0.26, b[1])) for a, b in box])
+            ns = round((100.0 + t) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = 0.0 if crossing else 2.0
+            node.odom_callback(odom)
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            steering, speed = mirror.command(
+                np.asarray(scan.ranges), odom.twist.twist.linear.x, step)
+            # oracle: integration invariant, independent controller histories.
+            assert published[-1].drive.speed == pytest.approx(speed, abs=TOLERANCE)
+            assert published[-1].drive.steering_angle == pytest.approx(steering, abs=TOLERANCE)
+            assert node.opponent_mode == mirror.opponent_mode
+            modes.append(node.opponent_mode)
+        # oracle: the new geometry and nearest-range plumbing were exercised.
+        assert node.opponents.params.length == 0.58
+        assert any(t.near_range > 0 for t in node.opponents.tracker.tracks)
+        # oracle: crossing refuses on heading; closing leader permits a pass
+        # in the wide section, so parity exercises both command branches.
+        assert ('follow' if crossing else 'clear') in modes[:45]
+        assert 'follow' in modes[45:]
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_mirror_matches_the_node_through_a_launch_boost_start():
+    """A race start with the shipped launch boost (docs/gap-follow.md#launch-boost):
+    ego on the grid, another car level with it 0.55 m to the left pulling
+    ahead at 2 m/s, a wall 4 m ahead.
+    The odometry follows the command with a lag, so the launch runs, the car
+    gains speed, and the wall's braking ceiling ends it. Node and mirror must
+    agree on every tick, launch and after."""
+    from test_opponent_awareness_node import _box, _make
+    node, published = _make('-p', 'enable_launch_boost:=true')
+    try:
+        assert node.launch_boost.state == 'armed'
+        params = gap_mirror.node_params()
+        params.update(command_slew_max_dt=DT)
+        assert params['enable_launch_boost'] and params['enable_opponent_awareness']
+        mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        speed, travelled, launched = 0.0, 0.0, []
+        for step in range(60):
+            t = step * DT
+            # The scene moves past the car: the wall and the other car are
+            # drawn relative to where ego has got to.
+            wall = 4.0 - travelled
+            other = -0.55 + (2.0 * t) - travelled   # rear face, LiDAR frame
+            scan = _raycast(_corridor(1.0, 1.0, length=wall)
+                            + [((wall, -1.0), (wall, 1.0))]
+                            + _box(other, y=0.55))
+            ns = round((100.0 + t) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            node.steering_basis = mirror.steering_basis = 0.0
+            mirror.previous_target_idx = node.previous_target_idx
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            steering, command = mirror.command(np.asarray(scan.ranges), speed, step)
+            drive = published[-1].drive
+            # oracle: integration invariant, independent controller histories.
+            assert drive.speed == pytest.approx(command, abs=TOLERANCE), f'tick {step}'
+            assert drive.steering_angle == pytest.approx(steering, abs=TOLERANCE), f'tick {step}'
+            assert node.launch_boost.state == mirror.launch_boost.state, f'tick {step}'
+            assert node.opponent_mode == mirror.opponent_mode, f'tick {step}'
+            launched.append(node.launch_boost.active)
+            # A first-order lag toward the command, about the car's 0.3 s.
+            speed += (command - speed) * (DT / 0.3)
+            travelled += speed * DT
+        # The launch must actually have run and ended here, or this proves nothing.
+        assert launched[0] and not launched[-1], (launched, node.launch_boost.end_reason)
+        assert node.launch_boost.end_reason == mirror.launch_boost.end_reason == 'braking'
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def _feed_imu(node, state, yaw_rate):
+    """What imu_bridge publishes for one tick: its verdict, then one sample."""
+    node.imu_status_callback(String(data=json.dumps(
+        {'state': state, 'reason': None, 'imu': 'bno'})))
+    msg = Imu()
+    msg.angular_velocity.z = float(yaw_rate)
+    node.imu_callback(msg)
+
+
+def test_mirror_matches_stopped_then_departing_confirmed_car():
+    from test_opponent_awareness_node import _make
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        params = gap_mirror.node_params()
+        # Mid-race, like _make's node: the launch boost would ignore the car.
+        params.update(enable_opponent_awareness=True, command_slew_max_dt=DT,
+                      enable_launch_boost=False)
+        mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        # Start equivalently once. Each controller carries its own command,
+        # steering basis and target history through every subsequent scan.
+        # Review mutation: discarding the mirror's carried rack fails at tick 1.
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_commanded_speed = mirror.last_commanded_speed = 0.0
+        for step in range(76):
+            speed = 1.0 if step < 40 else 0.0
+            gap = 0.4 + max(0, step - 63) * DT
+            scan = _raycast(_corridor(2.0, 2.0) + _box_ahead(gap + 0.47 - 0.26))
+            ns = round((100.0 + step * DT) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            # Inject the same elapsed command interval, not controller state.
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            actual = published[-1].drive.speed
+            steering, expected = mirror.command(np.asarray(scan.ranges), speed, step)
+            # oracle: integration invariant, identical per-scan commands.
+            assert actual == pytest.approx(expected, abs=TOLERANCE), f'tick {step}: speed'
+            assert published[-1].drive.steering_angle == pytest.approx(
+                steering, abs=TOLERANCE), f'tick {step}: steering'
+        # oracle: the sequence exercises the new hold and releases the speed cap.
+        assert mirror.opponents.followed_body()
+        assert published[63].drive.speed == 0.0
+        assert published[-1].drive.speed > 0.0
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_mirror_matches_the_node_with_steering_damping_on():
+    """The same comparison with steering damping on at the shipped gain, a yaw
+    rate that swings both ways, and a faulty IMU for the last third of the
+    sequence. In that third both must add exactly nothing, and they must agree
+    on every tick. The healthy part must really exercise the term, or this
+    proves nothing about it (docs/gap-follow.md#steering-damping-gyro)."""
+    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+                     '-p', 'enable_steering_damping:=true', *TEST_ONLY_DRIVE])
+    node = GapFollowNode()
+    try:
+        assert node.drive_pub.topic_name == '/test_only/drive'
+        published = []
+        node.drive_pub.publish = lambda msg: published.append(msg)
+        node.command_slew_max_dt = DT
+        params = gap_mirror.node_params()
+        params['enable_steering_damping'] = True
+        params['command_slew_max_dt'] = DT
+        joy = Joy()
+        joy.buttons = [0] * 5
+        joy.buttons[4] = 1
+        scans = _scene_sequence()
+        mirror = gap_mirror.GapController(params, _Lidar(scans[0][0]))
+        speed = 2.0
+        node.last_commanded_speed = speed
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+        healthy_ticks = 2 * len(scans) // 3
+        damping = []
+        for step, (scan, forced_speed) in enumerate(scans):
+            if forced_speed is not None:
+                speed = node.last_commanded_speed = forced_speed
+            yaw = 2.0 * math.sin(0.35 * step)   # rad/s: left, then right
+            healthy = step < healthy_ticks
+            _feed_imu(node, 'ok' if healthy else 'fault', yaw)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            if node.last_command_time is not None:
+                node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            mirror.steering_basis = node.steering_basis
+            mirror.last_commanded_speed = node.last_commanded_speed
+            mirror.previous_target_idx = node.previous_target_idx
+            mirror.last_command_time = step - 1
+            node.scan_callback(scan)
+            expected_steering, expected_speed = mirror.command(
+                np.asarray(scan.ranges), speed, step,
+                yaw_rate=yaw if healthy else None)
+            drive = published[-1].drive
+            assert drive.steering_angle == pytest.approx(expected_steering, abs=TOLERANCE), (
+                f'tick {step}: steering')
+            assert drive.speed == pytest.approx(expected_speed, abs=TOLERANCE), (
+                f'tick {step}: speed')
+            damping.append(mirror.telemetry.get('steering_damping', 0.0))
+            speed = max(drive.speed, 0.8 * speed)
+        # The healthy part must carry a real term on enough driving ticks, or
+        # the agreement above is agreement about nothing.
+        assert sum(abs(d) > 1e-3 for d in damping[:healthy_ticks]) >= 10, damping
+        assert all(d == 0.0 for d in damping[healthy_ticks:]), damping
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def _grip_scene_sequence():
+    """A corridor the car steers through at a steady 2 m/s. Every tick is forced
+    to 2.0 m/s, so the grip's demand is high enough to be judged on each tick
+    (the scenes in _scene_sequence are mostly too slow to judge)."""
+    return [(_raycast(_corridor(1.4, 0.6)), 2.0)] * 74
+
+
+def test_mirror_matches_the_node_with_adaptive_grip_on():
+    """The same comparison with the adaptive grip on at the shipped values, on a
+    steady corridor at 2 m/s. Steering damping is pinned off: it ships on since
+    2026-10-27, and with it on no healthy tick moved the limit, so the test
+    would prove nothing about the grip. Eight ticks warm up with the IMU at fault, long
+    enough for the rack to settle on the corridor's steering, so the first
+    judged tick is not lagged by the rack's slew. Then the healthy part: the car
+    yaws as the rack was last commanded, scaled to a grip ratio of 1.0 for
+    fourteen ticks and 0.5 for six, then 1.0 again, so the limit rises and is
+    cut. The last ten ticks are a faulty IMU, where both must sit at the base.
+    The healthy part must really move the limit both ways, or the agreement
+    proves nothing (docs/gap-follow.md#adaptive-grip-imu)."""
+    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+                     '-p', 'enable_adaptive_grip:=true',
+                     '-p', 'enable_steering_damping:=false',
+                     # A mid-course corridor, not a start: the launch boost
+                     # would hold the car straight and never move the limit.
+                     '-p', 'enable_launch_boost:=false', *TEST_ONLY_DRIVE])
+    node = GapFollowNode()
+    try:
+        assert node.drive_pub.topic_name == '/test_only/drive'
+        published = []
+        node.drive_pub.publish = lambda msg: published.append(msg)
+        node.command_slew_max_dt = DT
+        params = gap_mirror.node_params()
+        params['enable_adaptive_grip'] = True
+        params['enable_steering_damping'] = False
+        params['enable_launch_boost'] = False
+        params['command_slew_max_dt'] = DT
+        joy = Joy()
+        joy.buttons = [0] * 5
+        joy.buttons[4] = 1
+        scans = _grip_scene_sequence()
+        mirror = gap_mirror.GapController(params, _Lidar(scans[0][0]))
+        speed = 2.0
+        node.last_commanded_speed = speed
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+        warm_ticks, healthy_ticks = 8, 8 + 56
+        limits = []
+        for step, (scan, forced_speed) in enumerate(scans):
+            if forced_speed is not None:
+                speed = node.last_commanded_speed = forced_speed
+            healthy = warm_ticks <= step < healthy_ticks
+            # The yaw a car makes at the rack's last command, scaled to the grip
+            # ratio this block calls for. gap_logic reads the ratio back as
+            # yaw * speed / (speed^2 * tan(steer) / wheelbase), so this is exact.
+            last_steer = published[-1].drive.steering_angle if published else 0.0
+            j = step - warm_ticks   # index within the healthy part
+            ratio = 0.5 if 14 <= j < 20 else 1.0
+            yaw = ratio * speed * math.tan(last_steer) / params['wheelbase']
+            _feed_imu(node, 'ok' if healthy else 'fault', yaw)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            if node.last_command_time is not None:
+                node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            mirror.steering_basis = node.steering_basis
+            mirror.last_commanded_speed = node.last_commanded_speed
+            mirror.previous_target_idx = node.previous_target_idx
+            mirror.last_command_time = step - 1
+            node.scan_callback(scan)
+            expected_steering, expected_speed = mirror.command(
+                np.asarray(scan.ranges), speed, step,
+                yaw_rate=yaw if healthy else None)
+            drive = published[-1].drive
+            assert drive.steering_angle == pytest.approx(expected_steering, abs=TOLERANCE), (
+                f'tick {step}: steering')
+            assert drive.speed == pytest.approx(expected_speed, abs=TOLERANCE), (
+                f'tick {step}: speed')
+            # The limit itself, not only the speed it produces, must agree.
+            assert node.adaptive_grip.limit == pytest.approx(
+                mirror.grip.limit, abs=TOLERANCE), f'tick {step}: lateral limit'
+            limits.append(mirror.telemetry.get('lateral_limit'))
+            speed = max(drive.speed, 0.8 * speed)
+        base = params['max_lateral_accel']
+        # The healthy part must move the limit both ways, or this proves nothing.
+        healthy_limits = [v for v in limits[warm_ticks:healthy_ticks] if v is not None]
+        rises = sum(b > a for a, b in zip(healthy_limits, healthy_limits[1:]))
+        cuts = sum(b < a for a, b in zip(healthy_limits, healthy_limits[1:]))
+        assert rises >= 3 and cuts >= 1, (rises, cuts, healthy_limits)
+        assert max(healthy_limits) > base + 0.05, healthy_limits
+        # The faulty part: the limit sits at the base on every driving tick. It
+        # must first have risen above the base, or the reset proves nothing.
+        assert limits[healthy_ticks - 1] > base + 1e-3, limits[healthy_ticks - 1]
+        faulty_limits = [v for v in limits[healthy_ticks:] if v is not None]
+        assert faulty_limits, 'the faulty part must drive, or it proves nothing'
+        assert all(v == pytest.approx(base, abs=1e-12) for v in faulty_limits), faulty_limits
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_mirror_matches_the_node_through_a_drop_and_hold():
+    """The same comparison with awareness on and the followed car leaving the
+    scan after it was confirmed. The node holds its follow cap for
+    opponent_follow_memory_sec (opponent_tracking.FollowCapMemory), and the
+    mirror must hold it on the same ticks. Each controller keeps its own state."""
+    from test_opponent_awareness_node import _make
+    gap = 0.9
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        params = gap_mirror.node_params()
+        # Mid-race, like _make's node: the launch boost would ignore the car.
+        params.update(enable_opponent_awareness=True, command_slew_max_dt=DT,
+                      enable_launch_boost=False)
+        mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        speed = 1.0
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_commanded_speed = mirror.last_commanded_speed = speed
+        pairs = []
+        for step in range(100):
+            segments = _corridor(2.0, 2.0)
+            if step < 40:
+                segments = segments + _box_ahead(gap + 0.47 - 0.26)
+            scan = _raycast(segments)
+            ns = round((100.0 + step * DT) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            steering, expected = mirror.command(np.asarray(scan.ranges), speed, step)
+            drive = published[-1].drive
+            assert node.opponent_mode == mirror.opponent_mode, f'tick {step}: mode'
+            assert drive.speed == pytest.approx(expected, abs=TOLERANCE), f'tick {step}: speed'
+            assert drive.steering_angle == pytest.approx(
+                steering, abs=TOLERANCE), f'tick {step}: steering'
+            pairs.append((mirror.opponent_mode, mirror.binding_cap))
+        # oracle: the hold ran for ~40 ticks after the car was lost, and the held
+        # cap was the binding ceiling on them, so the parity above is not vacuous.
+        held = [binding for mode, binding in pairs if mode == 'follow_memory']
+        assert len(held) >= 30, pairs
+        assert sum(binding == 'follow' for binding in held) >= 20, pairs
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_an_old_yaml_without_the_memory_replays_with_it_off(tmp_path):
+    # oracle: spec -- gap_mirror.LEGACY_VALUES: a parameter that did not exist yet
+    # reads as the value that reproduces the behaviour from before it existed. The
+    # memory did not exist before 2026-10-28, and 0 is no hold.
+    lines = open(PACKAGED_CONFIG).read().splitlines()
+    kept = [ln for ln in lines if not ln.lstrip().startswith('opponent_follow_memory_sec:')]
+    assert len(kept) == len(lines) - 1
+    old = tmp_path / 'gap_follow.yaml'
+    old.write_text('\n'.join(kept) + '\n')
+    assert gap_mirror.node_params(old, fill_legacy=True)['opponent_follow_memory_sec'] == 0.0
+    # The shipped file says what the car does now: the hold is on.
+    assert gap_mirror.node_params()['opponent_follow_memory_sec'] == 1.0

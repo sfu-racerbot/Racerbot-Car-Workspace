@@ -22,20 +22,40 @@ def _track(priv):
     return priv[:, 0:64] * 16, priv[:, 64:128] * 16, priv[:, 128:192] * 2, priv[:, 192:256] * 2
 
 
-def _curvature_speed(x, y, a_lat: float, upto: int = 16):
-    """Speed limit from the sharpest bend in the next `upto` points (Menger curvature)."""
-    p = torch.stack([x[:, :upto], y[:, :upto]], -1)
-    a, b, c = p[:, :-2], p[:, 1:-1], p[:, 2:]
+A_LAT = 3.0        # m/s^2 the driver allows in a bend, at most
+A_BRAKE = 2.5      # m/s^2 it plans to brake with (the speed loop's limit is 4)
+MU = 256 + 4       # sim.privileged(): ego block starts at 256, mu is its 5th entry
+
+
+def _menger(x, y, step: int):
+    """Curvature at each interior point of the preview, on chords of `step` points."""
+    p = torch.stack([x, y], -1)
+    a, b, c = p[:, :-2 * step], p[:, step:-step], p[:, 2 * step:]
     ab, bc, ca = b - a, c - b, a - c
     cross = (ab[..., 0] * bc[..., 1] - ab[..., 1] * bc[..., 0]).abs()
     den = ab.norm(dim=-1) * bc.norm(dim=-1) * ca.norm(dim=-1)
-    kappa = (2 * cross / den.clamp(min=1e-9)).max(dim=1).values
-    return torch.sqrt(a_lat / kappa.clamp(min=1e-3))
+    return 2 * cross / den.clamp(min=1e-9)
+
+
+def _curvature_speed(x, y, a_lat, a_brake: float = A_BRAKE, upto: int = 16):
+    """The slower of two limits. The original: the sharpest bend in the next
+    `upto` points (4 m) at a_lat. And the whole 16 m preview, each bend's
+    speed plus what braking at a_brake gains over the distance to it, so the
+    car slows before a hairpin it would otherwise see too late. (Taking only
+    the second made the driver faster and crash more: 37% of held-out races
+    against 31%, 2026-10-27.)"""
+    a_lat = a_lat.view(-1, 1)
+    near = torch.sqrt(a_lat / _menger(x[:, :upto], y[:, :upto], 1).max(dim=1, keepdim=True).values.clamp(min=1e-3))
+    kappa = _menger(x, y, 2)
+    dist = 0.25 * torch.arange(3, 3 + kappa.shape[1], device=x.device, dtype=x.dtype)    # m to each bend point
+    far = torch.sqrt(a_lat / kappa.clamp(min=1e-3) + 2 * a_brake * dist).min(dim=1, keepdim=True).values
+    return torch.minimum(near, far).squeeze(1)
 
 
 def pursue(priv, v_cap, offset, pace, lookahead_gain: float = 0.35):
     """Pure pursuit on the centreline shifted `offset` (fraction of half-width,
-    + = left), at `pace` x the curvature speed."""
+    + = left), at `pace` x the speed the bends ahead allow (lateral grip
+    capped at A_LAT and at 60% of mu g)."""
     x, y, wl, wr = _track(priv)
     v = priv[:, 256] * 5
     k = (2 + (lookahead_gain * v.clamp(min=0.5) + 0.5) / 0.25).long().clamp(1, 62)
@@ -47,7 +67,8 @@ def pursue(priv, v_cap, offset, pace, lookahead_gain: float = 0.35):
     tx = torch.gather(x, 1, k.unsqueeze(1)).squeeze(1) + n[:, 0] * offset * half
     ty = torch.gather(y, 1, k.unsqueeze(1)).squeeze(1) + n[:, 1] * offset * half
     steer = torch.atan2(2 * WHEELBASE * ty, (tx * tx + ty * ty).clamp(min=1e-6)).clamp(-obs.STEER_LIMIT, obs.STEER_LIMIT)
-    speed = torch.minimum(pace * _curvature_speed(x, y, a_lat=3.0), v_cap)
+    a_lat = torch.minimum(torch.full_like(v, A_LAT), 0.6 * 9.81 * priv[:, MU])
+    speed = torch.minimum(pace * _curvature_speed(x, y, a_lat), v_cap)
     return torch.stack([steer, speed], -1)
 
 

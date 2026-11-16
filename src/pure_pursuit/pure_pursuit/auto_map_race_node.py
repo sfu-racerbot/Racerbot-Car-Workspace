@@ -8,6 +8,7 @@ controller instead. It also republishes SLAM's map->base_link transform as the
 PoseStamped input pure pursuit expects.
 """
 
+from collections import namedtuple
 import math
 import os
 from pathlib import Path
@@ -62,6 +63,11 @@ def angle_difference(a: float, b: float) -> float:
     return (a - b + math.pi) % (2.0 * math.pi) - math.pi
 
 
+#: The nearest a lap has come to its start while every closure gate except
+#: heading held. `index` is the last recorded point at that moment.
+_Nearest = namedtuple('_Nearest', 'distance heading_error index')
+
+
 class LapRecorder:
     """Distance-sampled map-frame path with conservative loop detection.
 
@@ -104,6 +110,15 @@ class LapRecorder:
     past one revolution without closing, and `lap_points` then trims the
     recording back to its final revolution, because a raceline recorded
     over two overlapping laps is not a raceline.
+
+    **A lap can close at its nearest point to the start, not its first.**
+    The default gate closes a lap on the first tick the car is inside the
+    closure circle with its heading inside the gate. A lap whose start sits
+    in a curve then closes about 29 degrees off the start heading, which is
+    what every lap of run 20261026-194913 did. With
+    `close_at_closest_approach` the lap waits until the car has moved on past
+    the nearest it came to its start, and closes there. It closes only if
+    the car faced the start at that point.
     """
 
     def __init__(self, spacing: float, min_distance: float,
@@ -111,13 +126,23 @@ class LapRecorder:
                  closure_heading_rad: float, min_duration_sec: float,
                  min_turn_rad: float = 0.0, max_pose_jump: float = 0.0,
                  closure_widen_after_revolutions: float = 0.0,
-                 max_closure_distance: float = 0.0):
+                 max_closure_distance: float = 0.0,
+                 close_at_closest_approach: bool = False,
+                 closest_approach_margin: float = 0.05,
+                 min_duration_fraction: float = 0.0):
         self.spacing = spacing
         self.min_distance = min_distance
         self.departure_distance = departure_distance
         self.closure_distance = closure_distance
         self.closure_heading_rad = closure_heading_rad
         self.min_duration_sec = min_duration_sec
+        if not (math.isfinite(min_duration_fraction) and 0.0 <= min_duration_fraction <= 1.0):
+            raise ValueError(
+                f'min_duration_fraction={min_duration_fraction!r}: expected 0..1')
+        self.min_duration_fraction = min_duration_fraction
+        # How long the last closed lap took. It outlives reset(), so the
+        # elapsed-time gate scales with the course once one lap is known.
+        self.previous_lap_duration_sec = None
         self.min_turn_rad = min_turn_rad
         self.max_pose_jump = max_pose_jump
         # Revolutions past the first after which the proximity gate starts
@@ -125,6 +150,10 @@ class LapRecorder:
         # widening entirely and restores the fixed gate.
         self.closure_widen_after_revolutions = closure_widen_after_revolutions
         self.max_closure_distance = max(max_closure_distance, closure_distance)
+        # Off by default. On: the lap closes at its nearest point to the start
+        # (see _closed_at_nearest_point), not on the first tick inside the circle.
+        self.close_at_closest_approach = close_at_closest_approach
+        self.closest_approach_margin = closest_approach_margin
         self.reset()
 
     def reset(self):
@@ -150,6 +179,9 @@ class LapRecorder:
         # Closest the car has come back to its start since departing, so a
         # near miss is reportable rather than invisible.
         self.closest_approach = float('inf')
+        # The nearest point to the start while every closure gate but heading
+        # held, for close_at_closest_approach. None while not tracking one.
+        self._nearest = None
 
     @property
     def revolutions(self) -> float:
@@ -253,6 +285,10 @@ class LapRecorder:
             self.last_sample = point
             self.last_pose = (x, y, yaw)
             self.last_odom_yaw = odom_yaw
+            self._odom_anchor_time = now_sec
+            self._odom_gap_turn = 0.0
+            self._odom_gap = False
+            self._odom_gap_ambiguous = False
             self.points.append((x, y))
             self.point_turn.append(self.turn)
             return False
@@ -266,14 +302,37 @@ class LapRecorder:
         # Accumulated yaw, not path heading: yaw comes straight from
         # localisation and does not have the sampled path's sensitivity
         # to noise at 0.15m spacing.
-        if odom_yaw is not None and self.last_odom_yaw is not None:
-            # Odometry is not re-optimised, so this is the car's own
-            # turning whether or not the pose graph moved this tick.
-            self.turn += angle_difference(odom_yaw, self.last_odom_yaw)
-        elif not jumped:
-            # Map yaw, and only when the map did not move under us -- across
-            # a re-anchor the yaw change is the map's, not the car's.
-            self.turn += angle_difference(yaw, self.last_pose[2])
+        # During an odom gap, credit map turning provisionally (never a
+        # jumped correction). On return replace that credit with the full
+        # anchored odom difference, so every interval is counted once.
+        # Wrapped differences become ambiguous at pi. Car 1's autonomy
+        # radius is 1.05 m (docs/hardware-reference.md); the shipped speed
+        # cap is 5 m/s (gap_follow.yaml). With 25% yaw-rate margin,
+        # 5/1.05 * 1.25 * 0.25 s = 1.49 rad < pi/2. Beyond 0.25 s,
+        # or if provisional turning ever exceeds pi/2, keep the map count
+        # and only re-anchor. Time is measured from the last odom sample,
+        # including the returning tick, not just the missing ticks.
+        if odom_yaw is not None:
+            if self.last_odom_yaw is not None:
+                if not self._odom_gap:
+                    self.turn += angle_difference(odom_yaw, self.last_odom_yaw)
+                elif (now_sec - self._odom_anchor_time <= 0.25
+                      and not self._odom_gap_ambiguous):
+                    self.turn += (angle_difference(odom_yaw, self.last_odom_yaw)
+                                  - self._odom_gap_turn)
+            elif not jumped:
+                self.turn += angle_difference(yaw, self.last_pose[2])
+            self._odom_anchor_time = now_sec
+            self._odom_gap_turn = 0.0
+            self._odom_gap = False
+            self._odom_gap_ambiguous = False
+        else:
+            map_turn = 0.0 if jumped else angle_difference(yaw, self.last_pose[2])
+            self.turn += map_turn
+            if self.last_odom_yaw is not None:
+                self._odom_gap = True
+                self._odom_gap_turn += map_turn
+                self._odom_gap_ambiguous |= abs(self._odom_gap_turn) > math.pi / 2
         self.last_pose = (x, y, yaw)
         if odom_yaw is not None:
             self.last_odom_yaw = odom_yaw
@@ -294,15 +353,84 @@ class LapRecorder:
         self.elapsed = now_sec - self.start_time
         self.distance_from_start = distance_from_start
         self.heading_error = abs(angle_difference(yaw, self.start_yaw))
+        if self.close_at_closest_approach:
+            closed = self._closed_at_nearest_point()
+        else:
+            closed = bool(
+                self._other_gates_open()
+                and self.distance_from_start <= self.effective_closure_distance
+                and self.heading_error <= self.closure_heading_rad
+            )
+        if closed:
+            self.previous_lap_duration_sec = self.elapsed
+        return closed
+
+    @property
+    def required_duration_sec(self) -> float:
+        """The elapsed time this lap needs before it may close.
+
+        Before any lap has closed the course length is unknown, so the fixed
+        floor applies. After that, a lap cannot take less than
+        min_duration_fraction of the one before: the previous lap's time is
+        the course length over the speed actually driven, so the gate grows
+        on long courses and shrinks on short ones. Half of one circuit stays
+        well below the next circuit, so the gate never forces a lap over two
+        circuits (which the old fixed 15 s did on short, fast courses).
+        """
+        if self.previous_lap_duration_sec is None:
+            return self.min_duration_sec
+        return max(self.min_duration_sec,
+                   self.min_duration_fraction * self.previous_lap_duration_sec)
+
+    def _other_gates_open(self) -> bool:
+        """Every closure condition except proximity to the start, and heading."""
         return bool(
             self.departed
             and self.distance >= self.min_distance
             and abs(self.turn) >= self.min_turn_rad
-            and self.elapsed >= self.min_duration_sec
-            and self.distance_from_start <= self.effective_closure_distance
-            and self.heading_error <= self.closure_heading_rad
+            and self.elapsed >= self.required_duration_sec
             and len(self.points) >= 3
         )
+
+    def _nearest_here(self) -> _Nearest:
+        """This tick, as a candidate nearest point to the start."""
+        return _Nearest(self.distance_from_start, self.heading_error,
+                        len(self.points) - 1)
+
+    def _closed_at_nearest_point(self) -> bool:
+        """Close the lap at its nearest point to the start, once the car has moved on.
+
+        While the car is inside the closure circle and the other gates are
+        open, the nearest distance to the start is tracked, with the heading
+        and the last recorded point at that moment. The lap closes on the
+        first tick that is out of the circle, or more than
+        closest_approach_margin past that nearest distance. It closes at the
+        nearest point, and only if the car faced the start there. If it did
+        not, the nearest point is forgotten and the lap goes on.
+        """
+        if not self._other_gates_open():
+            self._nearest = None
+            return False
+        inside = self.distance_from_start <= self.effective_closure_distance
+        nearest = self._nearest
+        if nearest is not None:
+            if inside and self.distance_from_start < nearest.distance:
+                self._nearest = self._nearest_here()
+                return False
+            if inside and self.distance_from_start <= (
+                    nearest.distance + self.closest_approach_margin):
+                return False
+            if nearest.heading_error <= self.closure_heading_rad:
+                self.heading_error = nearest.heading_error
+                self.distance_from_start = nearest.distance
+                del self.points[nearest.index + 1:]
+                del self.point_turn[nearest.index + 1:]
+                self._nearest = None
+                return True
+            self._nearest = None
+        if inside:
+            self._nearest = self._nearest_here()
+        return False
 
 
 class AutoMapRaceNode(Node):
@@ -386,12 +514,19 @@ class AutoMapRaceNode(Node):
         # as motion it becomes a corner nothing can steer; see
         # LapRecorder._reanchor. 0 disables the check.
         self.declare_parameter('max_pose_jump_m', 0.12)
-        self.declare_parameter('minimum_lap_duration_sec', 15.0)
+        self.declare_parameter('minimum_lap_duration_sec', 4.0)
+        # After the first closed lap: a lap must also take at least this
+        # fraction of the previous lap's time (0 = the floor alone, max 1).
+        self.declare_parameter('minimum_lap_duration_fraction', 0.5)
         self.declare_parameter('departure_distance', 2.0)
         self.declare_parameter('closure_distance', 0.75)
         self.declare_parameter('closure_heading_deg', 30.0)
         self.declare_parameter('closure_widen_after_revolutions', 1.25)
         self.declare_parameter('max_closure_distance', 4.0)
+        # Close the lap at its nearest point to the start, not the first tick
+        # inside the closure circle. Off here; auto_map_race.yaml turns it on.
+        self.declare_parameter('close_at_closest_approach', False)
+        self.declare_parameter('closest_approach_margin_m', 0.05)
         self.declare_parameter('transition_stop_sec', 2.0)
         self.declare_parameter('map_save_timeout_sec', 20.0)
         # slam_toolbox's SaveMap runs nav2's map_saver inline, and map_saver
@@ -402,7 +537,7 @@ class AutoMapRaceNode(Node):
         # different part of that window.
         self.declare_parameter('map_save_retries', 3)
         self.declare_parameter('map_save_retry_delay_sec', 2.5)
-        self.declare_parameter('output_directory', '~/.ros/racerbot_auto')
+        self.declare_parameter('output_directory', '~/racerbot-ws/data/racerbot_auto')
         self.declare_parameter('profile_max_speed', 4.0)
         self.declare_parameter('profile_min_speed', 0.5)
         self.declare_parameter('profile_max_lateral_accel', 2.5)
@@ -566,6 +701,9 @@ class AutoMapRaceNode(Node):
             closure_widen_after_revolutions=float(
                 value('closure_widen_after_revolutions')),
             max_closure_distance=float(value('max_closure_distance')),
+            close_at_closest_approach=bool(value('close_at_closest_approach')),
+            closest_approach_margin=float(value('closest_approach_margin_m')),
+            min_duration_fraction=float(value('minimum_lap_duration_fraction')),
         )
 
         self.state = 'mapping'
@@ -1225,7 +1363,7 @@ class AutoMapRaceNode(Node):
             f'distance={self.recorder.distance:.1f}/{self.recorder.min_distance:.1f}m, '
             f'turn={math.degrees(self.recorder.turn):.0f}/'
             f'{math.degrees(self.recorder.min_turn_rad):.0f}deg, '
-            f'elapsed={self.recorder.elapsed:.1f}/{self.recorder.min_duration_sec:.1f}s, '
+            f'elapsed={self.recorder.elapsed:.1f}/{self.recorder.required_duration_sec:.1f}s, '
             f"departed={'yes' if self.recorder.departed else 'no'}, "
             f'start distance={self.recorder.distance_from_start:.2f}/'
             f'{self.recorder.effective_closure_distance:.2f}m, heading error='
@@ -1492,6 +1630,11 @@ class AutoMapRaceNode(Node):
 
     def _mapping_lap_completed(self):
         self.completed_mapping_laps += 1
+        if self.recorder.close_at_closest_approach:
+            self.get_logger().info(
+                'closed at closest approach: '
+                f'd={self.recorder.distance_from_start:.2f}m, '
+                f'heading error={math.degrees(self.recorder.heading_error):.1f}deg')
         self.measured_lap_distance = self.recorder.distance
         self.measured_lap_duration_sec = self.recorder.elapsed
         trimmed = len(self.recorder.points) - len(self.recorder.lap_points())

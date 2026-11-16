@@ -2,7 +2,7 @@
 
     python -m neural_racer_train.heldout          # (re)write heldout.yaml and the maps
 
-  real        the four imported course maps in tools/f1tenth_sim/maps
+  real        the imported course maps in tools/f1tenth_sim/maps (car 1's own course among them)
   procedural  20 tracks from seeds at or above learn.HELDOUT_SEED_BASE (a range
               training never draws from), written as gym map triplets into
               .sim/neural_racer_heldout/ (gitignored; regenerated from the seeds)
@@ -19,7 +19,8 @@ import yaml
 from neural_racer_train import common, tracks
 from neural_racer_train.learn import HELDOUT_FILE, HELDOUT_SEED_BASE
 
-REAL = ('room_2026_07_27', 'levine_blocked', 'levine_obs', 'circular_obs')
+REAL = ('room_2026_07_27', 'levine_blocked', 'levine_obs', 'circular_obs', 'car1_course_2026_10_26',
+        'car2_course_2026_10_30', 'car2_course_2026_11_06a_clean', 'car2_course_2026_11_06b_clean')
 N_PROCEDURAL = 20
 MAP_DIR = common.REPO / '.sim' / 'neural_racer_heldout'
 

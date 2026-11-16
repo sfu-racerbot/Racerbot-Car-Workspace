@@ -3,6 +3,10 @@ real:
 - levine_blocked
 - levine_obs
 - circular_obs
+- car1_course_2026_10_26
+- car2_course_2026_10_30
+- car2_course_2026_11_06a_clean
+- car2_course_2026_11_06b_clean
 procedural:
 - name: heldout_00
   seed: 1000000000
@@ -21,7 +25,7 @@ procedural:
   kind: smooth_loop
 - name: heldout_03
   seed: 1000000003
-  digest: 4cae3cdd2c14c6e9
+  digest: 9619af8179f69a4c
   lap_length_m: 106.68
   kind: filleted_polygon
 - name: heldout_04
@@ -81,7 +85,7 @@ procedural:
   kind: smooth_loop
 - name: heldout_15
   seed: 1000000015
-  digest: bae8af79f9d344f1
+  digest: 7561c635f894190f
   lap_length_m: 92.53
   kind: filleted_polygon
 - name: heldout_16
@@ -101,7 +105,7 @@ procedural:
   kind: smooth_loop
 - name: heldout_19
   seed: 1000000019
-  digest: adbd60031cec48a6
+  digest: b489311c1c078fdc
   lap_length_m: 107.45
   kind: filleted_polygon
 note: Never train on these. Regenerate with python -m neural_racer_train.heldout.

@@ -86,7 +86,8 @@ class NeuralRacerNode(Node):
         for name in ('max_steering_angle', 'car_width', 'car_length', 'wheelbase',
                      'laser_offset_x', 'reserve_distance', 'max_braking_decel',
                      'braking_latency_sec', 'max_lateral_accel', 'max_steering_rate',
-                     'command_slew_max_dt', 'max_invalid_fraction'):
+                     'command_slew_max_dt', 'max_invalid_fraction', 'forward_fov_deg',
+                     'swept_clearance_margin', 'swept_clearance_max_length'):
             p(name, getattr(defaults, name))
 
         v = lambda name: self.get_parameter(name).value   # noqa: E731
@@ -112,7 +113,8 @@ class NeuralRacerNode(Node):
                 'max_steering_angle', 'car_width', 'car_length', 'wheelbase',
                 'laser_offset_x', 'reserve_distance', 'max_braking_decel',
                 'braking_latency_sec', 'max_lateral_accel', 'max_steering_rate',
-                'command_slew_max_dt', 'max_invalid_fraction')}))
+                'command_slew_max_dt', 'max_invalid_fraction', 'forward_fov_deg',
+                'swept_clearance_margin', 'swept_clearance_max_length')}))
 
         # --- refusals: the node then publishes only zero commands ------------
         self.refusal = None
@@ -310,7 +312,7 @@ class NeuralRacerNode(Node):
             o = obs.build_observation(
                 self.history, imu_present=imu_fresh and self.history.imu_complete(),
                 mode=obs.MODE_MAP if map_mode else obs.MODE_REACTIVE, v_cap=self.max_speed,
-                preview=prev_block, race=race)
+                a_lat=self.wrapper.cfg.max_lateral_accel, preview=prev_block, race=race)
         except (obs.ObservationError, preview.PreviewError):
             return self._stop('bad_observation')
 

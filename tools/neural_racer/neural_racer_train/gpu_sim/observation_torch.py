@@ -1,4 +1,4 @@
-"""Batched observation spec v1 -- the training side of neural_racer/observation.py.
+"""Batched observation spec v2 -- the training side of neural_racer/observation.py.
 
 Every constant is imported from that module; nothing is restated. The car
 builds one observation a tick in NumPy, this builds (E, C) of them at once,
@@ -71,8 +71,8 @@ class ObsHistory:
 
 
 def build(hist: ObsHistory, imu_present, mode, v_cap, preview=None, race=None, camera=None,
-          camera_present=None, camera_age=None):
-    """The A4 blocks, each (E, C, ...). imu_present/mode/v_cap are (E, C)."""
+          camera_present=None, camera_age=None, *, a_lat):
+    """The A4 blocks, each (E, C, ...). imu_present/mode/v_cap/a_lat are (E, C)."""
     E, C = mode.shape
     dev = mode.device
     scan = torch.cat([hist.scans, hist.valid.unsqueeze(2)], dim=2)
@@ -87,6 +87,7 @@ def build(hist: ObsHistory, imu_present, mode, v_cap, preview=None, race=None, c
     ego[..., obs.EGO['imu_present']] = ip.squeeze(-1)
     ego[..., obs.EGO['mode']] = mode.to(ego.dtype)
     ego[..., obs.EGO['v_cap']] = v_cap / obs.V_SCALE
+    ego[..., obs.EGO['a_lat']] = a_lat / obs.A_LAT_SCALE
     m = mode.to(ego.dtype).view(E, C, 1, 1)
     prev = (torch.zeros(E, C, 4, obs.PREVIEW_POINTS, device=dev) if preview is None else preview * m)
     rc = torch.zeros(E, C, obs.RACE_DIM, device=dev) if race is None else race * m.view(E, C, 1)

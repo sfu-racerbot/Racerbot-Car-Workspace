@@ -6,7 +6,719 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-24 (latest) — Gyro odometry for SLAM; every mapping run recorded and explained
+## 2026-10-30 (latest) — neural_racer student stages: race rules, rewards and the league's opponents
+
+A CPU audit raced teacher v5 (update 150) in the league's own races, with
+the league's rewards, 40 races per setup. Alone in a 1-seat sim, 19
+finished and 16 were still racing at the 90 s limit. Alone in a 4-seat
+sim, it stalled in 35 and finished none: the empty seats' cars sit at the
+origin, `privileged()` still reports them, and the solo-trained teacher's
+normaliser clips those inputs. With them masked, it was back to 19
+finishes. In traffic with them masked, it finished 10 and stalled behind
+opponents in 16. A car that stopped was never ended alone, and in traffic
+lost −73 on average to a contact charge paid every tick. The league also
+re-drew every opponent's driver every rollout, mid-race.
+
+### neural_racer_train — race rules and rewards (behavior changes)
+
+- **Reward defaults are the teacher's** (`RewardConfig`): wall cost
+  25 + 15(v/4)² (was 5 + 15(v/4)²), stall 40 (was 20). `PPOConfig.gamma`
+  0.998 (was 0.995). The Runner's episode limit is `learn.MAX_SECONDS`,
+  180 s (was 90). `teacher.py` already passed all of these, so teacher runs
+  are unchanged; distillation and the league get them.
+- **Contact with another car costs once per contact**, on its first tick,
+  and only between cars still racing. It was charged on every tick, wrecks
+  included. Running into a wreck is still a fault and still ends the race.
+- **A car below 0.1 m/s for 3 s is stalled, whatever the cause**
+  (`IDLE_TICKS`). With the wrapper on, only a car the wrapper held counted,
+  so stopping by choice was never ended or charged.
+- **A race ends when the learner's does** (`Runner(end_with_learner=True)`,
+  `sim.end_with_seat0`). After seat 0 finished or crashed, the env had raced
+  on until every car was done, and a parked opponent never is. `sim.step`
+  also returns `crashed`. PLR level scores count only the learner's racing
+  ticks (`Runner.add_scores(..., mask)`).
+- League: a curvature-cap cut costs `--cap-penalty` 0.5 per v_ref m/s.
+  Gate S counts those cuts as interventions, and the student's squash
+  doesn't hold the cap.
+
+### neural_racer_train — a solo teacher in seats for more cars
+
+- `model.solo_view`: the privileged state as a teacher trained alone saw it,
+  with no other cars and in first of one. It feeds distillation's labels
+  with `--max-cars` over 1, and the league's kickstart, unless the teacher's
+  checkpoint says `traffic`.
+- `model.fresh_opponent_inputs`: the league's `--critic-from` critic gets
+  normaliser statistics for the opponent block and the place from the
+  league's own state. Their first-layer weights are zeroed, since they never
+  trained, and the sample count is capped at 1e7 so the statistics can still
+  move (the teacher's count is about 3e9).
+
+### neural_racer_train — league_learner
+
+- `OpponentTable`: every race keeps its drivers to the finish. New races draw
+  from one half of the table. Matchmaking refills the other half once no
+  car still racing uses it. Archived snapshots are read once and cached.
+- `StackedOpponents(recurrent=...)`: an MLP snapshot races with its memory
+  input at zero, as it trained. Run as recurrent, its actions differed by up
+  to 1.8.
+- Win rule (`won`): a car that crashed loses to one that didn't; otherwise
+  the place decides.
+- An exploiter reset restores log_std −1.5 and a fresh actor optimiser and
+  step size. It used to keep the student's −1.0 and the old Adam state.
+- The main roles race the held-out tracks every `--eval-every` (200) updates
+  (student_eval) and keep `best.pt`. Archive entries record their width.
+- `./run.sh league STUDENT MLP_STUDENT TEACHER [RUN] [ROLES] [SEGMENTS]`
+  replaces the stale distill-v1 path. `fir_league_submit.sh` adds
+  `--init-mlp` (main1_mlp starts from the `--memory none` student),
+  `--teacher`, `--critic-from`, `--library` and `--roles`, and uses eight
+  3-hour segments by default (was six of 12 h).
+
+### neural_racer_train — distillation
+
+- The episode-start flag carries across rollouts. About 1 in 64 new
+  episodes started with the previous episode's GRU memory.
+- Distillation and the league skip a held-out eval once the time-limit
+  signal has arrived.
+- `./run.sh distill-sweep` has no traffic run, because the solo teacher
+  stalls behind other cars. `full` and `masked` are submitted first.
+
+### neural_racer_train — referee
+
+- `NeuralDriver` passes the cornering cap that observation spec v2 added.
+  Every neural race raised a `TypeError` on its first tick.
+- `eval_worker`: a race that fails in a worker comes back as an error. The
+  gym's bootstrap called `SystemExit` inside the worker, and `Pool.map`
+  waited forever. A matchup where every race failed is left unrecorded, so
+  it is retried. Snapshots load at their recorded width. SIGTERM ends the
+  worker at once, where before the job script waited up to an hour on it.
+- Item 3a, the referee in Fir jobs: the gym's `f1tenth_gym.envs` imports cv2,
+  which loaded the host's GLib 2.68. The software stack's libgio needs 2.70's
+  `g_source_set_static_name`, so every import failed with `undefined symbol`.
+  `fidelity.ensure_paths` now loads the stack's own GLib, GObject and GIO
+  first (`prefer_compat_glib`, from `$EBROOTGENTOO`; a no-op elsewhere).
+  Preloading those three fixed the import in job 1524538. All 33 tests that
+  need the gym now pass on a Fir compute node (job 1530304); none of them
+  could run there before.
+- `test_trajectory_matches_fidelity_plant`, which was never run where the gym
+  was missing, failed by 5.9 m. The race's `a_lat_cap` (default 2.0) has set
+  the sim's cornering cap since teacher v4, so its "never caps" wrapper config
+  no longer uncapped it. The test now uncaps the race; the sim was not at fault.
+
+### neural_racer_train — benched against the car's current algorithms
+
+- `python -m neural_racer_train.bench CKPT...` races students against what car 1
+  runs today, in the referee: gap_follow (its `gap_follow.yaml` race defaults,
+  through `gap_mirror`) and pure pursuit on the map's line. Each driver races
+  alone (finish, lap time, wall contacts), and each student races each of them
+  head to head with the grid order alternating (wins, at-fault contacts). It
+  runs on car 1's course, the other obstacle-free real maps and held-out
+  procedural tracks, with the student at gap_follow's 5.0 m/s and a chosen
+  cornering cap. The league's cars start here: it is their floor.
+- `tools/f1tenth_sim`, `src/gap_follow` and `src/pure_pursuit` are taken as
+  they are on main (ae7ceeb), so the referee and the bench race the shipped
+  algorithms. `test_config.py` and `neural_racer.yaml` take main's change: the
+  cornering cap is no longer paired with gap_follow's, which moved to 2.5.
+- `referee.NeuralDriver(a_lat=...)`: the wrapper's cornering cap, also given
+  to the policy.
+- `referee.NeuralDriver` adds the training sim's IMU noise (`imu_vibration`, default
+  1.0; per-race seed), so the referee tests a student on an IMU as noisy as car
+  1's is while driving. `bench --imu-vibration 0` gives the exact IMU.
+
+### neural_racer_train — sensor noise from car 1's drives (data/racerbot_runs)
+
+Read from the bags of runs 20261030-175701 (gap_follow, race defaults, 4.8 m/s
+top), 20261026-194913 and 20261026-180228 (the course). The analysis scripts
+live outside the repo.
+
+- **IMU vibration.** The node feeds the policy `/imu/data`'s latest message
+  each tick, with no averaging. While driving, that sample's scatter around a
+  0.08 s mean was 0.023–0.034 rad/s (gyro z), 0.4–1.0 m/s² (accel x) and
+  0.6–1.9 m/s² (accel y), growing with speed. That is 5–13× the sim's 0.005
+  and 0.15. At rest it is 0.001–0.008 rad/s and 0.03–0.09 m/s². Now the noise
+  is the rest level (`imu_gyro_noise` 0.004, `imu_accel_noise` 0.06) plus,
+  once moving, `imu.VIBRATION`'s fitted curves (std = c0 + c1·v), scaled by
+  `imu_vibration`, which is drawn from 0.4–1.5 per episode.
+- **LiDAR dropout in sectors.** 95% of the car's invalid beams come in runs of
+  4 or more (median 9, p90 56). In the 2026-10-30 room, a sector at +16° was
+  invalid in half the scans. The sim dropped single beams at 0.2%. Now
+  `lidar.sector_dropout` adds transient sectors (`lidar_sectors` per scan on
+  average, drawn from 0–1, each 4–60 beams wide) and, in about 57% of
+  episodes, one persistent sector (`lidar_persist*`). The range noise
+  (6–12 mm) already matched the sim's 10 mm.
+- Not changed: car 1 commands speed with a gain of 3650 ERPM per m/s
+  (`ackermann_to_vesc`) but reads odometry with 4040 (`vesc_to_odom`). Its
+  odometry therefore reads 0.90 of the command, and SLAM agrees with the
+  odometry (0.97 over 136 m), so the car drives about 10% slower than
+  commanded. That is for the team to fix on the car; the sim follows
+  commands exactly.
+
+### neural_racer_train — car 1's measured IMU position
+
+- `CarParams.imu_offset_x` 0.45 → 0.36 m from the rear axle. `/imu/data` is the
+  BNO085, rotated into car axes but not moved, and car 1 mounts it at the
+  front axle's centre (`tools/imu_calibration/config/car.yaml`). It was the
+  team's front-bumper estimate. The referee's `NeuralDriver` takes the same
+  point (0.18 m ahead of the CoG, was 0.27). Its gyro noise measured at rest is
+  0.0014 rad/s, under the simulated 0.005, which also has to cover driving
+  vibration, so the noise model is unchanged.
+
+### neural_racer_train — teacher v6, and a teacher's last races inside its time limit
+
+- Teacher v6 (jobs 1721555/7, from v5 on `tracklib-v2`) trained all 5e8 steps
+  (plain) and 3e8 (masked) with a crash hazard of 5–9e-5 per tick on the
+  tight-corner tracks. Its held-out finish stayed at ~88%, and car 1's course
+  only reached 14–19%. levine_blocked stayed at 0%, where the LiDAR-driven
+  student finishes 92%, so the teacher's privileged view of the real maps is
+  suspect and its real-map score says little. Both runs were killed at the 3 h
+  limit: each wrapper-on eval took 13–29 min, ten of them filled the segment,
+  and the reraces ran past the time-limit signal.
+- `teacher.py`: the final whole-plan race and the reraces start only before
+  the time-limit signal, and the reraces stop between snapshots. Otherwise
+  train() saves and returns as checkpointed, and the next segment (past its
+  step budget) runs them again.
+- `./run.sh teacher6`: `--eval-every 100`, and the signal 25 min before the
+  limit (`--signal=B:USR1@1500`).
+- `./run.sh distill-sweep TEACHER [MASKED|-] [STEPS] [LIB] [TAG] [VARIANTS]`:
+  the track library, the run-name tag and which runs to submit. The
+  teacher's reference bar is `--min-teacher-finish 0.7`: it cannot see two
+  real maps' boxes, so it tops out near 0.8 on the student's races.
+
+### Fir job scripts
+
+- `run.sh` keeps a broken GPU node out for 7 days, up from 24 h. fc10512 (no
+  CUDA device) came back after 24 h, and the scheduler handed it to six jobs
+  in a row on 2026-10-31, each failing in 30 s.
+
+### neural_racer_train — tight corners in training (track config v2, teacher v6)
+
+distill-v3-full (teacher v5) finished 81.3% of its 300 held-out races, level
+with the teacher's 80.0% on the same races. Both stalled in every race on car 1's
+course: the braking cap held them nose-on to the outside wall after the
+hairpin, from which no reachable arc was clear. Every real map has corners
+tighter than 1.3 m centreline radius (car 1's course 0.71 m, room 0.65 m,
+levine_blocked 0.50 m), and the training generator never made one
+(`min_radius` 1.3 m). The car's tightest turn is 1.05 m, so those corners
+need a wide line.
+
+- `TrackGenConfig.turn_room`: a corner tighter than this must have its radius
+  plus its outside width at least this, so the car's turning circle fits.
+  0 (the default) is off, and v1 is unchanged.
+- `learn.TRAIN_CONFIGS`: `v1` (as before) and `v2` (`min_radius` 0.45 m,
+  `turn_room` 1.4 m, which covers the outer front corner's ~1.34 m sweep at
+  full lock). In v2, 67% of tracks have a corner under 1.3 m and 30% one under
+  0.8 m. The obstacle-free real maps meet v2's corner rules (each has at
+  least 1.55 m of radius plus outside width).
+- A library records its config, and a run takes it from there: the feeder
+  generates with it once the library runs out (`Library(dir).cfg`). A library
+  written before `turn_room` existed still loads as v1.
+  `tracklib --config v1|v2`, `./run.sh tracklib [v1|v2]`.
+- `teacher.py --eval-real`: its held-out races and reraces also run on the
+  obstacle-free real maps (`teacher_eval.OBSTACLE_FREE_REAL`), so best.pt
+  answers for car 1's course. `Evaluator(real=...)` takes a tuple of names.
+- `./run.sh teacher6 [plain|masked]`: fine-tunes v5 on `tracklib-v2` with the
+  whole wrapper and `--eval-real`.
+
+### neural_racer_train — car 1's hairpin in training (track config v3, teacher v7)
+
+Teacher v6 (best 88.9% in-loop; masked 86.6%) and distill-v4-full (82.0%
+of 300 held-out races) still finished no race on car 1's course. In 3 of 4
+races, teacher and student both stopped at the same spot. They came out of
+the left hairpin round the divider's tip too wide and stopped at
+(−1.0…−1.5, −0.4), heading −46° to −71°, 0.38 m from the bottom wall, at
+full left lock. The swept clearance along every arc the wrapper allows was
+0.00–0.14 m, under the 0.2 m reserve, so only reversing would get them
+out. No generated track, v1 or v2, has a U-turn round a thin divider.
+gap_follow, with the same 1.05 m turning radius, gets round it in the
+referee.
+
+- `tracks.hairpin_loop`: a long loop round a thin divider (0.25–0.8 m), its
+  corridor 1.1–1.8 m wide. Each U-turn has room on the outside mid-turn (up
+  to +1.0 m) and a pinch just after its exit, where the outside wall comes
+  in to 45–95% of the half-width. The loop is mirrored at random, so the
+  U-turns go both ways. 93% pass `check()` with v2's rules. They reproduce
+  car 1's failure: on 32 fresh ones (CPU check, wrapper on), teacher v6
+  finished 13 of 64 races and distill-v4-full 9, and every stall came
+  within 3 m after a U-turn. 31 of the 32 have a minimum-curvature line no
+  tighter than car 1's 1.05 m turn at the 0.33 rad cap.
+- `TrackGenConfig.hairpin_share` (default 0, so v1 and v2 are unchanged).
+  `learn.TRAIN_CONFIGS['v3']` is v2 with `hairpin_share` 0.3.
+- `realmaps.variant(r, mirror, reverse, scale)` and `realmaps.variants(name)`
+  give a real map mirrored (left and right swapped), driven the other way
+  round, and scaled ×0.92, ×1 or ×1.08. That makes 12 per map, each with its
+  own digest.
+- `tracklib --real MAPS --real-copies N` adds every variant of those maps
+  to a library, N copies each (default 40, about 5.5% of an 8192-track
+  library). They take seeds from `REAL_SEED_BASE` (999 000 000), below the
+  held-out base. `./run.sh tracklib v3` builds the v3 library with car 1's
+  course in it.
+- **Car 1's course is no longer held out for anything trained on a v3
+  library.** For those runs its score in the held-out races and the bench
+  measures fit to the car's track, not generalisation. The other four real
+  maps and the procedural held-out tracks stay unseen.
+- `./run.sh teacher7 [plain|masked]`: fine-tunes teacher v6 (or v6-masked)
+  on `tracklib-v3`, with the same settings as teacher6.
+
+### neural_racer_train — car 2's course and car 2's sensors
+
+Car 2's runs reached the repo on `unify/merge-car2` (`data/rb2/`). Its
+2026-10-30 drives (gap_follow, and map_course's auto race on a 51.3 m
+course) were extracted and compared with car 1's and with the sim.
+
+- **Car 2's course is the sixth real map, as `car2_course_2026_10_30`**
+  (`heldout.REAL`, `teacher_eval.REAL_MAPS` and `OBSTACLE_FREE_REAL`,
+  `heldout.yaml`, catalog). Upstream has two versions (map files from
+  `origin/main`). `course_2026_10_30` has its outside filled in, but its
+  walls stand 7.5 cm (median) to 20 cm (p90) into the corridor: narrowest
+  0.80 m against 1.00 m. `course_2026_10_30_scans` has its walls corrected to
+  where real scans landed, but they are gappy and its outside is free.
+  car2_course takes the `_scans` walls and closes them with the filled
+  version, its unreachable pockets removed and shrunk 0.25 m. Then every
+  free cell a 0.3 m disk can't reach from the centreline becomes wall: the
+  insides of the infield islands, and slivers out through gaps in the outer
+  wall, which LiDAR beams in the sim had gone through. Widths match the
+  `_scans` map (median 1.55 m, min 1.00 m). On the filled map, nothing
+  finished in the referee with car 1's geometry (gap_follow, pure pursuit,
+  distill-v4-full 0/3 each), though the minimum-curvature line needs no
+  tighter than a 1.33 m radius. New `realmaps.reachable_free(occ, centre,
+  origin, res, radius=0.15)` and `write_clean` (`python -m
+  neural_racer_train.realmaps SRC OUT [--fill MAP]`). Lap 51.3 m. Held out:
+  no library trains on it.
+- **Real-map centrelines are smoothed on load** (`realmaps.CENTRE_SMOOTH`,
+  a 0.25 m Gaussian). The CSV centrelines jog: every real map had 3–12
+  points whose curvature was over 1/m above their neighbours'. Car 2's course
+  had a 0.32 m radius over 5 cm, at which teacher v6 turned into a wall with
+  1.5 m clear straight ahead. Generated tracks never jog, and the teacher
+  reads the curvature ahead. Smoothing moves the line by at most 8 cm and
+  keeps its clearance from the walls; laps get 0.3–0.4 m shorter. A real
+  map's digest now covers its centreline. `tracklib --real-refresh` /
+  `add_real(..., refresh=True)` rewrites a library's real-map tracks, and
+  `tracklib-v3`'s 480 were rewritten.
+- **The gyro has its own vibration scale** (`imu_gyro_vibration`, drawn
+  0.4–2.3). The accelerometers keep `imu_vibration`, whose range is now
+  0.3–1.5 (was 0.4–1.5). While driving, car 2's gyro reads 0.020–0.048
+  rad/s, up to 1.5× the sim's old top. Its accelerometers read 0.27–0.48
+  (x) and 0.28–0.39 (y) m/s², quieter than car 1's. One shared scale could
+  not cover both cars. `imu.noise_std(..., gyro_vibration=)`.
+- **`lidar_sectors` is drawn 0–1.5** (was 0–1). Car 2's UST-10LX loses
+  0.9–1.0 runs of beams per scan while driving (median run 4–5 beams, p90
+  16–27, max 72). Car 1 loses 0.1–0.6. Neither car had a sector invalid in
+  more than 30% of moving scans.
+- Measured on car 2 and already inside the sim's randomization: wheelbase
+  0.33 m and a 0.349 rad steering limit. That gives a 9% tighter turn than
+  car 1 for the same angle, inside the ±10% steering-gain error. Speed
+  follows the command 0.2 s late. /imu/data runs at 50 Hz, inside the
+  0–2 tick IMU delay. Under gap_follow (`max_lateral_accel` 2.5) the car
+  reached lateral accelerations of p50 2.0, p90 2.9 and max 4.1 m/s².
+
+### neural_racer_train — league library, and an escape-creep experiment switch
+
+- `./run.sh league ... [LIB]`: the league's track library, by default
+  `tracklib-v3`. Before, it was always `tracklib-v1`, which has none of the
+  tight corners, hairpins or car 1's course.
+- `SafetyTorch.creep` (sim only, default 0 = off, as on the car): gap_follow's
+  escape creep (`escape_creep_speed`). Inside the 0.2 m reserve the braking
+  cap allows up to that speed, using the braking formula on half the
+  reserve. Experiments set it to ask whether the car's wrapper should have
+  the creep: teacher v7 still stops at car 1's hairpin exit, 0.13 m from the
+  wall, with every arc it could take under the reserve. The car's wrapper
+  (`src/neural_racer`) is unchanged.
+
+### neural_racer_train — top speeds, overtaking, contact cost, release at full speed (2026-11-08)
+
+The team's call: "bump speeds as high as we can; the neural racers will
+figure out what works best; crashed cars should stay on the track". A
+release crossplay at 5.0 m/s (2.5 m/s²) found both of our best snapshots
+beating gap_follow and pure pursuit, yet vetoed for 3–11 at-fault contacts.
+
+- **Training's motor goes to 10 m/s** (`gpu_sim.params.TRAIN_SPEED_MAX`;
+  `learn.V_CAP_RANGE` 1.0–10.0). 5.05 m/s is only the VESC's configured
+  limit (`vesc.yaml` speed_max 23250 at gain 4600, still
+  `CAR1_OVERRIDES['speed_max']`); the car can reach about 27 m/s. 10 m/s is
+  the most any course we race can use. With the measured 4.5 m/s²
+  acceleration, 4.0 braking and grip, levine_blocked's fastest line peaks at
+  9.8 m/s, car 1's course at 7.6, car 2's at 6.5–8.2 and the room at 5.0.
+  Raising the cap from 5.05 to 8 m/s takes 1–14% off those laps. Nothing
+  above about 5.4 m/s is measured, so the motor's power limit `v_switch` is
+  drawn ±30%. The CPU referee, the release crossplay and the car keep the
+  VESC's limit until the team raises it. Car-side limits above about 8 m/s,
+  for the team: the student's LiDAR encoding stops at 10 m (`R_MAX`), and
+  the wrapper's braking look-ahead is 3 m (`swept_clearance_max_length`).
+- **Speed caps near the top.** 70% of levels draw their speed cap from
+  4.0 m/s to the top of `V_CAP_RANGE` (`learn.V_CAP_HIGH`, `V_CAP_HIGH_SHARE`). Only 10% sit at
+  exactly 2.0 m/s² cornering (`A_LAT_CAR_SHARE`, was 40%). Both come from
+  a separate random stream, so every other draw of a level is unchanged.
+- **Overtaking levels.** In 30% of multi-car levels (`OVERTAKE_SHARE`), the
+  learner starts at the back of the grid. The opponents ahead are held to
+  70–90% of its speed cap. `Level.v_cap_scale` gives each car its share,
+  and `BatchedRaceSim.car_v_cap()` uses it in the observation, the
+  privileged state and the wrapper. `tracks.start_grid(..., order=)` places
+  the grid.
+- **At-fault contact costs 60** (`RewardConfig.fault_contact`, was 20),
+  above a wall touched at walking pace (25). Crashed cars stay on the
+  track, as before.
+- **The floor's measured grip curve** (plan workstream 4). It replaces the
+  friction circle in training: `actuation.grip_clamp` with
+  `CarParams.grip_model` 1 (the default) turns the car by what `main`'s
+  `ProgressiveGrip` delivers. That is the mean of the two measured floors
+  (`sfu_course_2026_10_30`, `sfu_course_2026_11_06`), stretched per race by
+  `grip_scale`, drawn from 0.85–1.3. Up to 2.0 m/s² the car turns as asked;
+  asking 4.5 gives about 3.3. `grip_model` 0 keeps the circle; the parity test
+  against the CPU referee's plain calibration uses it. In the replay of the
+  cars' `/drive` commands, car 2's turning response came out 0.77–0.81
+  (real 0.69–0.81) and lateral p99 3.16 m/s² (real 3.25). Car 1 needs a
+  `grip_scale` near 1.25 for its 3.39.
+- **Head-to-heads are scored on finishing order** (plan workstream 6,
+  `referee.finish_outcome`). A car that crashes or runs out of time never
+  beats one that finishes, and two non-finishers draw, however far each got.
+  Crashed cars stay on the track (the team's call), and in the Nov 7 round
+  robin 87% of head-to-heads had no finisher, so distance had decided them.
+  The bench reports wins, losses and draws, the wins from races the student
+  started second (the overtaking measure, workstream 2), and at-fault
+  contacts per 100 races. The release crossplay (`eval_worker`) counts a
+  win the same way. league-v1's crossplay scored on distance moved to
+  `eval-max-distance/`.
+- **Wrapper reserve stays at 0.20 m.** In the sim what-if, 0.12 m (gap_follow's
+  since `main` 2fb626e) changed nothing: the smoke snapshot's results were
+  identical race for race on the 6 real maps, and teacher v9's differed by
+  one race.
+- **Release crossplay at full speed.** `eval_worker` now defaults to
+  5.05 m/s and a 5.0 m/s² cornering cap, writing to `<archive>/eval-max/`
+  (`RELEASE_V_CAP`, `RELEASE_A_LAT`, `RELEASE_TAG`). The 2.5 m/s results stay
+  in `eval/`. `fir_run.sh select` and `export` and the release lane read
+  `eval-max/`.
+
+### neural_racer_train — improvement plan, first steps (2026-11-08)
+
+The Nov 7 round robin (10 algorithms on `main` 2fb626e's simulator) put
+gap_follow narrowly ahead of our best neural racers. Each of our models
+failed at least one of car 2's courses, and nobody overtook. The plan is in
+the team's doc, "Neural Racer Improvement Plan". First steps:
+
+- **Car 2's Nov 6 courses are held-out real maps**:
+  `car2_course_2026_11_06a_clean` (lap 32.0 m) and
+  `car2_course_2026_11_06b_clean` (21.1 m), in `heldout.REAL`,
+  `teacher_eval.REAL_MAPS` and `OBSTACLE_FREE_REAL`, `heldout.yaml` and the
+  catalog. Each is built like `car2_course_2026_10_30`: the `_scans` walls,
+  closed by the filled map shrunk 0.25 m, then `reachable_free`. Upstream's
+  `car2_course_2026_11_06b_scans_centerline.csv` is a symlink to the plain
+  course's centreline; here it is a copy. Both courses loop round a thin
+  divider, like car 1's.
+- `tracklib-v4` (built with `python -m neural_racer_train.tracklib --config v3
+  --real car1_course_2026_10_26,car2_course_2026_11_06a_clean,car2_course_2026_11_06b_clean
+  --real-copies 10`): v3's tracks plus every variant of those three courses.
+- `eval_worker --a-lat --tag --only`: a crossplay at other caps writes to
+  `<archive>/eval-<tag>/`, beside the standard one (the release crossplay at
+  deploy speed); `--only` races just the named entries.
+
+### neural_racer_train — the floor's real grip, the car's real top speed (teacher v9)
+
+The cars' recorded `/drive` commands were replayed open loop through
+gpu_sim's actuation and single-track model, at several values of `mu`, and
+compared with each car's gyro. Car 1 (runs 20261030-175701 and
+20261026-194913) matched at `mu` ≈ 0.5–0.55. Car 2 (20261030-184556 and
+-185036) matched at ≈ 0.4: yaw gain 0.69–0.81 by speed band, lateral
+acceleration p99 3.25 m/s². Car 2's own analysis
+(`data/rb2/.../20261026-174911/analysis/yaw_tracking.txt`) puts its grip limit
+near 2.0 m/s² and its steering lag at 145 ms. Training drew `mu` from
+0.40–1.10, so both real floors sat at its bottom end.
+
+- **`mu` is drawn from 0.30–0.80** (was 0.40–1.10).
+- **The car's top speed is 5.05 m/s** (`speed_max` 23250/4600, was 23250/3650
+  = 6.37). Car 1's motor command gain is 4600 since `main` ea5f114 (it
+  delivered 0.79 of every command at 3650). `learn.V_CAP_RANGE` is 1.0–5.05.
+- `fidelity`: `NR_SIM_ROOT` makes the referee use another workspace's
+  `tools/f1tenth_sim` (with its `src/gap_follow` and `src/pure_pursuit`), so
+  the bench can race the team's current algorithms from an upstream checkout.
+- `./run.sh teacher9 [plain|masked]`: from teacher v8's best.pt on
+  `tracklib-v3r10`, which is v3 with 10 copies of each car-1 variant, not 40.
+  The longer v8 trained, the more it learnt car 1's course itself: 0.36 →
+  0.64 there, while car 2's course fell 0.56 → 0.24 and levine_blocked 0.94
+  → 0.64.
+
+### neural_racer_train — teacher v8, from teacher v7's last update
+
+distill-v5 (teacher v7, tracklib-v3) finished in one segment each: 85.6% of
+held-out races at its best, level with distill-v4-full's 85.0%. Car 1's
+course: 25% (full) and 75% (masked), against 0% for distill-v4 (4 races
+each, so read these as a direction, not a number). Car 2's course: 50% and 75%.
+
+- `teacher.py --init-actor best|latest`: with `--init-from`, start from the
+  run's best.pt actor (as before) or from its latest.pt. Teacher v7's best.pt
+  is its update 100, chosen on the procedural tracks, but car 1's course kept
+  improving to its last update (rerace finish 0.22 → 0.30).
+- `./run.sh teacher8 [plain|masked]`: teacher v7 (or v7-masked) trained on
+  for another 5e8 steps on `tracklib-v3`, from its latest actor.
+
+### neural_racer_train — job logs on scratch
+
+- `run.sh` and `fir_league_submit.sh` send every job's log to
+  `$SCRATCH/neural_racer/logs/%x-%j.out`. Before, logs landed in the
+  workspace root, beside the runs' code.
+
+### neural_racer_train — car 1's course in the held-out races
+
+- `car1_course_2026_10_26`, the cleaned SLAM map of car 1's run
+  20261026-194514 (31.1 m lap, 1.06–1.52 m wide), is the fifth real map
+  (`heldout.REAL`, `teacher_eval.REAL_MAPS`, `heldout.yaml`). The student eval
+  that picks distillation's and the league's `best.pt` now races the course
+  the car drives, and the CPU referee can race it too. The map files come
+  from `origin/main`'s `tools/f1tenth_sim/maps`.
+
+## 2026-10-29 — neural_racer safety wrapper brakes on the swept path, as gap_follow does
+
+The first distill-v2 run (Fir job 1084316, 2 h 50 min) trained a student that
+finished 0% of its held-out races, and the teacher, raced in the same
+student world, also finished 0% (98% in its own races). The wrapper's LiDAR
+braking cap took the nearest return in *any* direction, so a corridor's side
+walls capped the speed: it bound on 99.6% of ticks at ~0.3 m/s, and the
+held cars counted as stalled (crashed). The rest of the sweep was cancelled
+before it started.
+
+### neural_racer (car side)
+
+- **Behavior change, `SafetyWrapper.apply` step 5**: the braking cap's
+  clearance is `gap_logic.swept_path_clearance` (how far the body, plus a
+  margin, can drive along the arc it steers before reaching a return),
+  over gap_follow's 180° forward window, for both the arc asked for and the
+  slew-limited one. Before, it was `minimum_footprint_clearance` over
+  all 270°. Same reserve, deceleration and latency. `WrapperResult.clearance`
+  is now that free length.
+- **New parameters** (`WrapperConfig`, `neural_racer.yaml`, the node), all
+  gap_follow.yaml's: `forward_fov_deg` 180, `swept_clearance_margin` 0.05 m,
+  `swept_clearance_max_length` 3.0 m. `test_config` holds them equal to
+  gap_follow's.
+- Tests: driving straight down a 0.6–1.5 m corridor is not braked. Steering
+  into its wall is. A return beside the body stops the car. Returns behind
+  the forward window are ignored.
+
+### neural_racer_train
+
+- `SafetyTorch.swept_clearance`: the same clearance, batched;
+  `test_swept_clearance_matches_gap_logic` holds it to gap_logic's on
+  corridors at every steering. A scripted driver with the wrapper on now
+  runs 2.06 m/s against 2.08 without it (before the fix it was 1.09 m/s,
+  with the braking cap active on 90% of ticks).
+- `distill.py`: a new run stops before training if the teacher, raced in
+  the student's world, finishes under `--min-teacher-finish` (0.8), or the
+  braking cap binds on more than `--max-teacher-stop` (0.2) of its ticks.
+- `student_eval.evaluate` races the three episode types in one batch
+  (`Evaluator.races(episode_type=[...])`, `teacher_eval.split`), about 3×
+  faster. `races()` now returns its tick counts and lateral-acceleration
+  histogram per race.
+- `./run.sh distill-sweep` names its runs `distill-v3-*`.
+
+### neural_racer_train — teacher v5 inside the whole wrapper
+
+Even with the swept path, teacher v4 finished 1 of 8 student-world races
+(6 of 8 without the wrapper). Six of the seven failures were stalls: it
+races 2–12 cm from walls, inside the swept band's 5 cm side margin, where
+the braking cap is zero, so the wrapper held it. With no margin, 4 of 8
+finished and the rest braked late into a wall from up to 5.6 m/s. v4
+trained with the wrapper off and never met either limit.
+
+- `teacher.py --safety on` (already in the trainer, so far unused) is teacher
+  v5's regime. Every race (held-out, final and rerace) now has the wrapper on
+  too (`wrapper` plan entries, `teacher_eval.evaluate_file`). Because they cast
+  the LiDAR, those races run on the GPU between updates instead of in the
+  CPU worker. The training log adds `safety_stop` (share of live ticks the
+  braking cap bound).
+- `./run.sh teacher5 [plain|masked] [seeds]`: fine-tunes 5e8 steps with
+  `--safety on --cap-mode squash`. `plain` starts from teacher-v4 seed 1,
+  `masked` from teacher-v4-masked.
+
+### neural_racer_train — the Fir job environment installs triton
+
+`requirements-fir.txt` never listed triton, so every training job's LiDAR
+cast ran on the PyTorch fallback. Only the GPU check installed triton by
+hand. distill-v2 rolled out at 2.7e4 steps/s and teacher v5's first segment
+at 3.6e4, with the GPU at 100%. The Triton kernel is about 6x faster on an
+H100 (gpucheck 1030003). triton is now in the list, and `fir_env.sh` prints
+which backend the cast will use.
+
+## 2026-10-28 — neural_racer teacher v4 inside the car's cornering cap; observation spec v2; distillation and league rebuilt
+
+teacher-v3 finished 99.1% of 320 fresh held-out races with no cornering cap,
+but 36.2% when held to the car wrapper's 2.0 m/s² curvature cap (it trained
+with the wrapper off and cornered at 4.6 m/s², 95th percentile). This
+session builds training plan step 1 and the trainer/network plan's items
+(`docs/superpowers/specs/2026-10-28-neural-racer-*.md`). Teacher v4 jobs are
+submitted on Fir; nothing here is measured at scale yet.
+
+### neural_racer (car side) — observation spec v2
+
+- **`OBS_SPEC_VERSION` 1 → 2; ego 23 → 24 values**: `ego[23]` is the
+  cornering cap the wrapper holds the speed to, over `A_LAT_SCALE` (5 m/s²).
+  `build_observation` now requires `a_lat=`; the node passes its configured
+  `max_lateral_accel`. A v1 model is refused by `model_store` (spec version
+  check). FULL student 646,274 → 646,338 parameters.
+
+### neural_racer_train
+
+- **Cornering cap per race** (`Level.a_lat_cap`, `learn.A_LAT_RANGE` 2–5
+  m/s², 40% of levels exactly 2.0, drawn last so a level's other draws are
+  unchanged). The wrapper uses it (`SafetyTorch.apply_detailed(...,
+  max_lateral_accel=)`); with the wrapper off, `sim.curvature_cap = True`
+  still holds the speed to it (it needs only the steering). `curv_cut` (m/s
+  the cap removed) is in `step()`'s output; `RewardConfig.curvature` (default
+  0) charges it.
+- **Privileged input 298 → 363**: the cornering cap, then a known-flag per
+  track point (`PRIV_A_LAT`, `PRIV_VIS`), read by the track convolution as a
+  fifth channel. `model.load_expanded` loads older checkpoints with zero
+  weights on the new inputs (same outputs); `RunningNorm.set_columns`.
+- **Teacher speed squash** `model.capped_squash`: speed spans 0 to
+  min(v_cap, curvature cap at the steering the car will apply after the slew
+  limit), so the cap never cuts it. Checkpoints carry `'squash'`
+  (`teacher_squash(mode)`); absent means the old plain squash.
+- **teacher.py**: `--cap-mode squash|penalty|off`, `--cap-penalty`,
+  `--a-lat-range`, `--init-from RUN` (best actor + last critic, widened),
+  `--init-std`, `--ema` (averaged actor, 0.99/update), `--anneal-frac/-kl`
+  (KL target shrinks over the last 20%), `--mask-share` (item 2.3: hide the
+  track points the LiDAR cannot see from the actor in that share of
+  episodes' reactive-mode ticks; `sim.track_visibility`, `lidar.line_of_sight`,
+  `model.mask_track`), `--rerace-top/-starts` (top 5 snapshots raced again on
+  1000 fresh races on the GPU at the end; that sets best.pt), fused Adam.
+  `--eval-starts` 4 → 8 plus `--eval-fresh` 8, `--eval-threads` 4 → 7.
+  On SIGUSR1 the held-out race worker is terminated, not awaited: Python's
+  exit waits for a running work item, which could outlast the 10-minute
+  warning, end the job in TIMEOUT and cancel its chained segment. One race
+  of the whole plan (560 races at the 2.0 cap) takes the CPU worker about
+  14 min on Fir, so while training runs the worker races the main entry
+  (and the masked one) only; when training ends, a race still on the CPU is
+  dropped and the last snapshot races the whole plan on the GPU (before,
+  the GPU sat idle up to ~30 min waiting on two CPU races).
+  `teacher_eval.evaluate_file(device=)`. best.pt is written with
+  `common.save_checkpoint` (the smoke run with `--eval-every 10` crashed:
+  its first result came in before any save had made `checkpoints/`).
+- **ppo.Update**: the teacher's update, shared (item 1.1): separate
+  optimisers and clips, critic first, actor frozen during warm-up, KL-adaptive
+  step measured from each minibatch's own forward pass before its step (no
+  third forward; the first minibatch's KL is zero and is skipped);
+  `ppo.accumulate` and `ppo.kl_config` moved here.
+- **teacher_eval.py**: 320 races (fixed + fresh starts), at the car's 2.0
+  cap; Wilson 95% interval (`finish_lo/hi`), best.pt chosen on its lower
+  bound; results by v_cap bin and track; lateral-acceleration percentiles;
+  curvature-cut share; `ref_ratio`, race time over the minimum-curvature
+  line's at the same caps (`raceline_ref.py`, gate G5); students with the
+  whole wrapper (`races(wrapper=True, episode_type=, mask=)`).
+- **student_eval.py** (new): a student raced as the car runs it, per episode
+  type, with the teacher and scripted gap_follow as references, on the
+  procedural held-out tracks and the four real course maps.
+- **realmaps.py** (new, step 3c): the real maps as pool tracks: resampled to
+  5 cm (`circular_obs` is 1.3 cm), cropped to the free space, widths measured
+  along the centreline normals; obstacles stay in the grid. On a real map a
+  start that puts a car within 18 cm of a wall is re-drawn.
+- **distill.py**: labels are the teacher's own (capped) commands; per-type
+  held-out eval every `--eval-every` updates and `best.pt` by its lower
+  bound; `PolicyNet.unroll` runs the encoders over a whole rollout and steps
+  only the GRU (item 1.4; `--micro` envs per backward); `--width
+  full|half|wide`, `--memory gru|none`, `--latent` (training-only head on the
+  teacher's encoding, item 2.5), `--teacher-mask`, `--library`,
+  `--a-lat-range`; crash, intervention and cut rates logged.
+- **league_learner.py**: rebuilt on `ppo.Update` with `ValueNorm`, critic
+  warm-up (`--critic-warmup` 20), `--critic-from` (a teacher's critic),
+  critic normaliser updates, `--actor-lr` 2e-5, batched `unroll`, and
+  kickstarting (`--teacher`, `--kickstart`, `--kickstart-frac`, item 1.7).
+- **LiDAR as one Triton kernel** (`gpu_sim/lidar_triton.py`, item 1.3): each
+  beam marches in registers and a block stops when no beam moved; car boxes
+  in the same launch. `lidar.cast` uses it on a GPU with Triton
+  (`NR_LIDAR=torch` forces the PyTorch cast, now `lidar.cast_reference`).
+  Parity test `tests/test_lidar_triton.py` (GPU only). Not yet measured.
+- **Run records** (item 1.8): every stage appends `run.jsonl` (args, commit,
+  hash of the uncommitted changes) and writes `code-<job>.tar.gz` of them.
+- **run.sh**: `teacher4 [squash|penalty|masked] [seeds]`, `distill-sweep`.
+  `fir_train.sbatch`: no CPU referee workers for distill.
+- Tests: `test_distill.py`, `test_league.py`, `test_lidar_triton.py`, and
+  teacher v4 tests in `test_teacher.py`. On Fir CPU nodes everything passes
+  except the known F1TENTH Gym imports (libgio).
+
+## 2026-10-27 — neural_racer teacher-v3: a training regime that can finish 3 laps
+
+The teacher-v1/v2 runs never produced a policy as good as the scripted driver
+they started from (held-out: 65–98% of races crashed, 0–15% finished).
+Measured causes: a behaviour-cloned start that crashed every race; a reward
+and discount (5 s horizon) that tolerated a crash every ~1000 ticks over a
+3600-tick race; 66% of training on 10 of 304 tracks; a teacher input missing
+the commands in its actuator delay lines; obstacles it could not see; and
+92% of each tick spent on a LiDAR cast nothing read. In a 30-minute H100
+smoke run (2.6e8 steps) the held-out finish rate rose from 64% after the
+warm start to 91% (crashes 36% → 9%); the scripted driver it clones finishes
+71%. Not yet run at full scale.
+
+### neural_racer_train
+
+- **Sim without sensors** (`BatchedRaceSim(sensors=False)`): no LiDAR, IMU or
+  observation history, for the teacher, which reads only `privileged()`. The
+  cast was 92% of a tick: 17.6k → 232k steps/s at 8192 envs, 672k at 32768
+  (H100). A reset now casts only the envs it resets (it re-cast all of them,
+  218 ms a tick). The safety wrapper refuses to run without sensors.
+- **Privileged input, 286 → 298 values** (`PRIV_DIM`; old checkpoints do not
+  load): the commands still in the steering (4) and speed (3) delay lines —
+  without them a memoryless teacher's state is not Markov — and 5 unobserved
+  car parameters (steering gain, cornering stiffnesses, servo gain, yaw
+  inertia). `PRIV_BASE` keeps the first 286 where the scripted drivers read them.
+- **TeacherNet / Critic**: a 1-D convolution along the 64-point track preview,
+  an MLP on the running-normalised rest (`RunningNorm`, saved in the
+  checkpoint), LayerNorm fusion; the policy's last layer starts 100× small;
+  the time-left input is masked (the episode limit is bootstrapped, a 3-lap
+  race has none).
+- **teacher.py**: DAgger warm start on scripted pursuit, loss on the squashed
+  commands (behaviour cloning had left a clone that crashed every race);
+  separate actor and critic optimisers and gradient clips (one joint clip
+  shrank the actor's step to 20–51%); normalised returns (`ppo.ValueNorm`);
+  KL-adaptive actor step from 2e-5; γ 0.995 → 0.998; wall cost 25 + 15(v/4)²
+  (was 5 + 15(v/4)²), stall 40; 180 s training episodes. New flags:
+  `--library`, `--gamma`, `--lam`, `--actor-lr`, `--wall`, `--wall-min`,
+  `--max-seconds`, `--eval-every`, `--eval-starts`, `--eval-threads`;
+  `--warm-start-steps` now 1e7. Each PPO minibatch is computed in pieces of
+  at most 131k samples (`teacher.accumulate`, the same gradient): at 32768
+  envs a whole minibatch, up to 524k samples, ran the H100's allocator out.
+- **Held-out race during training** (`teacher_eval.py`, also a CLI): every
+  `--eval-every` updates a CPU process races a snapshot on the 20 held-out
+  tracks (obstacles removed), up to 300 s, and logs finish rate, finish rate
+  where 3 laps are feasible, crash hazard per tick, laps and speed as
+  `kind: eval` lines. The best is `checkpoints/best.pt`; distillation starts
+  from it.
+- **GAE** (`ppo.gae(rewards, values, next_values, terminal, done, ...)`): a
+  step cut by the time limit bootstraps from the state it reached, not the
+  next episode's first state. League learner updated to match, and its
+  policy and critic gradients are clipped apart.
+- **PLR**: scores are credited step by step to the level actually played
+  (they went to whatever level the env held after the rollout, and episodes
+  shorter than a rollout were never scored); temperature 0.3 → 1 (0.3 gave
+  the top level 87% of score-weighted draws); `Runner(level_cap=...)` limits
+  envs per level (default 1 per 1024); the sampling distribution is cached
+  for 16 draws and a full buffer evicts its bottom 5% at once.
+- **Tracks**: training tracks have no obstacles until after the league (team
+  decision); `learn.TRAIN_TRACKS`. New `tracklib.py`: a pre-generated library
+  (8192 tracks in 100 s on 32 cores) that fills the GPU pool at start-up (a
+  run had reached only 304 tracks in 20 minutes). Pool eviction is one pass
+  over the levels instead of one per slot.
+- **Scripted pursuit** also brakes for bends up to 16 m ahead, and caps its
+  bend acceleration at 60% of μg; it never drives faster than before
+  (held-out, 160 races: 70.6% finished against 69.4%).
+- `Runner.refresh_tracks` keeps 2 requests per worker in flight, and does
+  nothing without workers (it generated tracks in-process every update).
+
+### slurm
+
+- New `fir_tracklib.sbatch` and `fir_run.sh tracklib`; `fir.conf` gains
+  `NR_TEACHER_ENVS=32768` and `NR_TRACKLIB`, and `NR_TEACHER_RUN=teacher-v3`;
+  the teacher stage starts no archive referees; `distill` starts from `best.pt`.
+- `fir_train.sbatch` sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+  (the PPO batch changes size every update, since only replayed levels train).
+
+### Tests
+
+- New `test_teacher.py` (23); GAE tests updated and a timeout-bootstrap test
+  added in `test_training_units.py`.
+- New `clean_sys_path` fixture (`conftest.py`). The gym modules' skip marks
+  put `.sim/` (its own scipy and numpy) first on `sys.path` at collection,
+  and spawned workers inherit it: the library test's pool never returned,
+  and the full suite ran into its time limit.
+- Full suite on Fir (CPU): 112 passed. The 9 tests that import the F1TENTH
+  Gym fail on Fir's `libgio` (`g_source_set_static_name`), as before.
+
+## 2026-10-24 — Gyro odometry for SLAM; every mapping run recorded and explained
 
 For the first IMU mapping test (A/B, `docs/launchstart.md#testing-the-imu-in-mapping-ab`).
 Built and checked off the car: **not yet driven on.**

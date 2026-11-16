@@ -1,17 +1,47 @@
+import json
 import math
 
 import numpy as np
 import rclpy
 from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 from rclpy.node import Node
-from sensor_msgs.msg import LaserScan, Joy
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
+from sensor_msgs.msg import Imu, JointState, LaserScan, Joy
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import String
 
 from drive_intent import predict, schema
 from drive_intent.throttle import FailureLatch, IntentThrottle
-from gap_follow import gap_logic, live_tuning, opponent_tracking
+from gap_follow import gap_logic, launch_boost, live_tuning, opponent_tracking
+
+# /imu/status is latched by imu_bridge (its STATUS_QOS), so a node started
+# after the bridge still gets the current verdict at once.
+IMU_STATUS_QOS = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                            reliability=QoSReliabilityPolicy.RELIABLE)
+
+UNDERSTEER_DEFAULTS = {
+    'imu_understeer_engage_ratio': 0.75,
+    'imu_understeer_release_ratio': 0.85,
+    'imu_understeer_speed_factor': 0.85,
+    'imu_understeer_hold_sec': 0.2,
+    'imu_understeer_timeout_sec': 0.1,
+    'imu_understeer_steering_lag_sec': 0.15,
+    'imu_understeer_max_steering_change': 0.05,
+}
+
+TRACTION_DEFAULTS = {
+    'imu_traction_slip_threshold': 0.246,
+    'imu_traction_release_slip': 0.123,
+    'imu_traction_min_speed': 0.3,
+    'imu_traction_max_hold_sec': 0.5,
+    'imu_traction_timeout_sec': 0.2,
+}
+
+IMPACT_DEFAULTS = {
+    'imu_impact_threshold': 33.7257297468959,
+    'imu_impact_min_samples': 1,
+}
 
 
 class GapFollowNode(Node):
@@ -28,8 +58,34 @@ class GapFollowNode(Node):
         super().__init__('gap_follow_node')
 
         self.declare_parameter('scan_topic', '/scan')
+        self.declare_parameter('enable_imu_impact_stop', False)
+        self.enable_imu_impact_stop = self.get_parameter('enable_imu_impact_stop').value
+        for name, default in IMPACT_DEFAULTS.items():
+            self.declare_parameter(name, default)
+        self.imu_impact_threshold = self.get_parameter('imu_impact_threshold').value
+        self.imu_impact_min_samples = self.get_parameter('imu_impact_min_samples').value
+        self.impact_latch = gap_logic.ImpactLatch(
+            self.imu_impact_threshold, self.imu_impact_min_samples)
+        self.impact_force = math.nan
+        self.impact_time = None
+        self.impact_sample_force = math.nan
         self.declare_parameter('drive_topic', '/drive')
         self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('fused_odom_topic', '/odom/fused')
+        self.declare_parameter('wheel_odom_topic', '/odom')
+        self.declare_parameter('enable_imu_traction', False)
+        self.enable_imu_traction = self.get_parameter('enable_imu_traction').value
+        for name, default in TRACTION_DEFAULTS.items():
+            self.declare_parameter(name, default)
+        traction_values = {name: self.get_parameter(name).value for name in TRACTION_DEFAULTS}
+        self._validate_traction_parameters(traction_values)
+        for name, value in traction_values.items():
+            setattr(self, name, float(value))
+        self._restart_traction()
+        self.fused_speed = math.nan
+        self.last_fused_time = None
+        self.wheel_speed = 0.0
+        self.last_wheel_time = None
         self.declare_parameter('max_range', 10.0)
         self.declare_parameter('forward_fov_deg', 180.0)
         self.declare_parameter('min_gap_distance', 1.0)
@@ -66,6 +122,46 @@ class GapFollowNode(Node):
         self.declare_parameter('max_braking_decel', 3.0)
         self.declare_parameter('max_steering_rate', 1.0)
         self.declare_parameter('command_slew_max_dt', 0.10)
+        # Steering damping from the IMU yaw rate: minus gain x yaw, added to the
+        # requested steering before the clip, the arc guard and the slew limit.
+        # Ships OFF. Used only while /imu/status is 'ok' and /imu/data is fresh;
+        # otherwise it adds exactly zero. See gap_logic.steering_damping and
+        # docs/gap-follow.md#steering-damping-gyro.
+        self.declare_parameter('enable_steering_damping', False)
+        self.declare_parameter('steering_damping_gain', 0.0)
+        self.declare_parameter('imu_topic', '/imu/data')
+        self.declare_parameter('imu_status_topic', '/imu/status')
+        self.declare_parameter('imu_timeout_sec', 0.1)
+        # Adaptive grip (docs/gap-follow.md#adaptive-grip-imu): the lateral limit
+        # behind the curvature speed caps starts at max_lateral_accel, rises while
+        # the gyro says the tyres are making the turn the rack asks for, and is
+        # cut when they are not. Ships OFF. It trusts the gyro through the same
+        # gate as steering damping (_imu_gate).
+        self.declare_parameter('enable_adaptive_grip', False)
+        self.declare_parameter('adaptive_grip_ceiling', 3.0)
+        self.declare_parameter('adaptive_grip_rise_per_s', 0.2)
+        self.declare_parameter('adaptive_grip_cut_factor', 0.85)
+        self.declare_parameter('adaptive_grip_hold_ratio', 0.95)
+        self.declare_parameter('adaptive_grip_slip_ratio', 0.90)
+        self.declare_parameter('adaptive_grip_judge_fraction', 0.8)
+        # The measured yaw trails the rack, so the yaw is judged against the
+        # steering from adaptive_grip_steering_lag_sec ago, and only while the
+        # steering has moved no more than adaptive_grip_max_steering_change over
+        # that window (quasi-steady). Otherwise the tick is not judged.
+        self.declare_parameter('adaptive_grip_steering_lag_sec', 0.15)
+        self.declare_parameter('adaptive_grip_max_steering_change', 0.05)
+        self.declare_parameter('enable_imu_understeer', False)
+        for name, default in UNDERSTEER_DEFAULTS.items():
+            self.declare_parameter(name, default)
+        self.enable_imu_understeer = self.get_parameter('enable_imu_understeer').value
+        understeer_values = {name: self.get_parameter(name).value
+                            for name in UNDERSTEER_DEFAULTS}
+        self._validate_understeer_parameters(understeer_values)
+        for name, value in understeer_values.items():
+            setattr(self, name, float(value))
+        self._restart_understeer()
+        self.measured_steering = math.nan
+        self.last_measured_steering_time = None
         # Padded collision envelope around this car's rear-axle base_link.
         # wheelbase, laser_offset_x and the 0.30 m the car measures over the
         # tires were tape-measured 2026-08-24; car_width is that 0.30 m plus
@@ -298,6 +394,15 @@ class GapFollowNode(Node):
         self.scan_topic = self.get_parameter('scan_topic').value
         self.drive_topic = self.get_parameter('drive_topic').value
         self.odom_topic = self.get_parameter('odom_topic').value
+        self.fused_odom_topic = self.get_parameter('fused_odom_topic').value
+        self.wheel_odom_topic = self.get_parameter('wheel_odom_topic').value
+        self.using_fused_speed = self.odom_topic == self.fused_odom_topic
+        self._fused_imu_reason = 'no imu'
+        for name in ('fused_odom_topic', 'wheel_odom_topic'):
+            if not isinstance(getattr(self, name), str) or not getattr(self, name).strip():
+                raise ValueError(f'{name} must be a nonempty topic')
+        if self.fused_odom_topic == self.wheel_odom_topic:
+            raise ValueError('wheel_odom_topic must differ from fused_odom_topic')
         self.max_range = self.get_parameter('max_range').value
         self.forward_fov = math.radians(self.get_parameter('forward_fov_deg').value)
         self.min_gap_distance = float(
@@ -324,6 +429,31 @@ class GapFollowNode(Node):
             self.get_parameter('max_steering_rate').value)
         self.command_slew_max_dt = float(
             self.get_parameter('command_slew_max_dt').value)
+        self.enable_steering_damping = bool(
+            self.get_parameter('enable_steering_damping').value)
+        self.steering_damping_gain = float(
+            self.get_parameter('steering_damping_gain').value)
+        self.imu_topic = self.get_parameter('imu_topic').value
+        self.imu_status_topic = self.get_parameter('imu_status_topic').value
+        self.imu_timeout_sec = float(self.get_parameter('imu_timeout_sec').value)
+        self.enable_adaptive_grip = bool(
+            self.get_parameter('enable_adaptive_grip').value)
+        self.adaptive_grip_ceiling = float(
+            self.get_parameter('adaptive_grip_ceiling').value)
+        self.adaptive_grip_rise_per_s = float(
+            self.get_parameter('adaptive_grip_rise_per_s').value)
+        self.adaptive_grip_cut_factor = float(
+            self.get_parameter('adaptive_grip_cut_factor').value)
+        self.adaptive_grip_hold_ratio = float(
+            self.get_parameter('adaptive_grip_hold_ratio').value)
+        self.adaptive_grip_slip_ratio = float(
+            self.get_parameter('adaptive_grip_slip_ratio').value)
+        self.adaptive_grip_judge_fraction = float(
+            self.get_parameter('adaptive_grip_judge_fraction').value)
+        self.adaptive_grip_steering_lag_sec = float(
+            self.get_parameter('adaptive_grip_steering_lag_sec').value)
+        self.adaptive_grip_max_steering_change = float(
+            self.get_parameter('adaptive_grip_max_steering_change').value)
         self.car_width = float(self.get_parameter('car_width').value)
         self.car_length = float(self.get_parameter('car_length').value)
         self.wheelbase = float(self.get_parameter('wheelbase').value)
@@ -507,6 +637,44 @@ class GapFollowNode(Node):
         )
         if not all(math.isfinite(value) and value > 0.0 for value in dynamic_limits):
             raise ValueError('dynamic steering/speed limits must be finite and positive')
+        # A negative gain would steer *with* the car's rotation (positive
+        # feedback), so it is refused at startup rather than quietly ignored.
+        if not (math.isfinite(self.steering_damping_gain)
+                and self.steering_damping_gain >= 0.0):
+            raise ValueError(
+                'steering_damping_gain must be finite and non-negative (seconds)')
+        if not (math.isfinite(self.imu_timeout_sec) and self.imu_timeout_sec > 0.0):
+            raise ValueError('imu_timeout_sec must be finite and positive')
+        # Checked with the feature off as well, like steering_damping_gain: a
+        # broken value must not wait for someone to switch the feature on.
+        if not (math.isfinite(self.adaptive_grip_ceiling)
+                and self.adaptive_grip_ceiling > 0.0):
+            raise ValueError('adaptive_grip_ceiling must be finite and positive')
+        if not (math.isfinite(self.adaptive_grip_rise_per_s)
+                and self.adaptive_grip_rise_per_s >= 0.0):
+            raise ValueError(
+                'adaptive_grip_rise_per_s must be finite and non-negative')
+        if not (math.isfinite(self.adaptive_grip_cut_factor)
+                and 0.0 < self.adaptive_grip_cut_factor <= 1.0):
+            raise ValueError('adaptive_grip_cut_factor must be in (0, 1]')
+        if not (math.isfinite(self.adaptive_grip_hold_ratio)
+                and math.isfinite(self.adaptive_grip_slip_ratio)
+                and self.adaptive_grip_slip_ratio < self.adaptive_grip_hold_ratio):
+            raise ValueError(
+                'adaptive_grip_slip_ratio must be finite and below '
+                'adaptive_grip_hold_ratio, or the two bands overlap')
+        if not (math.isfinite(self.adaptive_grip_judge_fraction)
+                and self.adaptive_grip_judge_fraction >= 0.0):
+            raise ValueError(
+                'adaptive_grip_judge_fraction must be finite and non-negative')
+        if not (math.isfinite(self.adaptive_grip_steering_lag_sec)
+                and self.adaptive_grip_steering_lag_sec >= 0.0):
+            raise ValueError(
+                'adaptive_grip_steering_lag_sec must be finite and non-negative')
+        if not (math.isfinite(self.adaptive_grip_max_steering_change)
+                and self.adaptive_grip_max_steering_change >= 0.0):
+            raise ValueError(
+                'adaptive_grip_max_steering_change must be finite and non-negative')
         if not (math.isfinite(self.gap_switch_margin) and self.gap_switch_margin >= 1.0):
             raise ValueError(
                 'gap_switch_margin must be finite and at least 1.0 -- below that, a '
@@ -559,6 +727,23 @@ class GapFollowNode(Node):
         # (passing allowed) or 'follow'.
         self.opponent_last_stamp = None
         self.opponent_mode = None
+
+        # Launch boost (launch_boost.py, docs/gap-follow.md#launch-boost): full
+        # speed off the start line on the first LB press, once per node. Off
+        # unless enabled; the shipped YAML turns it on. Raises ValueError
+        # naming a bad limit, like the validators above.
+        self.declare_parameter('enable_launch_boost', False)
+        self.declare_parameter('launch_boost_max_sec', 3.0)
+        self.declare_parameter('launch_boost_max_distance', 5.0)
+        self.declare_parameter('launch_boost_end_steering', 0.0)
+        self.enable_launch_boost = bool(
+            self.get_parameter('enable_launch_boost').value)
+        self.launch_boost = launch_boost.LaunchBoost(
+            self.enable_launch_boost,
+            float(self.get_parameter('launch_boost_max_sec').value),
+            float(self.get_parameter('launch_boost_max_distance').value),
+            float(self.get_parameter('launch_boost_end_steering').value))
+        self.launch_end_reported = False
         if self.enable_corner_setup:
             self._validate_corner_setup_parameters()
         if not math.isfinite(self.ttc_command_speed_timeout_sec) or (
@@ -581,6 +766,26 @@ class GapFollowNode(Node):
         self.deadman_held = False
         self.last_joy_time = None
         self.joy_button_available = False
+        # Latest gyro sample and verdict, for steering damping. None until
+        # heard from: no sample and no verdict both mean "not trusted".
+        self.imu_yaw_rate = math.nan
+        self.last_imu_time = None
+        self.imu_state = None
+        # Adaptive grip: the lateral limit and the low-pass on its ratio. Built
+        # even with the feature off, so its checks always run, and read only
+        # when it is on. Its base follows max_lateral_accel, which is live-tunable.
+        self.adaptive_grip = gap_logic.AdaptiveGrip(
+            base=self.max_lateral_accel,
+            ceiling=max(self.adaptive_grip_ceiling, self.max_lateral_accel),
+            rise_per_s=self.adaptive_grip_rise_per_s,
+            cut_factor=self.adaptive_grip_cut_factor,
+            hold_ratio=self.adaptive_grip_hold_ratio,
+            slip_ratio=self.adaptive_grip_slip_ratio,
+            judge_fraction=self.adaptive_grip_judge_fraction)
+        self.grip_ratio_filter = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+        # The rack steering over the last lag, for the judgement (gap_logic.SteeringLag).
+        self.adaptive_steering_lag = gap_logic.SteeringLag(
+            self.adaptive_grip_steering_lag_sec)
         self.current_speed = 0.0
         self.last_odom_time = None
         self.last_commanded_speed = 0.0
@@ -656,8 +861,29 @@ class GapFollowNode(Node):
             LaserScan, self.scan_topic, self.scan_callback, 10)
         self.odom_sub = self.create_subscription(
             Odometry, self.odom_topic, self.odom_callback, 10)
+        if self.using_fused_speed:
+            self.wheel_odom_sub = self.create_subscription(
+                Odometry, self.wheel_odom_topic, self.wheel_odom_callback, 10)
+        if self.enable_imu_traction:
+            self.fused_odom_sub = self.create_subscription(
+                Odometry, self.fused_odom_topic, self.fused_odom_callback, 10)
         self.joy_sub = self.create_subscription(
             Joy, self.joy_topic, self.joy_callback, 10)
+        if self.enable_imu_impact_stop:
+            self.impact_joy_sub = self.create_subscription(
+                Joy, self.joy_topic, self.impact_joy_callback, 10)
+        # Gyro consumers share one subscription and one trust gate.
+        if (self.enable_steering_damping or self.enable_adaptive_grip
+                or self.enable_imu_understeer or self.enable_imu_traction
+                or self.using_fused_speed or self.enable_imu_impact_stop):
+            self.imu_sub = self.create_subscription(
+                Imu, self.imu_topic, self.imu_callback, 10)
+            self.imu_status_sub = self.create_subscription(
+                String, self.imu_status_topic, self.imu_status_callback,
+                IMU_STATUS_QOS)
+        if self.enable_imu_understeer:
+            self.measured_steering_sub = self.create_subscription(
+                JointState, '/steering/measured', self.measured_steering_callback, 10)
         self.status_timer = self.create_timer(
             min(0.25, self.scan_timeout_sec / 2.0), self._sensor_status_callback)
 
@@ -680,14 +906,46 @@ class GapFollowNode(Node):
         Rejecting says so out loud instead. See live_tuning.py.
         """
         requested = {parameter.name: parameter.value for parameter in parameters}
+        understeer = {name: value for name, value in requested.items()
+                      if name in UNDERSTEER_DEFAULTS}
+        traction = {name: value for name, value in requested.items() if name in TRACTION_DEFAULTS}
+        impact = {name: value for name, value in requested.items() if name in IMPACT_DEFAULTS}
+        try:
+            gap_logic.ImpactLatch.validate(
+                impact.get('imu_impact_threshold', self.imu_impact_threshold),
+                impact.get('imu_impact_min_samples', self.imu_impact_min_samples))
+            self._validate_traction_parameters({
+                name: traction.get(name, getattr(self, name)) for name in TRACTION_DEFAULTS})
+            self._validate_understeer_parameters({
+                name: understeer.get(name, getattr(self, name))
+                for name in UNDERSTEER_DEFAULTS})
+        except ValueError as exc:
+            return SetParametersResult(successful=False, reason=str(exc))
         accepted, reason = live_tuning.review(
-            self._tunables, requested, self._tunable_values,
+            self._tunables, {k: v for k, v in requested.items()
+                             if k not in understeer and k not in traction and k not in impact},
+            self._tunable_values,
             passthrough=('use_sim_time',),
             invariants=live_tuning.GAP_FOLLOW_INVARIANTS)
         if reason is not None:
             self.get_logger().warn(f'live tune rejected: {reason}')
             return SetParametersResult(successful=False, reason=reason)
 
+        for name, value in understeer.items():
+            setattr(self, name, float(value))
+        if understeer:
+            self._restart_understeer()
+        for name, value in traction.items():
+            setattr(self, name, float(value))
+        if traction:
+            self._restart_traction()
+        for name, value in impact.items():
+            setattr(self, name, value)
+        if impact:
+            # Retuning must never lift a latched stop or discard a release edge.
+            self.impact_latch.threshold = self.imu_impact_threshold
+            self.impact_latch.min_samples = self.imu_impact_min_samples
+            self.impact_latch.on_sample(0.0, 0.0, False)
         for name, value in accepted.items():
             tunable = self._tunables[name]
             previous = self._tunable_values[name]
@@ -707,6 +965,248 @@ class GapFollowNode(Node):
     def odom_callback(self, msg: Odometry):
         self.current_speed = float(msg.twist.twist.linear.x)
         self.last_odom_time = self.get_clock().now()
+
+    @property
+    def current_speed(self):
+        # Select at read time so a dropout switches every existing odometry
+        # consumer, even without another odometry callback arriving.
+        if self.using_fused_speed:
+            self._fused_imu_reason = self._imu_gate()[1]
+            if self._fused_imu_reason is not None:
+                return self.wheel_speed
+        return self._primary_speed
+
+    @current_speed.setter
+    def current_speed(self, value):
+        self._primary_speed = value
+
+    @property
+    def last_odom_time(self):
+        if self.using_fused_speed:
+            self._fused_imu_reason = self._imu_gate()[1]
+            if self._fused_imu_reason is not None:
+                return self.last_wheel_time
+        return self._primary_odom_time
+
+    @last_odom_time.setter
+    def last_odom_time(self, value):
+        self._primary_odom_time = value
+
+    def wheel_odom_callback(self, msg: Odometry):
+        self.wheel_speed = float(msg.twist.twist.linear.x)
+        self.last_wheel_time = self.get_clock().now()
+
+    def fused_odom_callback(self, msg: Odometry):
+        self.fused_speed = float(msg.twist.twist.linear.x)
+        self.last_fused_time = self.get_clock().now()
+
+    @staticmethod
+    def _validate_traction_parameters(values):
+        for name, value in values.items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError(f'{name} must be finite and positive')
+        if values['imu_traction_release_slip'] >= values['imu_traction_slip_threshold']:
+            raise ValueError('imu_traction_release_slip must be below imu_traction_slip_threshold')
+
+    def _restart_traction(self):
+        self.traction_hold = gap_logic.TractionHold(
+            self.imu_traction_slip_threshold, self.imu_traction_release_slip,
+            self.imu_traction_min_speed, self.imu_traction_max_hold_sec)
+
+    def _traction_step(self, dt):
+        """Return (holding, trusted fused ramp basis or None, off reason)."""
+        if not self.enable_imu_traction:
+            return False, None, None
+        _, why = self._imu_gate()
+        if why is None:
+            if not self._odom_fresh():
+                why = 'no fresh odometry'
+            elif self.last_fused_time is None:
+                why = 'no fused odometry'
+            elif ((self.get_clock().now() - self.last_fused_time).nanoseconds / 1e9
+                  >= self.imu_traction_timeout_sec):
+                why = 'fused odometry stale'
+            elif not math.isfinite(self.fused_speed):
+                why = 'fused speed not finite'
+        if why is not None:
+            self.traction_hold.reset()
+            return False, None, why
+        wheel = self.wheel_speed if self.using_fused_speed else self.current_speed
+        if self.using_fused_speed and (self.last_wheel_time is None or
+                (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+                >= self.odom_timeout_sec or not math.isfinite(wheel)):
+            self.traction_hold.reset()
+            return False, None, 'no fresh wheel odometry'
+        holding = self.traction_hold.update(wheel, self.fused_speed, dt)
+        # No judgement near standstill/reversing; preserve the feature-off ramp.
+        basis = (self.fused_speed if wheel >= self.imu_traction_min_speed
+                 and self.fused_speed >= self.imu_traction_min_speed else None)
+        return holding, basis, None
+
+    @staticmethod
+    def _validate_understeer_parameters(values):
+        for name, value in values.items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value)):
+                raise ValueError(f'{name} must be finite')
+        if not (0 < values['imu_understeer_engage_ratio']
+                < values['imu_understeer_release_ratio'] <= 1.5):
+            raise ValueError('imu_understeer_engage_ratio and imu_understeer_release_ratio '
+                             'must satisfy 0 < engage < release <= 1.5')
+        if not 0 < values['imu_understeer_speed_factor'] < 1:
+            raise ValueError('imu_understeer_speed_factor must be in (0, 1)')
+        for name in UNDERSTEER_DEFAULTS:
+            if name.endswith(('_sec', '_change')) and values[name] <= 0:
+                raise ValueError(f'{name} must be positive')
+
+    def _restart_understeer(self):
+        self.understeer_check = gap_logic.UndersteerCheck(
+            self.imu_understeer_engage_ratio, self.imu_understeer_release_ratio,
+            self.imu_understeer_hold_sec)
+        self.understeer_steering_lag = gap_logic.SteeringLag(
+            self.imu_understeer_steering_lag_sec)
+
+    def measured_steering_callback(self, msg: JointState):
+        # Malformed or non-finite samples invalidate the previous measurement.
+        self.measured_steering = math.nan
+        self.last_measured_steering_time = self.get_clock().now()
+        if msg.name == ['steering'] and len(msg.position) == 1:
+            self.measured_steering = float(msg.position[0])
+
+    def _understeer_cap(self, steering, dt):
+        if not self.enable_imu_understeer:
+            return math.inf, None
+        lagged = self.understeer_steering_lag.step(
+            dt, steering, self.imu_understeer_max_steering_change)
+        _, why = self._imu_gate()
+        if why is None:
+            if not self._odom_fresh():
+                why = 'no fresh odometry'
+            elif self.last_measured_steering_time is None:
+                why = 'no measured steering'
+            elif not ((self.get_clock().now() - self.last_measured_steering_time).nanoseconds
+                      / 1e9 < self.imu_understeer_timeout_sec):
+                why = 'measured steering stale'
+            elif not math.isfinite(self.measured_steering):
+                why = 'measured steering not finite'
+        ratio = (gap_logic.understeer_ratio(self.measured_steering, lagged, self.current_speed)
+                 if why is None else math.nan)
+        engaged = self.understeer_check.update(ratio, dt)
+        if not math.isfinite(ratio):
+            return math.inf, why or 'turn not judgeable'
+        return gap_logic.understeer_speed_cap(
+            engaged, self.current_speed, self.imu_understeer_speed_factor), None
+
+    def imu_callback(self, msg: Imu):
+        if (self.enable_imu_impact_stop and self.last_imu_time is not None
+                and self._imu_gate()[1] is not None):
+            # A gap in trusted data breaks a consecutive sequence, not a latch.
+            self.impact_latch.on_sample(0.0, 0.0, False)
+        self.imu_yaw_rate = float(msg.angular_velocity.z)
+        self.last_imu_time = self.get_clock().now()
+        if self.enable_imu_impact_stop:
+            ax, ay = msg.linear_acceleration.x, msg.linear_acceleration.y
+            self.impact_sample_force = gap_logic.horizontal_force(ax, ay)
+            was_latched = self.impact_latch.latched
+            self.impact_latch.on_sample(ax, ay, self._imu_gate()[1] is None)
+            if self.impact_latch.latched and not was_latched:
+                self.impact_force = self.impact_sample_force
+                self.impact_time = self.last_imu_time
+
+    def impact_joy_callback(self, msg: Joy):
+        """Independent LB edges for impact reset; never changes the deadman."""
+        pressed = (bool(msg.buttons[self.deadman_button])
+                   if len(msg.buttons) > self.deadman_button else None)
+        self.impact_latch.on_lb(pressed)
+
+    def _impact_detection_reason(self):
+        _, why = self._imu_gate()
+        if why is None and not math.isfinite(self.impact_sample_force):
+            why = 'horizontal force not finite'
+        return why
+
+    def imu_status_callback(self, msg: String):
+        try:
+            state = json.loads(msg.data).get('state')
+        except (ValueError, AttributeError):
+            state = None
+        self.imu_state = state if isinstance(state, str) else None
+        if self.enable_imu_impact_stop and self.imu_state != 'ok':
+            self.impact_latch.on_sample(0.0, 0.0, False)
+
+    def _imu_gate(self):
+        """The gyro's verdict for this tick: (yaw rate, None) while it can be
+        trusted, otherwise (None, why).
+
+        The gyro is trusted only while /imu/status says 'ok' and the latest
+        /imu/data arrived within imu_timeout_sec. Steering damping and the
+        adaptive grip both call this, so they cannot disagree about whether
+        the gyro is usable (docs/gap-follow.md#steering-damping-gyro).
+        """
+        if self.last_imu_time is None:
+            return None, 'no imu'
+        age_sec = (self.get_clock().now() - self.last_imu_time).nanoseconds / 1e9
+        if not age_sec < self.imu_timeout_sec:
+            return None, 'imu stale'
+        if self.imu_state is None:
+            return None, 'no imu'
+        if self.imu_state == 'waiting':
+            return None, 'imu waiting'
+        if self.imu_state != 'ok':
+            return None, 'imu fault'
+        if not math.isfinite(self.imu_yaw_rate):
+            return None, 'imu yaw not finite'
+        return self.imu_yaw_rate, None
+
+    def _steering_damping_term(self):
+        """This tick's steering damping in radians, and -- when the feature is
+        on but the gyro cannot be trusted -- the reason it is zero.
+
+        Any untrusted gyro adds exactly zero, which is what the node commands
+        with the feature off (docs/gap-follow.md#steering-damping-gyro).
+        """
+        if not self.enable_steering_damping:
+            return 0.0, None
+        yaw_rate, why = self._imu_gate()
+        if why is not None:
+            return 0.0, why
+        return gap_logic.steering_damping(yaw_rate, self.steering_damping_gain), None
+
+    def _lateral_limit(self, steering: float, dt: float):
+        """This tick's lateral-acceleration limit for the curvature speed caps,
+        and -- when the feature is on but the gyro cannot be trusted -- the
+        reason the limit is the plain max_lateral_accel
+        (docs/gap-follow.md#adaptive-grip-imu).
+
+        With the feature off this returns max_lateral_accel and touches no
+        state, so the node is exactly what it was before the feature existed.
+        With it on and the gyro trusted, the limit is judged from the grip ratio.
+        An untrusted gyro restarts the limit at the base.
+        """
+        if not self.enable_adaptive_grip:
+            return self.max_lateral_accel, None
+        grip = self.adaptive_grip
+        # max_lateral_accel is live-tunable and is the floor, so follow it.
+        grip.follow_base(self.max_lateral_accel, self.adaptive_grip_ceiling)
+        # The steering the yaw answers to: the rack's from a lag ago, and only
+        # while steady (gap_logic.SteeringLag). The history is recorded through an
+        # untrusted gyro too, so judging resumes at once when the gyro does.
+        judged = self.adaptive_steering_lag.step(
+            dt, steering, self.adaptive_grip_max_steering_change)
+        yaw_rate, why = self._imu_gate()
+        if why is not None:
+            grip.limit = grip.base
+            self.grip_ratio_filter.reset()
+            return grip.limit, why
+        # Measured speed, not the speed basis: the lateral acceleration is made
+        # from the speed the car has. Stale odometry gives no judgement, so the
+        # limit holds; only an untrusted gyro restarts it at the base.
+        speed = self.current_speed if self._odom_fresh() else math.nan
+        limit = gap_logic.adaptive_grip_step(
+            grip, self.grip_ratio_filter, yaw_rate, speed, judged,
+            self.wheelbase, dt)
+        return limit, None
 
     def _odom_fresh(self) -> bool:
         if self.last_odom_time is None or not math.isfinite(self.current_speed):
@@ -728,14 +1228,57 @@ class GapFollowNode(Node):
             and 0.0 <= command_age_sec <= self.ttc_command_speed_timeout_sec
         ):
             recent_command_speed = self.last_commanded_speed
-        effective_speed = gap_logic.conservative_ttc_speed(
-            self.current_speed,
+        command_args = (
             self.last_commanded_speed,
             command_age_sec,
             self.ttc_command_speed_timeout_sec,
             self.ttc_command_fallback_max_odom_speed,
         )
+        effective_speed = gap_logic.conservative_ttc_speed(
+            self.current_speed, *command_args)
+        if self.using_fused_speed:
+            # The near-zero command fallback is conditional: maxing the
+            # measurements first can switch it off. Preserve each source's
+            # independent result, especially the feature-off wheel result.
+            wheel_effective_speed = gap_logic.conservative_ttc_speed(
+                self.wheel_speed, *command_args)
+            effective_speed = max(wheel_effective_speed, effective_speed)
         return effective_speed, recent_command_speed
+
+    def _safety_speed(self):
+        """Measurement summary only; not an input to conditional safety checks."""
+        if not self.using_fused_speed:
+            return self.current_speed
+        return math.copysign(
+            max(abs(self.wheel_speed), abs(self.current_speed)), self.wheel_speed)
+
+    def _safety_odom_fresh(self):
+        if not self.using_fused_speed:
+            return self._odom_fresh()
+        if self.last_wheel_time is None or not math.isfinite(self.wheel_speed):
+            return False
+        age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+        return age < self.odom_timeout_sec and self._odom_fresh()
+
+    def _stale_odom_detail(self) -> str:
+        """Name the odometry stream that is actually stale.
+
+        With fused speed in use both streams must be fresh, and naming the
+        fused topic when the wheel /odom stopped would send a reader to the
+        wrong node.
+        """
+        stale = []
+        if self.using_fused_speed:
+            wheel_age = math.inf
+            if self.last_wheel_time is not None and math.isfinite(self.wheel_speed):
+                wheel_age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+            if not wheel_age < self.odom_timeout_sec:
+                stale.append(self.wheel_odom_topic)
+        if not self._odom_fresh():
+            stale.append(self.odom_topic)
+        names = ', '.join(f"'{topic}'" for topic in stale) or f"'{self.odom_topic}'"
+        return (f"TTC is enabled but no odometry newer than "
+                f"{self.odom_timeout_sec:.2f}s is available on {names}")
 
     def _check_odom_direction(self):
         """Warn once if /odom reports motion opposing the commanded direction.
@@ -822,14 +1365,16 @@ class GapFollowNode(Node):
         if not deadman_ok:
             self._stop(stop_state, stop_detail)
             return
-        self._check_odom_direction()
-        if self.enable_ttc and not self._odom_fresh():
+        if self.impact_latch.latched:
             self._stop(
-                'odometry_stale',
-                f"TTC is enabled but no odometry newer than "
-                f"{self.odom_timeout_sec:.2f}s is available on "
-                f"'{self.odom_topic}'",
-            )
+                'imu_impact_stop',
+                f'horizontal force {self.impact_force:.6f}m/s^2 at '
+                f'{self.impact_time.nanoseconds / 1e9:.9f}s; '
+                'release LB and press it again to resume')
+            return
+        self._check_odom_direction()
+        if self.enable_ttc and not self._safety_odom_fresh():
+            self._stop('odometry_stale', self._stale_odom_detail())
             return
 
         if not scan.ranges:
@@ -1043,7 +1588,25 @@ class GapFollowNode(Node):
         # model the body's own width themselves.
         raw_window = window
         follow_cap = math.inf
-        if self.opponents is not None and self.opponents.moving_body():
+        alongside_cap = math.inf
+        # Launch boost: this tick ignores opponents if the launch is running,
+        # or is armed and this is a driving tick that will start it below (not
+        # creeping, not an escape). The speed stage re-checks after the end
+        # conditions.
+        launching = self.launch_boost.active or (
+            self.launch_boost.armed and not creeping
+            and not (emergency_tripped or ttc_tripped))
+        if launching:
+            # Launch boost: opponents are ignored for the start. The plain
+            # search still reads the real scan, so the other cars remain
+            # obstacles to steer around; only the avoidance footprints, the
+            # follow cap and the alongside cap are skipped.
+            (window, closest_dist, gap_start, gap_end, used_fallback,
+             target_idx_in_window, near_bearing) = self._select_gap(
+                window, window_valid, scan.angle_increment, beam_angles)
+            if self.opponents is not None:
+                self.opponent_mode = 'launch'
+        elif self.opponents is not None and self.opponents.moving_body():
             # Another car is moving nearby. Search twice: once with its
             # predicted footprint inflated (opponent_tracking.inflate_
             # predicted), once on the real scan. The inflated answer is used
@@ -1055,15 +1618,40 @@ class GapFollowNode(Node):
             plain = self._select_gap(
                 window, window_valid, scan.angle_increment, beam_angles)
             passing = (self.opponents.may_pass(self.steering_basis)
-                       and opponent_tracking.avoidance_usable(avoid[2:5], plain[2:5]))
+                       and opponent_tracking.avoidance_usable(
+                           avoid[2:5], plain[2:5],
+                           gap_width=self.opponents.passing_gap_width(
+                               window, beam_angles, avoid[2:5]),
+                           required_width=self.car_width
+                           + 2 * self.opponents.params.passing_margin))
             self.opponent_mode = 'clear' if passing else 'follow'
             (window, closest_dist, gap_start, gap_end, used_fallback,
              target_idx_in_window, near_bearing) = avoid if passing else plain
-            follow_cap = self.opponents.follow_cap(passing)
+            follow_cap = self.opponents.follow_law_cap(passing)
+            alongside_cap = self.opponents.alongside_cap(passing)
         else:
             (window, closest_dist, gap_start, gap_end, used_fallback,
              target_idx_in_window, near_bearing) = self._select_gap(
                 window, window_valid, scan.angle_increment, beam_angles)
+
+        if (self.opponents is not None and self.opponent_mode is None
+                and not launching and self.opponents.followed_body()):
+            self.opponent_mode = 'follow'
+            follow_cap = self.opponents.follow_law_cap(passing=False)
+            alongside_cap = self.opponents.alongside_cap(passing=False)
+
+        # The follow cap outlives its car: it is held for opponent_follow_memory_sec
+        # after the car was last seen (opponent_tracking.FollowCapMemory). Only the
+        # speed ceiling is held, never a steering command or a stop, and the scan
+        # stamp is its clock, as it is for the tracker. It comes before the
+        # no_safe_gap stop below. The alongside-abort ceiling is added after the
+        # memory, so it binds only on scans that see the alongside car.
+        if self.opponents is not None:
+            follow_cap, held = self.opponents.follow_memory.update(
+                follow_cap, self.opponent_last_stamp)
+            if held:
+                self.opponent_mode = 'follow_memory'
+            follow_cap = min(follow_cap, alongside_cap)
 
         if gap_start is None:
             if emergency_tripped or ttc_tripped:
@@ -1106,9 +1694,11 @@ class GapFollowNode(Node):
         if emergency_tripped:
             creeping = True
             trip_detail = emergency_detail
+            self.launch_boost.end('emergency_escape')
         elif ttc_tripped:
             creeping = True
             trip_detail = ttc_detail
+            self.launch_boost.end('ttc_escape')
 
         # Only the real driving decision updates the hysteresis basis -- this
         # is that decision whether this tick is an ordinary one or an escape,
@@ -1165,8 +1755,12 @@ class GapFollowNode(Node):
         # the heading loop keeps its phase margin (gap_logic.speed_scheduled_gain).
         bearing_gain = self.steering_gain * gap_logic.speed_scheduled_gain(
             self._speed_basis(), self.steering_gain_speed_ref)
+        # Steering damping opposes the car's measured yaw rate. It joins the
+        # request here, so the clip, the arc guard and the slew limit all check
+        # the damped command (docs/gap-follow.md#steering-damping-gyro).
+        damping, damping_off = self._steering_damping_term()
         requested_steering = float(np.clip(
-            bearing_gain * target_angle + centering_bias + setup_bias,
+            bearing_gain * target_angle + centering_bias + setup_bias + damping,
             -self.max_steering_angle,
             self.max_steering_angle,
         ))
@@ -1186,6 +1780,31 @@ class GapFollowNode(Node):
                 self.laser_offset_x, self.laser_offset_y,
                 self.max_steering_angle, self.arc_guard_max_correction,
                 self.arc_guard_candidates, self.arc_guard_blocked_fallback)
+        # Launch boost: drive straight while the straight path is clear. A car
+        # alongside fills part of the forward window, and the gap logic and
+        # centering would steer away from it (~0.23 rad in the parity scene),
+        # which the curvature cap then turns into a slow, veering start. Only
+        # the body's own straight path decides: clear for the stopping distance
+        # (at least arc_guard_length, at most swept_clearance_max_length) and
+        # the car holds straight, with steering damping only; anything in it
+        # (a car cutting in, the wall at the end) hands back to gap steering.
+        straight_room = math.nan
+        if launching and not creeping:
+            straight_room = gap_logic.swept_path_clearance(
+                raw_window, window_valid, beam_angles, 0.0,
+                self.car_width / 2.0 + self.swept_clearance_margin,
+                self.car_length, self.wheelbase,
+                self.laser_offset_x, self.laser_offset_y,
+                self.swept_clearance_max_length)
+            needed = min(self.swept_clearance_max_length, max(
+                self.arc_guard_length,
+                self._speed_basis() ** 2 / (2.0 * self.max_braking_decel)
+                + self.forward_stop_clearance))
+            if straight_room >= needed:
+                requested_steering = desired_steering = float(np.clip(
+                    damping, -self.max_steering_angle, self.max_steering_angle))
+            else:
+                straight_room = math.nan
         now, command_dt = self._command_timing()
         steering_basis_before = self.steering_basis
         steering_angle = gap_logic.slew_rate_limit(
@@ -1195,6 +1814,9 @@ class GapFollowNode(Node):
             self.max_steering_rate,
         )
         self.steering_basis = steering_angle
+        # The lateral limit both curvature caps below use: max_lateral_accel,
+        # or the adaptive grip's judged limit (docs/gap-follow.md#adaptive-grip-imu).
+        lateral_limit, grip_off = self._lateral_limit(steering_angle, command_dt)
 
         # Use the clipped requested curvature for the lateral-acceleration
         # ceiling, so speed falls before the rate-limited rack reaches a newly
@@ -1203,7 +1825,7 @@ class GapFollowNode(Node):
         # command immediately.
         limited_curvature = math.tan(desired_steering) / self.wheelbase
         curve_speed = gap_logic.curvature_speed_limit(
-            limited_curvature, self.max_lateral_accel, self.max_speed)
+            limited_curvature, lateral_limit, self.max_speed)
         normal_speed = max(self.min_speed, curve_speed)
 
         # Cornering anticipation: an *earlier* look at the same curvature
@@ -1232,7 +1854,7 @@ class GapFollowNode(Node):
             ))
             anticipated_curvature = math.tan(anticipated_steering) / self.wheelbase
             anticipated_speed = gap_logic.curvature_speed_limit(
-                anticipated_curvature, self.max_lateral_accel, self.max_speed)
+                anticipated_curvature, lateral_limit, self.max_speed)
 
         # The braking ceiling's clearance. With swept-path clearance on, it is
         # how far the body can drive along the arc it is on -- checked for both
@@ -1282,14 +1904,35 @@ class GapFollowNode(Node):
                     self.max_speed,
                 ),
             )
-        desired_speed = min(normal_speed, clearance_speed, anticipated_speed,
-                            self._narrow_corridor_speed(side_left, side_right),
-                            follow_cap)
-        if used_fallback:
-            desired_speed = min(desired_speed, self.effective_corner_speed)
-        if self.speed_hold_sec > 0.0:
-            self.speed_hold_clock += command_dt
-            desired_speed = self.speed_hold.update(self.speed_hold_clock, desired_speed)
+        understeer_cap, understeer_off = self._understeer_cap(steering_angle, command_dt)
+        # Launch boost: end it once the braking ceiling reaches the car, the car
+        # turns, or the time/distance backstop runs out (launch_boost.step).
+        # While it lasts, only the grip and braking ceilings apply: no corner,
+        # narrow-corridor, follow or alongside cap, no speed hold, no ramp and
+        # no traction hold. The understeer ceiling (a grip limit) still applies.
+        measured_speed = (self.current_speed if self._odom_fresh()
+                          else self.last_commanded_speed)
+        if launching and clearance_speed > measured_speed:
+            # The first driving tick with room to speed up starts it; a tick
+            # the braking ceiling holds at the car's speed would only end it.
+            self.launch_boost.begin()
+        launching = self.launch_boost.step(
+            command_dt, measured_speed, desired_steering, clearance_speed)
+        self._report_launch_end()
+        if launching:
+            desired_speed = min(normal_speed, clearance_speed, anticipated_speed)
+        else:
+            desired_speed = min(normal_speed, clearance_speed, anticipated_speed,
+                                self._narrow_corridor_speed(side_left, side_right),
+                                follow_cap)
+            if used_fallback:
+                desired_speed = min(desired_speed, self.effective_corner_speed)
+            if self.speed_hold_sec > 0.0:
+                self.speed_hold_clock += command_dt
+                desired_speed = self.speed_hold.update(self.speed_hold_clock, desired_speed)
+        # Do not store an IMU ceiling in speed_hold: an untrusted sample must
+        # restore the feature-off command immediately, without a held cap.
+        desired_speed = min(desired_speed, understeer_cap)
 
         # Acceleration is deliberately gradual. A lower curvature/clearance
         # ceiling takes effect immediately; delaying a safety-related slowdown
@@ -1302,14 +1945,52 @@ class GapFollowNode(Node):
         # a car that never actually slowed. Fresh odometry closes that gap. It
         # only ever raises the basis, is clamped to max_speed so a bad reading
         # cannot inflate it, and every ceiling above still applies.
-        ramp_basis = self.last_commanded_speed
+        # Counterfactual traction-off ramp for this same tick and speed source.
+        # Reuse the desired speed above; never run the scan pipeline twice.
+        off_basis = self.last_commanded_speed
         if self._odom_fresh():
-            ramp_basis = max(
-                ramp_basis, min(abs(self.current_speed), self.max_speed))
-        acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
-        speed = min(desired_speed, acceleration_ceiling)
+            off_basis = max(off_basis, min(abs(self.current_speed), self.max_speed))
+        traction_off_ceiling = off_basis + self.max_acceleration * command_dt
+        traction_holding, fused_basis, traction_off = self._traction_step(command_dt)
+        if traction_holding:
+            acceleration_ceiling = self.last_commanded_speed
+            speed = gap_logic.traction_limited_speed(
+                desired_speed, self.last_commanded_speed, True)
+        else:
+            ramp_basis = self.last_commanded_speed
+            if fused_basis is not None:
+                ramp_basis = max(ramp_basis, min(fused_basis, self.max_speed))
+            elif self._odom_fresh():
+                ramp_basis = max(
+                    ramp_basis, min(abs(self.current_speed), self.max_speed))
+            acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
+            speed = min(desired_speed, acceleration_ceiling)
 
+        speed = min(speed, traction_off_ceiling)
+        # Name the traction-off ceiling when it, not traction's own ramp, is
+        # the lower one, so the dashboard says which cap actually held.
+        traction_off_binds = traction_off_ceiling < acceleration_ceiling
+        acceleration_ceiling = min(acceleration_ceiling, traction_off_ceiling)
+        if launching:
+            # Launch boost: no ramp and no traction hold. Wheelspin off the
+            # line is accepted (the traction state above still updates).
+            speed = desired_speed
         self._publish_drive(steering_angle, speed, now=now)
+        traction_text = ''
+        if self.enable_imu_traction:
+            if traction_off is not None:
+                traction_text = f', imu_traction_off: {traction_off}'
+            elif traction_holding:
+                wheel = self.wheel_speed if self.using_fused_speed else self.current_speed
+                traction_text = f', imu traction hold (slip {wheel - self.fused_speed:.2f}m/s)'
+        understeer_text = ''
+        if self.enable_imu_understeer:
+            if understeer_off is not None:
+                understeer_text = f', imu_understeer_off: {understeer_off}'
+            elif math.isfinite(understeer_cap):
+                ratio = self.understeer_check.ratio_filter.value
+                understeer_text = (f', imu understeer cap {understeer_cap:.2f}m/s '
+                                   f'(ratio {ratio:.2f})')
         gap_lo_angle = scan.angle_min + (lo_idx + gap_start) * scan.angle_increment
         gap_hi_angle = scan.angle_min + (lo_idx + gap_end) * scan.angle_increment
         closest_text = (
@@ -1337,6 +2018,25 @@ class GapFollowNode(Node):
         setup_text = (
             f", corner setup {setup_bias:+.3f}rad at weight {setup_weight:.2f}"
             if setup_weight > 0.0 else "")
+        # Named whenever the feature is on: its value while the gyro is trusted,
+        # or the reason it is zero on this tick. Empty when the feature is off,
+        # so the reason text is exactly what it was before the feature existed.
+        if damping_off is not None:
+            damping_text = f", steering_damping_off: {damping_off}"
+        elif self.enable_steering_damping:
+            damping_text = (
+                f", steering damping {damping:+.3f}rad (gyro yaw "
+                f"{self.imu_yaw_rate:+.3f}rad/s)")
+        else:
+            damping_text = ""
+        # The same rule for the adaptive grip: named while it is on, with the
+        # reason the limit is the plain base, and empty when it is off.
+        if grip_off is not None:
+            grip_text = f", adaptive_grip_off: {grip_off}"
+        elif self.enable_adaptive_grip:
+            grip_text = f", adaptive grip limit {lateral_limit:.2f}m/s^2"
+        else:
+            grip_text = ""
         guard_text = (
             f", arc guard {requested_steering:+.3f}->{desired_steering:+.3f}rad "
             f"(requested arc blocked)"
@@ -1357,6 +2057,8 @@ class GapFollowNode(Node):
             gap_mode = 'emergency_escape'
         elif ttc_tripped:
             gap_mode = 'ttc_escape'
+        elif launching:
+            gap_mode = 'launch_boost'
         else:
             gap_mode = 'corner_fallback' if used_fallback else 'gap_follow'
         depth_text = (
@@ -1371,7 +2073,14 @@ class GapFollowNode(Node):
                f"(near {math.degrees(near_bearing):+.1f}deg vs far "
                f"{math.degrees(target_angle):+.1f}deg)"
                if near_bearing is not None and anticipated_speed < self.max_speed else "")
-            + (f", follow cap={follow_cap:.2f}m/s" if math.isfinite(follow_cap) else "")
+            + (f", LAUNCH BOOST ({self.launch_boost.elapsed:.2f}s, "
+               f"{self.launch_boost.distance:.2f}m; ramp, corner, corridor and "
+               f"opponent caps off"
+               + (f"; holding straight, straight path clear "
+                  f"{straight_room:.2f}m)" if not math.isnan(straight_room)
+                  else "; straight path blocked, gap steering)")
+               if launching else "")
+            + (f", follow cap={follow_cap:.2f}m/s" if math.isfinite(follow_cap) and not launching else "")
             + (f", opponent mode={self.opponent_mode}" if self.opponent_mode else "")
             + (f", CREEP (forward clearance {forward_clearance:.3f}m inside "
                f"the {self.forward_stop_clearance:.3f}m reserve; crawling out)"
@@ -1392,6 +2101,7 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
+            f"{damping_text}{grip_text}{understeer_text}{traction_text}"
             f"{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
@@ -1409,11 +2119,15 @@ class GapFollowNode(Node):
         ]
         if used_fallback:
             intent_factors.append(schema.factor('corner cap', self.effective_corner_speed))
-        if math.isfinite(follow_cap):
+        if math.isfinite(follow_cap) and not launching:
             intent_factors.append(schema.factor('follow cap', follow_cap))
         if near_bearing is not None:
             intent_factors.append(schema.factor('anticipation cap', anticipated_speed))
-        intent_factors.append(schema.factor('accel ceiling', acceleration_ceiling))
+        ceiling_name = ('traction hold' if traction_holding
+                        else 'traction-off ceiling' if traction_off_binds
+                        else 'accel ceiling')
+        if not launching:
+            intent_factors.append(schema.factor(ceiling_name, acceleration_ceiling))
         self._publish_intent(
             gap_mode,
             decision_detail,
@@ -1873,6 +2587,16 @@ class GapFollowNode(Node):
         hi_idx = max(0, min(hi_idx, num_points - 1))
         return lo_idx, hi_idx
 
+    def _report_launch_end(self):
+        """Log, once, why the launch boost ended -- not on every tick after."""
+        boost = self.launch_boost
+        if (boost.state == launch_boost.DONE and boost.end_reason != 'disabled'
+                and not self.launch_end_reported):
+            self.launch_end_reported = True
+            self.get_logger().info(
+                f'launch boost ended ({boost.end_reason}) after '
+                f'{boost.elapsed:.2f}s and {boost.distance:.2f}m')
+
     def _command_timing(self):
         """Return one bounded command interval and the clock sample behind it."""
         now = self.get_clock().now()
@@ -1921,6 +2645,11 @@ class GapFollowNode(Node):
         # someone noticing the car and cycling LB.
         self._publish_drive(self.steering_basis, 0.0)
         self.speed_hold.reset()
+        # Any stop ends an active launch for good (deadman released, TTC,
+        # emergency clearance, no gap, stale sensors). Before the first press
+        # this does nothing, so the waiting-for-LB stops do not spend it.
+        self.launch_boost.end(state)
+        self._report_launch_end()
         # Memoized because some stop reasons are deliberately expensive
         # thunks -- _escape_report re-runs the whole gap pipeline -- and the
         # log and the intent publisher both want that same string on the
@@ -1967,6 +2696,23 @@ class GapFollowNode(Node):
         if not self._intent_throttle.should_publish(now):
             return
         try:
+            if self.enable_imu_impact_stop:
+                # Diagnostic-only trust/force explanation, including on early
+                # stops. Never let reason construction escape this boundary.
+                impact_off = self._impact_detection_reason()
+                if impact_off is not None:
+                    reason = lambda base=reason, why=impact_off: (
+                        (base() if callable(base) else base) or ''
+                    ) + f', imu_impact_stop_off: {why}'
+            if self.using_fused_speed:
+                # Early stops may not read gated odometry. Refresh only here,
+                # after the drive command, inside diagnostic containment.
+                why = self._imu_gate()[1]
+                state_text = ('ok' if why is None else
+                              why.removeprefix('imu ') if why != 'imu yaw not finite' else 'fault')
+                original_reason = reason
+                reason = lambda: ((original_reason() if callable(original_reason)
+                                   else original_reason) or '') + f', fused_speed_imu: {state_text}'
             payload = schema.build(
                 'gap_follow_node',
                 state,

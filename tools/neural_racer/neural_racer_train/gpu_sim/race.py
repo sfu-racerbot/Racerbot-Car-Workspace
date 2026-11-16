@@ -3,12 +3,22 @@ with hysteresis, and the reward of plan A8.
 
     r =   0.1 * ds / (v_ref * dt)       progress (v_ref = 4 m/s)
         + 2.0 * places gained           and -2.0 per place lost (0.3 m hysteresis)
-        - 20 at-fault contact           (ends that car's episode)
-        -  2 not-at-fault contact
-        - 20 wall contact               (ends that car's episode)
-        - 0.5 safety wrapper intervened
+        - 60 at-fault contact           (ends that car's episode)
+        -  2 not-at-fault contact       once per contact, with a car still racing
+        - (25 + 15 (v / v_ref)^2) wall contact at speed v   (ends that car's episode)
+        - 0.5 x min(1, cut / v_ref)     the LiDAR braking cap removed `cut` m/s
+              (a full 0.5 when the wrapper stops the car). Not steering slew
+              or the curvature cap: exploration noise trips those every tick
+        - curvature x min(1, cut / v_ref)  the curvature cap removed `cut` m/s
+              (0 by default; the teacher's penalty variant and the league set it)
+        - 40 stalled: held below 0.1 m/s by the wrapper for 1 s, or below it
+              for 3 s for any reason (ends that car's episode -- parked
+              nose-to-wall it could never move again)
         - 0.01 (d_delta / 0.33)^2       steering smoothness
         + 10 (N - place) / (N - 1)      at the finish, N cars
+
+The wall and stall costs are teacher.py's since teacher-v3 (5 + 15 (v/4)^2
+and 20 had left a teacher that crashed); every stage now shares them.
 """
 from dataclasses import dataclass
 
@@ -21,12 +31,18 @@ class RewardConfig:
     progress: float = 0.1
     place: float = 2.0
     place_hysteresis: float = 0.3
-    fault_contact: float = 20.0
+    # 60 (was 20, 2026-11-08): at-fault contacts were the only thing keeping the league's snapshots from
+    # release (deploy-speed crossplay: they beat both baselines with 3-11 at-fault contacts); now above
+    # a wall touched at walking pace (wall_min)
+    fault_contact: float = 60.0
     other_contact: float = 2.0
-    wall: float = 20.0
+    wall: float = 40.0
+    wall_min: float = 25.0          # a wall touched at walking pace; wall at v_ref
     intervened: float = 0.5
     smooth: float = 0.01
     finish: float = 10.0
+    stall: float = 40.0
+    curvature: float = 0.0
 
 
 def project(pool, slot, x, y, last_idx, window: int = 30):
@@ -97,10 +113,18 @@ class RaceState:
         return (n_active - self.ahead.sum(-1)).clamp(min=1)
 
 
-def reward(cfg: RewardConfig, ds, gained, fault, other, wall, intervened, d_steer, dt: float):
+def reward(cfg: RewardConfig, ds, gained, fault, other, wall, intervened, d_steer, dt: float, wall_speed=None,
+           curv_frac=None):
+    """intervened: bool, or the fraction of the penalty in [0, 1]. wall_speed
+    (m/s at contact) scales the wall cost; None charges the full cfg.wall.
+    curv_frac: the curvature cap's share of cfg.curvature, in [0, 1]."""
     r = cfg.progress * ds / (cfg.v_ref * dt)
     r = r + cfg.place * gained.float()
     r = r - cfg.fault_contact * fault.float() - cfg.other_contact * (other & ~fault).float()
-    r = r - cfg.wall * wall.float() - cfg.intervened * intervened.float()
+    wall_cost = cfg.wall if wall_speed is None else \
+        cfg.wall_min + (cfg.wall - cfg.wall_min) * (wall_speed / cfg.v_ref) ** 2
+    r = r - wall_cost * wall.float() - cfg.intervened * intervened.float()
     r = r - cfg.smooth * (d_steer / 0.33) ** 2
+    if curv_frac is not None:
+        r = r - cfg.curvature * curv_frac
     return r

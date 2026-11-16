@@ -19,11 +19,20 @@ INTEGRATOR_DT = 0.005      # run_validation.INTEGRATOR_DT, RK4
 
 # Car 1 measurements that differ from calibration.py (car 2's numbers).
 CAR1_OVERRIDES = {
-    'speed_max': 23250.0 / 3650.0,     # vesc.yaml speed_max / car 1's command gain = 6.37 m/s
-    'speed_min': -23250.0 / 3650.0,
+    # vesc.yaml speed_max / car 1's command gain: 4600 since 2026-11-02 (main ea5f114; at 3650 car 1
+    # delivered 0.79 of every command), so 5.05 m/s. Was 6.37 at 3650; car 2's 4614 gives 5.04
+    'speed_max': 23250.0 / 4600.0,
+    'speed_min': -23250.0 / 4600.0,
     'steering_max_left': 0.401,        # car 1 circles at full stick, 2026-10-21 (hardware-reference.md)
     'steering_max_right': -0.388,
 }
+# The motor's top speed in training (2026-11-08). The VESC's configured limit is CAR1_OVERRIDES' 5.05 m/s,
+# but the car itself can reach about 27 m/s (97 km/h, the team). Training lets the policy use up to 10 m/s:
+# the most any course we race can use (levine_blocked's fastest line peaks at 9.8 m/s; car 1's course 7.6,
+# car 2's 6.5-8.2, the room 5.0, with the measured 4.5 m/s^2 acceleration, 4.0 braking and grip). Nothing
+# above about 5.4 m/s has been measured, so the motor's power limit (v_switch) is drawn +/-30% (RANDOMIZATION).
+# The CPU referee and the car keep the VESC's limit until the team raises it.
+TRAIN_SPEED_MAX = 10.0
 
 
 @dataclass(frozen=True)
@@ -44,7 +53,7 @@ class CarParams:
     gym_v_min: float = -5.0            # gym stock; sets pid_accl's gain, see calibration.py
     gym_v_max: float = 20.0
     # FidelityPlant's actuation layer
-    speed_max: float = CAR1_OVERRIDES['speed_max']
+    speed_max: float = TRAIN_SPEED_MAX
     speed_min: float = CAR1_OVERRIDES['speed_min']
     servo_gain: float = 15.0
     steer_delay_ticks: int = 3
@@ -54,6 +63,10 @@ class CarParams:
     speed_loop_brake_gain: float = 4.0
     speed_loop_brake_max: float = 4.0
     longitudinal_grip_coupling: float = 1.0
+    # the floor's grip (actuation.grip_clamp): 1 = the measured progressive curve, stretched by grip_scale;
+    # 0 = the friction circle at mu * g (the CPU referee's plain calibration; the dynamics parity tests)
+    grip_model: float = 1.0
+    grip_scale: float = 1.0
     # bodies
     body_width: float = 0.30
     body_length: float = 0.535
@@ -63,11 +76,33 @@ class CarParams:
     # sensors
     lidar_noise_std: float = 0.01
     lidar_dropout_rate: float = 0.002
+    # Car 1's invalid beams come in runs (2026-11-01, runs 20261030-175701 and 20261026-194913): 95%
+    # of them in runs of >= 4 beams, median 9, p90 56; and a room can hold a sector that drops out in
+    # half the scans (+16 deg, a dark or glass surface). lidar.sector_dropout draws both: transient
+    # sectors (lidar_sectors per scan, on average) and one persistent sector at lidar_persist_deg,
+    # lidar_persist_width beams wide, present in a scan with probability lidar_persist (<= 0: none)
+    lidar_sectors: float = 0.3
+    lidar_persist: float = 0.0
+    lidar_persist_deg: float = 0.0
+    lidar_persist_width: float = 10.0
     lidar_delay_ticks: int = 1
     odom_speed_noise: float = 0.05     # fractional
-    imu_offset_x: float = 0.45         # primary IMU, front bumper (team, 2026-10-23); P0.4 measures it
-    imu_gyro_noise: float = 0.005      # ESTIMATED until P0.5
-    imu_accel_noise: float = 0.15      # ESTIMATED until P0.5 (driving vibration)
+    # /imu/data is the BNO085 (imu_bridge's primary), rotated into car axes but not moved: car 1
+    # mounts it at the front axle's centre, 0.18 m ahead of the wheelbase's midpoint
+    # (tools/imu_calibration/config/car.yaml, measured), so 0.36 m ahead of the rear axle.
+    # Was 0.45, the front bumper (team's estimate, 2026-10-23)
+    imu_offset_x: float = 0.36
+    # Per-sample IMU noise as the node sees it: /imu/data's latest message each tick, no averaging.
+    # At rest (car 1's BNO085): ~0.001-0.008 rad/s, 0.03-0.09 m/s^2. Once the car moves, vibration
+    # adds imu.VIBRATION's speed-dependent std, scaled by imu_vibration (2026-11-01, measured: the
+    # 0.005 / 0.15 estimates were 5-13x under what the car reads while driving)
+    imu_gyro_noise: float = 0.004
+    imu_accel_noise: float = 0.06
+    imu_vibration: float = 1.0
+    # the gyro's own vibration scale: car 2's gyro shakes up to 2x car 1's while its accelerometers
+    # are quieter (runs 20261030-184556 and -185036: gyro 0.020-0.048 rad/s, accel x 0.27-0.48,
+    # accel y 0.28-0.39 m/s^2), so the two scales are drawn apart
+    imu_gyro_vibration: float = 1.0
     imu_delay_ticks: int = 1           # ESTIMATED until P0.5
     imu_gyro_bias: float = 0.005
 
@@ -115,12 +150,22 @@ RANDOMIZATION = {
     'speed_loop_accel_gain': ('rel', 0.05), 'speed_loop_accel_max': ('rel', 0.05),
     'speed_loop_brake_gain': ('rel', 0.05), 'speed_loop_brake_max': ('rel', 0.05),
     'lidar_noise_std': ('rel', 0.10), 'lidar_dropout_rate': ('rel', 0.30),
-    'mu': ('range', (0.40, 1.10)),             # STOCK-grade knowledge of the floor
+    # the cars' recorded commands replayed through this sim's dynamics match their gyros at mu ~0.5-0.55
+    # (car 1) and ~0.4 (car 2) (2026-11-03): 0.40-1.10 put both floors at its bottom end
+    'mu': ('range', (0.30, 0.80)),
+    'v_switch': ('rel', 0.30),                 # the motor's power limit: unmeasured above ~5.4 m/s
+    'grip_scale': ('range', (0.85, 1.3)),      # actuation.GRIP_DELIVERED: both cars' replays inside (car 1 ~1.25)
     'C_Sf': ('rel', 0.30), 'C_Sr': ('rel', 0.30), 'h': ('rel', 0.30), 'I': ('rel', 0.30),
     'servo_gain': ('rel', 0.30),
     'steer_delay_ticks': ('ticks', (2, 4)), 'speed_delay_ticks': ('ticks', (1, 3)),
     'lidar_offset_x': ('abs', 0.02), 'imu_offset_x': ('abs', 0.02),
     'imu_gyro_noise': ('rel', 0.30), 'imu_accel_noise': ('rel', 0.30),
+    'imu_vibration': ('range', (0.3, 1.5)),       # accelerometers: car 2's quietest to car 1's noisiest runs
+    'imu_gyro_vibration': ('range', (0.4, 2.3)),  # gyro: car 1's quietest to car 2's noisiest
+    'lidar_sectors': ('range', (0.0, 1.5)),       # car 2 drops ~0.9-1.0 runs of beams a scan (car 1 0.1-0.6)
+    'lidar_persist': ('range', (-0.6, 0.8)),      # <= 0 in ~43% of episodes: no persistent sector
+    'lidar_persist_deg': ('range', (-135.0, 135.0)),
+    'lidar_persist_width': ('range', (4.0, 60.0)),
     'imu_delay_ticks': ('ticks', (0, 2)),
 }
 # Steering-gain error of +/-10% (car 1's gain was 30% off until 2026-10-21):

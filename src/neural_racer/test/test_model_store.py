@@ -9,7 +9,7 @@ import nr_testutil
 import numpy as np
 import pytest
 
-from neural_racer import approve_model, model_store
+from neural_racer import approve_model, model_store, observation as obs
 from neural_racer.policy_numpy import PolicyNumpy
 
 PASS = json.dumps({'pass': True})
@@ -101,7 +101,7 @@ def test_directory_name_must_match_hash(tmp_path):
 
 
 def test_obs_spec_version_mismatch_refused(tmp_path):
-    src, _ = _exported(tmp_path, card_extra={'obs_spec_version': 2})
+    src, _ = _exported(tmp_path, card_extra={'obs_spec_version': obs.OBS_SPEC_VERSION + 1})
     with pytest.raises(model_store.ModelStoreError, match='obs_spec_version'):
         approve_model.approve(src, tmp_path / 'models', shadow_only=True)
 

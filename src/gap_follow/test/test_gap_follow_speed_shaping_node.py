@@ -26,8 +26,12 @@ from test_gap_follow_corners_node import (  # noqa: E402
 
 def _make(extra=()):
     # TEST_ONLY_DRIVE last, after the params file and any override, so the
-    # YAML's drive_topic: /drive can never win (CLAUDE.md).
-    rclpy.init(args=['--ros-args', *CAR, *extra, *TEST_ONLY_DRIVE])
+    # YAML's drive_topic: /drive can never win (CLAUDE.md). These are mid-race
+    # scenes, not a start: the launch boost (shipped on since 2026-10-30)
+    # skips the ramp and speed hold for its first 3 s / 5 m, so it is off here
+    # (test_launch_boost_node.py covers it).
+    rclpy.init(args=['--ros-args', *CAR, '-p', 'enable_launch_boost:=false',
+                     *extra, *TEST_ONLY_DRIVE])
     n = GapFollowNode()
     assert n.drive_pub.topic_name == '/test_only/drive'
     n.max_steering_rate = 100.0
@@ -149,7 +153,11 @@ def test_speed_hold_keeps_a_dip_for_the_hold_time(node):
     node.speed_hold_sec = 0.25
     node.speed_hold = gap_logic.SpeedHold(0.25)
     node.command_slew_max_dt = dt
-    node.max_acceleration = 100.0
+    # The release tick must not be ramp-limited. At 100 m/s^2 the ramp reaches
+    # only 1.2 + 100/32 = 4.3 m/s on that tick, which was under the old 3.5
+    # top speed but is under the 5.0 shipped since 2026-10-27. At 1000 it
+    # reaches 32 m/s, so the top speed is what the release has to reach.
+    node.max_acceleration = 1000.0
     open_road = _raycast(_corridor(1.5, 1.5))
     top = node.max_speed
 

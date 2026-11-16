@@ -4,6 +4,7 @@
 #   tools/neural_racer/slurm/fir_run.sh setup              once, on a login node
 #   tools/neural_racer/slurm/fir_run.sh shakedown          1 h GPU job: does everything work on an H100?
 #   tools/neural_racer/slurm/fir_run.sh benchmark          30 min: how many envs fill the GPU
+#   tools/neural_racer/slurm/fir_run.sh tracklib           CPU job: the training track library (before teacher)
 #   tools/neural_racer/slurm/fir_run.sh teacher [seeds]    Stage 1 (default seeds 0 1 2)
 #   tools/neural_racer/slurm/fir_run.sh distill <seed>     Stage 2, from that teacher seed
 #   tools/neural_racer/slurm/fir_run.sh league             Stage 3, all four roles
@@ -79,18 +80,26 @@ case "${STEP}" in
                "${HERE}/fir_train.sbatch" benchmark "${name}")"
         echo "benchmark: job ${jid}. Result: ${RUNS}/${name}/solo/benchmark.json -> put chosen.num_envs into fir.conf" ;;
 
+    tracklib)
+        need_account
+        jid="$(sb --export="ALL,NR_REPO=${REPO},NR_PYTHON_MODULE=${NR_PYTHON_MODULE}" "${HERE}/fir_tracklib.sbatch" \
+               "${NR_TRACKLIB}")"
+        echo "tracklib: job ${jid}, into ${NR_TRACKLIB}" ;;
+
     teacher)
         need_account
+        [[ "${DRY}" == "1" || -f "${NR_TRACKLIB}/library.json" ]] || { echo "no track library at ${NR_TRACKLIB}: run '$0 tracklib' first" >&2; exit 2; }
         seeds=("$@"); (( ${#seeds[@]} )) || seeds=(0 1 2)
         for s in "${seeds[@]}"; do
             NR_EXTRA_EXPORT=",NR_ROLE=seed${s}" chain "teacher seed ${s}" --job-name="nr-teacher-s${s}" \
-                "${HERE}/fir_train.sbatch" teacher "${NR_TEACHER_RUN}" --seed "${s}" --num-envs "${NR_NUM_ENVS}"
+                "${HERE}/fir_train.sbatch" teacher "${NR_TEACHER_RUN}" --seed "${s}" --num-envs "${NR_TEACHER_ENVS}" \
+                --library "${NR_TRACKLIB}"
         done ;;
 
     distill)
         need_account
         seed="${1:?usage: fir_run.sh distill <teacher seed>  (pick the best from: fir_run.sh status)}"
-        ckpt="${RUNS}/${NR_TEACHER_RUN}/seed${seed}/checkpoints/latest.pt"
+        ckpt="${RUNS}/${NR_TEACHER_RUN}/seed${seed}/checkpoints/best.pt"     # best held-out race
         [[ "${DRY}" == "1" || -f "${ckpt}" ]] || { echo "no teacher checkpoint at ${ckpt}" >&2; exit 2; }
         chain "distill" --job-name=nr-distill "${HERE}/fir_train.sbatch" distill "${NR_DISTILL_RUN}" \
             --teacher "${ckpt}" --num-envs "${NR_NUM_ENVS}" ;;
@@ -119,7 +128,7 @@ case "${STEP}" in
         done ;;
 
     select)
-        cp="${RUNS}/${NR_LEAGUE_RUN}/archive/eval/crossplay.jsonl"
+        cp="${RUNS}/${NR_LEAGUE_RUN}/archive/eval-max/crossplay.jsonl"   # eval_worker's release crossplay (RELEASE_TAG)
         [[ -f "${cp}" ]] || { echo "no referee results yet at ${cp}" >&2; exit 2; }
         login_python -m neural_racer_train.selection --crossplay "${cp}" --panel gap_follow pure_pursuit \
             --out "${RUNS}/${NR_LEAGUE_RUN}/selection_report.json" || true
@@ -139,7 +148,7 @@ d = export.export(policy, out, run_name=arch.parent.name, snapshot_id=entry)
 report = json.loads(sel.read_text()) if sel.exists() else {}
 chosen = report.get('winner') == entry          # passes only for the selected snapshot
 (d / 'selection_report.json').write_text(json.dumps(dict(report, **{'pass': chosen})))
-ev = arch / 'eval' / f'{entry}.json'
+ev = arch / 'eval-max' / f'{entry}.json'
 r = json.loads(ev.read_text()) if ev.exists() else {}
 ok = bool(r) and all(m.get('verdict') == 'win' and m.get('fault_neural', 1) == 0
                      for m in r.get('matchups', {}).values() if 'verdict' in m)

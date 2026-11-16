@@ -19,7 +19,7 @@ fi
 # Lmod's scripts reference unset variables; relax nounset around them.
 set +u
 module purge
-module load StdEnv/2023 "${NR_PYTHON_MODULE:-python/3.11}"
+module load StdEnv/2023 cuda "${NR_PYTHON_MODULE:-python/3.11}"
 set -u
 
 NR_VENV="${SLURM_TMPDIR}/nr-venv"
@@ -34,5 +34,13 @@ if [[ -n "${NR_WHEELS:-}" ]]; then
 fi
 pip install "${pip_args[@]}"
 
-python -c "import torch; assert torch.cuda.is_available(), 'no CUDA device visible'; \
-print('[nr-env] torch', torch.__version__, 'on', torch.cuda.get_device_name(0))"
+if ! python -c "import torch; assert torch.cuda.is_available(), 'no CUDA device visible'; \
+print('[nr-env] torch', torch.__version__, 'on', torch.cuda.get_device_name(0))"; then
+    mkdir -p "${SCRATCH}/neural_racer"
+    echo "$(date +%s) ${SLURMD_NODENAME:-$(hostname -s)}" >> "${SCRATCH}/neural_racer/bad_nodes.log"
+    echo "[nr-env] Quarantined broken GPU node ${SLURMD_NODENAME:-$(hostname -s)} for 24h"
+    exit 1
+fi
+# The LiDAR cast's backend: the fallback is silent, and it cost every run until 2026-10-29 ~6x
+python -c "import triton; print('[nr-env] triton', triton.__version__, '(the LiDAR cast)')" 2>/dev/null \
+    || echo "[nr-env] WARNING: no triton; the LiDAR cast falls back to PyTorch (~6x slower)"

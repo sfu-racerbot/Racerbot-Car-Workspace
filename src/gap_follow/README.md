@@ -6,11 +6,29 @@
 
 Reactive "follow-the-gap" autonomy: no map, no localization, no memory of the track — every LIDAR scan is looked at fresh and the car steers into the biggest safe opening it currently sees. This file documents the algorithm and code in detail; for the broader workspace context (safety model, how to run it, how to write your own node) see [docs/architecture.md](../../docs/architecture.md), [docs/operations.md](../../docs/operations.md#running-autonomy-gap_follow-pure_pursuit-or-your-own-node), and [docs/writing-your-own-node.md](../../docs/writing-your-own-node.md).
 
+## Highlights
+
+- **No map needed.** Each LiDAR scan is read fresh, and the car steers at the widest safe opening in it. It can drive a course it has never seen.
+- **The [LB deadman](../../docs/glossary.md#deadman) is checked inside this node.** Every drive command needs LB held on a live `/joy` stream. The [mux](../../docs/glossary.md#mux--multiplexer) does not do that check.
+- **Other cars: on by default since 2026-10-28.** Two simulated cars on the shipped settings passed 32 of 32 runs, with no contact and no stalls. With the layer off, 24 of 32 passed.
+- **The YAML is the source of truth.** Every knob is a parameter in `config/gap_follow.yaml`, and it overrides the defaults in the code. Edit the YAML, not the `.py`.
+- **The newest parts are simulator-only.** Steering damping (on since 2026-10-27) and the other-car layer (on since 2026-10-28) have not been driven on the car. Read [the validation order](../../docs/gap-follow.md#validation) first.
+
+**Why it exists.** It is the no-map driver. A car with no map can still drive a course it has never seen, and every new driving node in this workspace copies its deadman pattern from this one.
+
 ## New in October 2026: swept clearance, arc guard, corner setup
 
 Three additions change how this node drives through corridors: a speed limit from how far the *body* can drive along its arc, a check that the steered arc is clear, and a move to the outside wall before a turn. In the simulator they took the indoor layouts from 24 wall contacts in 60 runs to none, and lapped about 20% faster. **They have not been driven on the real car yet.**
 
 What each does, how to turn each off, the results, and the order to bring them up on the car (wheels off first): **[docs/gap-follow.md](../../docs/gap-follow.md)**. The step-by-step algorithm below describes the pipeline they sit in.
+
+**Other cars on the track.** The other-car layer (`opponent_tracking.py`) is on by default since 2026-10-28. It tracks moving cars, follows them, and passes only with room on a straight. It can only lower speed or choose a side of an opening.
+
+Turn it off with `opponent_awareness:=false` on `gap_follow_launch.py`. The mapping launches (`map_course`, `auto_map_race`, `autonomous_mapping_launch.py`) read this YAML too, but they turn the layer off, because mapping is always one car.
+
+Each of them takes `opponent_awareness`, which defaults to `false`; `opponent_awareness:=true` turns the layer on there.
+
+The details and the first-run order are in [docs/gap-follow.md](../../docs/gap-follow.md#several-cars-at-once).
 
 ## Making the car faster
 
@@ -19,7 +37,7 @@ Edit [`config/gap_follow.yaml`](config/gap_follow.yaml), **not** `gap_follow_nod
 The car drives at the **lowest** of several speed caps, so raise the cap that is binding. The comment block at the top of the YAML lists them in order: usually `corner_speed`, then `max_lateral_accel` in tight corners, then `max_speed` on straights. Two rules:
 
 - Keep `corner_speed <= corner_speed_wide <= max_speed`. If that ordering breaks, the node exits at startup.
-- Don't raise `max_acceleration` to go faster. It is the braking the car *assumes* it has, so raising it makes the car drive faster than it can stop.
+- Don't raise `max_braking_decel` to go faster. It is the braking the car *assumes* it has, so raising it makes the car drive faster than it can stop. `max_acceleration` is only how fast a speed command may rise (5.0 on car 1 since 2026-10-27), and never limits braking.
 
 Test any increase wheels-off first, then at low speed in open space.
 
@@ -30,12 +48,13 @@ Test any increase wheels-off first, then at low speed in open space.
 | [`gap_follow/gap_follow_node.py`](gap_follow/gap_follow_node.py) | ROS orchestration: deadman, odometry watchdog, TTC brake, diagnostics, and drive publisher. |
 | [`gap_follow/gap_logic.py`](gap_follow/gap_logic.py) | Unit-tested footprint, TTC, disparity extension, safety bubble, and gap-selection math. |
 | [`config/gap_follow.yaml`](config/gap_follow.yaml) | Every tunable parameter, loaded at launch. Change behavior here, not in the code. |
-| [`launch/gap_follow_launch.py`](launch/gap_follow_launch.py) | Starts the node with the YAML above as its parameters. Launch arguments: `opponent_awareness:=true` (other cars on track) and `max_speed:=<m/s>`, which only lowers the YAML's top speed for one run (the logic is [`gap_follow/launch_speed.py`](gap_follow/launch_speed.py)). See [docs/launchstart.md](../../docs/launchstart.md#car-1-and-car-2-together-first-run). |
+| [`launch/gap_follow_launch.py`](launch/gap_follow_launch.py) | Starts the node with the YAML above as its parameters. Launch arguments: `opponent_awareness:=true` or `false` (other cars on track; on by default since 2026-10-28, and `false` turns it off) `max_speed:=<m/s>`, which sets the top speed for one run, anywhere up to 5.0 m/s (the logic is [`gap_follow/launch_speed.py`](gap_follow/launch_speed.py)), and `launch_boost:=false`, which turns off the full-speed start ([docs/gap-follow.md](../../docs/gap-follow.md#launch-boost)). See [docs/launchstart.md](../../docs/launchstart.md#car-1-and-car-2-together-first-run). |
 | `resource/gap_follow` | Empty marker file required by `ament_python` — not code. |
 
 ## Interface
 
 - **Subscribes:** `/scan` (`sensor_msgs/LaserScan`), `/odom` (`nav_msgs/Odometry`, for TTC), `/joy` (`sensor_msgs/Joy`, for the deadman button)
+- **Also subscribes, only with `enable_steering_damping` or `enable_adaptive_grip` on:** `/imu/data` (`sensor_msgs/Imu`, the gyro's yaw rate) and `/imu/status` (`std_msgs/String`, the IMU's verdict, latched). See [steering damping](../../docs/gap-follow.md#steering-damping-gyro) and [adaptive grip](../../docs/gap-follow.md#adaptive-grip-imu)
 - **Publishes:** `/drive` (`ackermann_msgs/AckermannDriveStamped`)
 
 The launch file sends ROS logs to the terminal. Each controller state change is
@@ -45,6 +64,8 @@ command. An unchanged decision is repeated every `decision_log_period_sec`
 (1.0 s by default); set it to `0.0` for transitions only. A small status timer
 also reports a missing/stale `/scan`, which otherwise stops this callback-driven
 node by letting `/drive` time out silently at the mux.
+
+With the other-car layer on, a decision line can also carry `opponent mode=clear`, `opponent mode=follow` or `opponent mode=follow_memory`, and `follow cap=<m/s>` when a car ahead sets a limit. `opponent mode=` with no other car on the track means a wall is being taken for a car.
 
 ## The algorithm, step by step
 
@@ -445,24 +466,39 @@ apex, only change the car's pace approaching one.
 | `min_centerline_gap_width` | `0.10` m | Minimum center corridor remaining after obstacle inflation |
 | `min_gap_distance` / `fallback_min_gap_distance` | `2.0` / `0.8` m | Preferred depth and tight-corner fallback depth |
 | `gap_switch_margin` | `1.2` | Hysteresis: how much better a new candidate must score than the one containing the previous tick's aim before the car re-aims. `1.0` disables it |
-| `max_speed` / `min_speed` / `corner_speed` | `2.5` / `0.8` / `1.1` m/s | Normal speed range and fallback cap. Shipped YAML: `max_speed: 3.5` |
+| `max_speed` / `min_speed` / `corner_speed` | `2.5` / `0.8` / `1.1` m/s | Normal speed range and fallback cap. Shipped YAML since 2026-10-27: `5.0` / `1.429` / `2.143` m/s (were `3.5` / `1.0` / `1.5`; see [race defaults](../../docs/gap-follow.md#race-defaults-2026-10-27)) |
 | `enable_adaptive_width` / `adaptive_width_narrow` / `adaptive_width_reference` | `true` / `1.4` / `2.6` m | Live corridor-width sensing (see below); the sensed-width range the two knobs after it scale between |
 | `min_safety_margin` | `0.18` m (== `safety_margin`, i.e. off) | Floor `safety_margin` may shrink to on a sensed-narrow straight |
-| `corner_speed_wide` | `1.4` m/s | Ceiling `corner_speed` may rise to on a sensed-wide corner |
+| `corner_speed_wide` | `1.4` m/s (shipped YAML: `2.714`) | Ceiling `corner_speed` may rise to on a sensed-wide corner |
+| `enable_corner_setup` | `true` (shipped YAML: `false`, since 2026-10-27) | On the approach to a turn in a corridor, move toward the outside wall so the car turns in late. See [docs/gap-follow.md](../../docs/gap-follow.md#corner-setup) |
 | `enable_cornering_anticipation` / `anticipation_near_depth` | `false` / `2.5` m | Extra speed cap from near/far gap-bearing disagreement (see below) — ships off, measured to over-brake in open rooms |
 | `max_steering_angle` | `0.33` rad (19°) on car 1 | Hard command clamp. Car 1's check circles reached ~0.39–0.40 rad at full stick (2026-10-21); 0.33 leaves margin for gain error. Must fit `vesc.yaml`'s servo clip |
 | `steering_gain` | `1.0` | Steering per radian of gap bearing, before the `max_steering_angle` clip. `1.0` points the wheels at the gap. Raise only if the car is slow to leave a wall; too high weaves |
-| `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$. Shipped YAML: `2.0` (simulator-validated only) |
+| `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$. Shipped YAML: `2.5` (raised 2026-10-26 from a map run's grip, `20261026-194514`; `2.0` from 2026-10-19; not yet run on the floor at 2.5, see [validation](../../docs/gap-follow.md#validation)) |
 | `max_braking_decel` | `3.0` m/s² | **Safety-critical.** Braking authority the car *assumes it has* when deciding how fast it may drive for the clearance it can see. Set above real capability and it drives faster than it can stop. Not the same knob as `pure_pursuit`'s identically named command slew rate — don't copy that value here |
-| `max_acceleration` | `3.0` m/s² | Cap on how fast a speed *command* may rise; braking is never limited |
+| `max_acceleration` | `3.0` m/s² (shipped YAML: `5.0`, since 2026-10-27) | Cap on how fast a speed *command* may rise; braking is never limited |
 | `max_steering_rate` | `1.0` rad/s | Cap on how fast a steering command may slew. Shipped YAML: `2.0` (simulator-validated only) |
+| `enable_steering_damping` | `false` (shipped YAML: `true`, since 2026-10-27) | Adds `-steering_damping_gain × yaw rate` to the steering request, using the gyro on `/imu/data`. Used only while `/imu/status` says `ok` and the sample is fresh; otherwise it adds zero. Turn off with `gap_follow_launch.py steering_damping:=false`. See [docs/gap-follow.md](../../docs/gap-follow.md#steering-damping-gyro) |
+| `steering_damping_gain` | `0.0` s (shipped YAML: `0.10`, since 2026-10-27) | Gain for the term above, in seconds. Refused at startup if negative or not finite |
+| `imu_topic` / `imu_status_topic` / `imu_timeout_sec` | `/imu/data` / `/imu/status` / `0.1` s | The gyro samples, their verdict, and how old a sample may be before the term turns off. `imu_timeout_sec` is refused at startup unless positive |
+| `enable_adaptive_grip` | `false` | Raises or cuts the lateral limit behind the corner speed caps, from the gyro's grip ratio, starting at `max_lateral_accel`. Used only while the gyro is trusted; otherwise the limit is `max_lateral_accel`. Turn on with `gap_follow_launch.py adaptive_grip:=true`. See [docs/gap-follow.md](../../docs/gap-follow.md#adaptive-grip-imu) |
+| `adaptive_grip_ceiling` / `adaptive_grip_rise_per_s` / `adaptive_grip_cut_factor` | `3.0` m/s² / `0.2` m/s² per s / `0.85` | The highest the limit may rise to, how fast it rises while the tires hold, and the factor it is cut by when they slide. Refused at startup if the ceiling is not positive, the rise is negative, or the cut is outside (0, 1] |
+| `adaptive_grip_hold_ratio` / `adaptive_grip_slip_ratio` / `adaptive_grip_judge_fraction` | `0.95` / `0.90` / `0.8` | Grip ratio at or above which the limit rises, below which it is cut, and the share of the limit the steering must ask for before a tick is judged. Refused at startup unless `slip_ratio` is below `hold_ratio`, and the judge fraction is not negative |
+| `adaptive_grip_steering_lag_sec` | `0.0` s (shipped YAML: `0.15`) | How far back the yaw is judged against the steering, because the yaw trails the rack. Until that much steering is recorded nothing is judged. `0` judges the steering now. Refused at startup if negative. See [docs/gap-follow.md](../../docs/gap-follow.md#adaptive-grip-imu) |
+| `adaptive_grip_max_steering_change` | `0.0` rad (shipped YAML: `0.05`) | A tick is judged only while the steering has moved no more than this over the lag window (quasi-steady). Otherwise the limit holds. Refused at startup if negative |
 | `ttc_path_margin` | `0.05` m | How far beyond the body's side the TTC brake still counts an obstacle as in the path (was the full `safety_margin`, 0.18 m, before 2026-10-20). Must be between 0 and `safety_margin`. See [docs/gap-follow.md](../../docs/gap-follow.md#the-2026-10-19-run) |
 | `braking_latency_sec` | `0.25` s | Time the car keeps its speed after a slower command; the stopping-distance ceiling subtracts `speed × latency` from the room it sees. `0` = the old formula |
 | `steering_gain_speed_ref` | `0.0` m/s (off) | Above this speed the steering gain falls as `ref / speed`, so fast corrections are smaller. Shipped YAML: `1.8` |
 | `speed_hold_sec` | `0.0` s (off) | Hold the lowest desired speed of this window instead of following every scan's ceiling up and down |
 | `arc_guard_blocked_fallback` | `freest` | What the arc guard does when no arc in reach is clear: `freest` (most free length) or `request` (keep the gap's choice). Shipped YAML: `request` |
-| `narrow_corridor_speed` / `narrow_corridor_clearance` / `open_corridor_clearance` | `2.5` m/s / `0.05` / `0.15` m | Speed ceiling from the body's clearance to the nearer side wall: `max_speed` at `open_corridor_clearance` and above, falling linearly to `narrow_corridor_speed` at `narrow_corridor_clearance`. `narrow_corridor_speed ≥ max_speed` turns it off |
-| `enable_opponent_awareness` + `opponent_*` | `false` (off) | Other cars on track: track moving clusters, follow a car ahead at `(gap − opponent_follow_min_gap) / opponent_follow_time_gap`, and only pass on a straight with `opponent_passing_margin` of room. With it off nothing runs and the commands are identical. Every `opponent_*` value is commented in the YAML; the code is `gap_follow/opponent_tracking.py`. Simulator-validated only — [docs/gap-follow.md](../../docs/gap-follow.md#several-cars-at-once) |
+| `narrow_corridor_speed` / `narrow_corridor_clearance` / `open_corridor_clearance` | `2.5` m/s (shipped YAML: `3.571`) / `0.05` / `0.15` m | Speed ceiling from the body's clearance to the nearer side wall: `max_speed` at `open_corridor_clearance` and above, falling linearly to `narrow_corridor_speed` at `narrow_corridor_clearance`. `narrow_corridor_speed ≥ max_speed` turns it off |
+| `enable_opponent_awareness` + `opponent_*` | `true` (since 2026-10-28; was `false`). Launch: `opponent_awareness:=false` turns it off | Other cars on track: track moving clusters, follow a car ahead at `(gap − opponent_follow_min_gap) / opponent_follow_time_gap`, and only pass on a straight with `opponent_passing_margin` of room. With it off nothing runs and the commands are identical. Every `opponent_*` value is commented in the YAML; the code is `gap_follow/opponent_tracking.py`. Simulator-validated only — [docs/gap-follow.md](../../docs/gap-follow.md#several-cars-at-once) |
+| `opponent_follow_memory_sec` | `1.0` s (`0.0` turns it off) | Holds the follow cap this long after the followed car is lost. Speed only: it can lower a command, never raise one, and never steers or stops the car. Since 2026-10-28 |
+| `enable_launch_boost` + `launch_boost_*` | `false` (shipped YAML: `true`, since 2026-10-30). Launch: `launch_boost:=false` turns it off | Full speed off the start line on the first driving tick after LB, once per node: no ramp, corner, narrow-corridor, follow or alongside cap and no speed hold, and straight ahead (steering damping only) while the body's straight path is clear for its stopping distance, until the braking ceiling reaches the car's speed or `launch_boost_max_sec` (3.0 s) / `launch_boost_max_distance` (5.0 m) pass. `launch_boost_end_steering` (0.0, off) ends it on a steering request past that many rad. Deadman, TTC, emergency clearance, braking and curvature ceilings always apply. Code: `gap_follow/launch_boost.py`. Simulator-validated only — [docs/gap-follow.md](../../docs/gap-follow.md#launch-boost) |
+| `opponent_stopped_release_sec` | `1.0` s | Follow hold: a car that counted as moving stays followed this long after it drops below half of `opponent_moving_speed` (0.3 m/s). Must be above zero |
+| `opponent_radius` | `0.30` m | Rear cutoff only, not an inflation radius: a moving car more than this far behind `base_link` is ignored. The other car's outline is `opponent_length` × `opponent_width` |
+| `opponent_length` / `opponent_width` | `0.58` / `0.31` m | The other car's outline for the gap search: the measured car, padded. Its centre is worked out from the face the scan sees |
+| `opponent_passing_margin` / `opponent_pass_max_steering` | `0.15` m / `0.10` rad | Room added on every side of the other car's outline, and the steering limit for starting a pass. A pass also needs `car_width + 2 × opponent_passing_margin` of room beside the other car (0.61 m shipped). Chosen by the 2026-10-28 margin sweep |
 | `command_slew_max_dt` | `0.10` s | Longest interval one slew step may integrate, so a scan gap isn't cashed in as a jump |
 | `emergency_stop_clearance` | `0.0` m (was `0.02`, cut 2026-08-25) | All-direction final contact floor measured from the padded body |
 | `forward_stop_clearance` / `forward_stop_fov_deg` | `0.20m` (was `0.25m`, cut 2026-08-25) / `60°` | Odom-independent forward-cone braking fallback |

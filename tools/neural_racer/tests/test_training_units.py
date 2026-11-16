@@ -27,10 +27,10 @@ HERE = Path(__file__).resolve().parent
 # --- PPO --------------------------------------------------------------------------------
 
 def test_gae_hand_computed():
-    """3 steps, gamma 0.9, lambda 0.5, no terminals: delta_t = r_t + g V_{t+1} - V_t."""
+    """3 steps, gamma 0.9, lambda 0.5, no terminals: delta_t = r_t + g V(s_t+1) - V_t."""
     r = torch.tensor([[1.0], [0.0], [2.0]])
     v = torch.tensor([[0.5], [0.4], [0.3]])
-    nv = torch.tensor([0.2])
+    nv = torch.tensor([[0.4], [0.3], [0.2]])           # the value of the state each step reached
     f = torch.zeros(3, 1, dtype=torch.bool)
     adv, ret = ppo.gae(r, v, nv, f, f, 0.9, 0.5)
     d2 = 2.0 + 0.9 * 0.2 - 0.3
@@ -46,8 +46,19 @@ def test_gae_terminal_cuts_bootstrap():
     r = torch.tensor([[1.0], [5.0]])
     v = torch.tensor([[0.0], [0.0]])
     term = torch.tensor([[True], [False]])
-    adv, _ = ppo.gae(r, v, torch.tensor([9.0]), term, torch.zeros(2, 1, dtype=torch.bool), 0.9, 1.0)
+    adv, _ = ppo.gae(r, v, torch.tensor([[7.0], [9.0]]), term, term, 0.9, 1.0)
     assert float(adv[0, 0]) == pytest.approx(1.0, abs=1e-6)       # nothing leaks back across the end
+
+
+def test_gae_timeout_bootstraps_from_the_state_reached():
+    """Pardo et al. 2018: a step cut by the time limit bootstraps from where the
+    car was (next_values), not from the next episode's start (values[t + 1])."""
+    r = torch.tensor([[1.0], [0.0]])
+    v = torch.tensor([[0.0], [-50.0]])                  # step 1 is a new episode's first state
+    nv = torch.tensor([[10.0], [0.0]])
+    done = torch.tensor([[True], [False]])
+    adv, _ = ppo.gae(r, v, nv, torch.zeros(2, 1, dtype=torch.bool), done, 0.9, 1.0)
+    assert float(adv[0, 0]) == pytest.approx(1.0 + 0.9 * 10.0, abs=1e-6)
 
 
 def test_ppo_learns_a_bandit():
@@ -202,12 +213,14 @@ def test_exploiter_reset_rule():
 # --- scripted drivers ---------------------------------------------------------------------------------
 
 def _priv_straight(n=1, v=2.0):
-    p = torch.zeros(n, 286)
+    from neural_racer_train.gpu_sim.sim import PRIV_DIM
+    p = torch.zeros(n, PRIV_DIM)
     s = 0.25 * torch.arange(1, 65)
     p[:, 0:64] = s / 16                       # centreline straight ahead
     p[:, 128:192] = 0.5                       # 1 m each side
     p[:, 192:256] = 0.5
     p[:, 256] = v / 5
+    p[:, scripted.MU] = 0.55                  # the floor's grip
     return p
 
 
@@ -273,6 +286,52 @@ def test_check_catches_tight_corner():
     assert any('radius' in r for r in tracks.check(spec, tracks.TrackGenConfig(lap_min=1.0)))
 
 
+def _rectangle_with_one_tight_corner(radius, outside):
+    """A 10 m x 6 m CCW rectangle (left turns: the outside is the right), its
+    first corner rounded to `radius`, 0.4 m inside and `outside` m outside."""
+    rect = np.array([[0, 0], [10, 0], [10, 6], [0, 6]], dtype=float)
+    c = tracks.resample_closed(tracks._fillet_path(rect, np.array([radius, 3.0, 3.0, 3.0])))
+    return tracks.TrackSpec('t', 0, c, np.full(len(c), 0.4), np.full(len(c), outside))
+
+
+def test_turn_room_keeps_a_tight_corner_only_where_the_car_can_swing_wide():
+    """v2 (learn.TRAIN_CONFIGS): a 0.7 m corner passes with 0.8 m outside it
+    (car 1's course: 0.71 m, with 1.56 m of radius plus outside width) and is
+    refused with 0.5 m; v1 refuses it either way, for the radius alone."""
+    from neural_racer_train import learn
+    v1, v2 = learn.TRAIN_CONFIGS['v1'], learn.TRAIN_CONFIGS['v2']
+    wide, narrow = _rectangle_with_one_tight_corner(0.7, 0.8), _rectangle_with_one_tight_corner(0.7, 0.5)
+    assert tracks.check(wide, v2) == []
+    assert any('too tight for its width' in r for r in tracks.check(narrow, v2))
+    assert any('radius' in r for r in tracks.check(wide, v1))
+
+
+def test_v2_tracks_have_tight_corners_the_car_can_take():
+    from neural_racer_train import learn
+    cfg = learn.TRAIN_CONFIGS['v2']
+    tightest = []
+    for seed in range(30):
+        spec = tracks.generate(seed, cfg)
+        assert tracks.check(spec, cfg) == []
+        k = tracks.signed_curvature(spec.centre[::5])
+        r = 1.0 / np.maximum(np.abs(k), 1e-9)
+        outside = np.where(k > 0, spec.w_right[::5], spec.w_left[::5])
+        assert np.all((r >= cfg.turn_room) | (r + outside >= cfg.turn_room - 1e-9))
+        tightest.append(r.min())
+    assert np.mean(np.array(tightest) < 1.3) > 0.4      # v1 never goes under 1.3 m
+
+
+def test_v3_makes_hairpin_loops_round_a_thin_divider():
+    """car 1's course's shape (2026-11-01): a third of v3's tracks, every one valid."""
+    from neural_racer_train import learn
+    cfg = learn.TRAIN_CONFIGS['v3']
+    kinds = [tracks.generate(seed, cfg).kind for seed in range(40)]
+    assert 0.15 <= kinds.count('hairpin_loop') / len(kinds) <= 0.5
+    for seed in range(10):
+        spec = tracks.generate(seed, cfg, kind='hairpin_loop')
+        assert spec.kind == 'hairpin_loop' and tracks.check(spec, cfg) == []
+
+
 def test_check_catches_self_intersection():
     t = np.linspace(0, 2 * math.pi, 600, endpoint=False)
     eight = np.stack([8 * np.sin(t), 8 * np.sin(t) * np.cos(t)], 1)  # a figure-eight crosses itself
@@ -329,13 +388,36 @@ def test_start_grid_cars_apart():
     assert min(d) > 0.535 + 0.2                    # a body length plus 20 cm of air, bends included
 
 
+def test_levels_start_the_learner_behind_slower_cars_and_mostly_near_top_speed():
+    """Plan workstreams 2 and the 2026-11-08 speed bump: a share of multi-car levels put seat 0 last
+    on the grid behind cars capped at 70-90% of its speed; most levels draw their cap near the top."""
+    from neural_racer_train import learn
+    spec = tracks.generate(1)
+    maker = learn.LevelMaker(4)
+    maker.specs[0] = spec
+    lv = [maker.make(0, seed, seed) for seed in range(400)]
+    multi = [x for x in lv if x.n_cars >= 2]
+    over = [x for x in multi if x.v_cap_scale is not None]
+    assert 0.2 <= len(over) / len(multi) <= 0.4
+    L = tracks.lap_length(spec.centre)
+    n = len(spec.centre)
+    for x in over:
+        ahead = [((x.start_idx[i] - x.start_idx[0]) % n) * L / n for i in range(1, x.n_cars)]
+        assert all(0 < d < L / 2 for d in ahead)                        # every opponent starts ahead of seat 0
+        assert x.v_cap_scale[0] == 1.0 and np.all((x.v_cap_scale[1:] >= 0.7) & (x.v_cap_scale[1:] <= 0.9))
+    caps = np.array([x.v_cap for x in lv])
+    assert np.mean(caps >= learn.V_CAP_HIGH) >= 0.65 and caps.max() <= learn.V_CAP_RANGE[1]
+    assert all(x.v_cap_scale is None for x in lv if x.n_cars == 1)
+
+
 # --- the trainer contract ---------------------------------------------------------------------------------
 
 def _stage(tmp_path, *extra):
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(HERE.parent), os.environ.get('PYTHONPATH', '')]),
                OMP_NUM_THREADS='2')
     cmd = [sys.executable, '-m', 'neural_racer_train.teacher', '--run-dir', str(tmp_path / 'run'),
-           '--device', 'cpu', '--num-envs', '2', '--rollout', '4', '--pool-slots', '2', *extra]
+           '--device', 'cpu', '--num-envs', '2', '--rollout', '4', '--pool-slots', '2',
+           '--warm-start-steps', '0', '--eval-every', '0', *extra]
     return subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 
@@ -370,4 +452,4 @@ def test_place_reward_closed_form():
     assert float(r) == pytest.approx(0.1, abs=1e-6)   # 0.1 m at v_ref 4 m/s over 25 ms = one unit of 0.1
     t = torch.ones(1, 1, dtype=torch.bool)
     r = race.reward(cfg, z, torch.ones(1, 1, dtype=torch.long), t, t, f, f, z, 0.025)
-    assert float(r) == pytest.approx(2.0 - 20.0, abs=1e-6)
+    assert float(r) == pytest.approx(cfg.place - cfg.fault_contact, abs=1e-6)       # a place gained, an at-fault contact

@@ -35,9 +35,16 @@ N_BEAMS = 1081
 SPAN = math.radians(270.0)
 
 
+# Every scene here is a car mid-course meeting a corner, not a race start. The
+# launch boost (shipped on since 2026-10-30) holds the car straight on its first
+# ticks while the straight path is clear, so it is off here
+# (test_launch_boost_node.py covers it).
+MID_RACE = ['-p', 'enable_launch_boost:=false']
+
+
 @pytest.fixture
 def node():
-    rclpy.init(args=['--ros-args', *CAR, *TEST_ONLY_DRIVE])
+    rclpy.init(args=['--ros-args', *CAR, *MID_RACE, *TEST_ONLY_DRIVE])
     n = GapFollowNode()
     assert n.drive_pub.topic_name == '/test_only/drive'
     # Slew is tested elsewhere; here it would only hide the steering decision.
@@ -175,6 +182,10 @@ def test_swept_clearance_still_brakes_for_a_wall_in_the_path(node):
 # ============================================================================
 
 def _setup_pair(node, segments, speed=2.0):
+    # Corner setup is the feature under test. It ships OFF since 2026-10-27
+    # (docs/gap-follow.md#race-defaults-2026-10-27), so turn it on here rather
+    # than rely on the shipped default.
+    node.enable_corner_setup = True
     node.enable_arc_guard = False      # isolate the setup term
     scan = _raycast(segments)
     with_setup = _drive(node, scan, speed).steering_angle
@@ -217,6 +228,7 @@ def test_corner_setup_does_nothing_on_a_straight(node):
 
 
 def test_corner_setup_is_reported_in_the_decision_log(node):
+    node.enable_corner_setup = True    # off by default since 2026-10-27
     node.enable_arc_guard = False
     _record_details(node)
     _drive(node, _raycast(_left_turn(0.7, 0.7, corner_x=1.5)), speed=2.0)

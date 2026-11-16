@@ -34,7 +34,7 @@ def _tick_times(width, n=1500):
         t0 = time.perf_counter()
         enc, valid = obs.pool_scan(r, 0.02, 30.0)
         history.push_tick(enc, valid, 1.0, (0.1, 0.0, 0.2))
-        o = obs.build_observation(history, imu_present=True, mode=0, v_cap=1.0)
+        o = obs.build_observation(history, imu_present=True, mode=0, v_cap=1.0, a_lat=2.0)
         out = policy.step(o)
         res = wrapper.apply(out.steering, out.speed, out.ego_path, r, angles, 0.02, 30.0, 0.0, 0.025)
         history.push_command(res.steering, res.speed)

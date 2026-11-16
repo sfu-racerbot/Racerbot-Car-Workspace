@@ -18,8 +18,9 @@ Everything below, condensed. Each step is one command, run on a **Fir login node
 | 1 | `tools/neural_racer/slurm/fir_run.sh setup` | referee gym, wheelhouse check, login venv, held-out maps | once |
 | 2 | `tools/neural_racer/slurm/fir_run.sh shakedown` | 1 h GPU job: the tests, then every stage at tiny scale, then the export golden check | read `nr-shakedown-<job>.out`: every line must say PASS |
 | 3 | `tools/neural_racer/slurm/fir_run.sh benchmark` | 30 min: how many environments fill an H100 | put `chosen.num_envs` into `fir.conf` as `NR_NUM_ENVS` |
-| 4 | `tools/neural_racer/slurm/fir_run.sh teacher` | Stage 1, seeds 0 1 2, each a chain of `NR_SEGMENTS` segments | `fir_run.sh status` until `DONE` |
-| 5 | `tools/neural_racer/slurm/fir_run.sh distill <best seed>` | Stage 2. **Re-run after Phase 0** puts car 1's measured IMU numbers into `gpu_sim/params.py` | wait for `DONE` |
+| 3b | `tools/neural_racer/slurm/fir_run.sh tracklib` | CPU job: 8192 training tracks into `NR_TRACKLIB`, so a run fills its GPU pool at start-up | wait for the job; rerun to top up |
+| 4 | `tools/neural_racer/slurm/fir_run.sh teacher` | Stage 1, seeds 0 1 2, each a chain of `NR_SEGMENTS` segments; races snapshots on the held-out tracks as it trains | `fir_run.sh status` until `DONE`; compare seeds by the `kind: eval` lines in `metrics.jsonl` |
+| 5 | `tools/neural_racer/slurm/fir_run.sh distill <best seed>` | Stage 2, from that seed's `checkpoints/best.pt`. **Re-run after Phase 0** puts car 1's measured IMU numbers into `gpu_sim/params.py` | wait for `DONE` |
 | 6 | `tools/neural_racer/slurm/fir_run.sh league` | Stage 3: four roles; the referee workers score snapshots as they appear | days on a default allocation |
 | 7 | `tools/neural_racer/slurm/fir_run.sh select` | picks the release from the referee's results | read `selection_report.json` |
 | 8 | `tools/neural_racer/slurm/fir_run.sh export <winner>` | the folder the car loads, with both reports | copy to the car, run `approve_model` there |

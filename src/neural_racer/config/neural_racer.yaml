@@ -27,7 +27,12 @@ neural_racer_node:
     imu_timeout_sec: 0.1
     pose_timeout_sec: 0.2
 
-    # Safety wrapper -- gap_follow.yaml's values. Each can only lower speed.
+    # Safety wrapper -- gap_follow.yaml's values, except max_lateral_accel and
+    # max_invalid_fraction. max_lateral_accel is set on its own line below:
+    # gap_follow moved to 2.5 (decided 2026-10-26), and neural_racer deliberately
+    # keeps 2.0 (training cap unchanged). See src/neural_racer/test/test_config.py.
+    # max_invalid_fraction is neural_racer's own value; gap_follow has no such key.
+    # Each can only lower speed.
     max_steering_angle: 0.33
     car_width: 0.31
     car_length: 0.58
@@ -36,6 +41,11 @@ neural_racer_node:
     reserve_distance: 0.20
     max_braking_decel: 3.0
     braking_latency_sec: 0.25
+    # The braking cap's clearance is gap_follow's swept path: how far the body
+    # can drive along the arc it is steering, over the forward window's beams.
+    forward_fov_deg: 180.0
+    swept_clearance_margin: 0.05
+    swept_clearance_max_length: 3.0
     max_lateral_accel: 2.0       # the cornering cap; raising it is a Phase 10+ decision
     max_steering_rate: 2.0
     command_slew_max_dt: 0.10

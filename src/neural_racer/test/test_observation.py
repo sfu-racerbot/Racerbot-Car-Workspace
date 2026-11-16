@@ -85,7 +85,7 @@ def test_encode_endpoints(r, expected):
 
 def test_ego_layout_matches_spec():
     h = _history()
-    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=2.0)
+    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=2.0, a_lat=3.0)
     e = o['ego']
     # speeds pushed 1, 2, 3: index 0 is the newest (t)
     assert list(e[0:3] * 5.0) == pytest.approx([3.0, 2.0, 1.0], abs=1e-6)
@@ -98,11 +98,12 @@ def test_ego_layout_matches_spec():
     assert e[18] == 1.0 and e[19] == 0.0
     assert e[20] * 5.0 == pytest.approx(2.0, abs=1e-6)
     assert e[21] == 0.0 and e[22] == 0.0
+    assert e[23] * obs.A_LAT_SCALE == pytest.approx(3.0, abs=1e-6)        # v2: the cornering cap
 
 
 def test_scan_block_order():
     h = _history()
-    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0)
+    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0, a_lat=2.0)
     # scans were 1 m, 2 m, 3 m everywhere: channel 0 is the newest (3 m)
     assert o['scan'][0, 0] == pytest.approx(obs.encode_range(3.0), abs=1e-6)
     assert o['scan'][2, 0] == pytest.approx(obs.encode_range(1.0), abs=1e-6)
@@ -111,7 +112,7 @@ def test_scan_block_order():
 
 def test_short_history_repeats_the_oldest():
     h = _history(n_ticks=1)
-    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0)
+    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0, a_lat=2.0)
     assert np.all(o['scan'][0] == o['scan'][1]) and np.all(o['scan'][1] == o['scan'][2])
     assert o['ego'][0] == o['ego'][1] == o['ego'][2]
     # commands start from zeros, not from the first pushed one
@@ -120,7 +121,7 @@ def test_short_history_repeats_the_oldest():
 
 def test_imu_missing_zeroes_imu_slots():
     h = _history()
-    o = obs.build_observation(h, imu_present=False, mode=obs.MODE_REACTIVE, v_cap=1.0)
+    o = obs.build_observation(h, imu_present=False, mode=obs.MODE_REACTIVE, v_cap=1.0, a_lat=2.0)
     assert np.all(o['ego'][9:19] == 0.0)
 
 
@@ -129,33 +130,33 @@ def test_imu_present_with_gap_raises():
     enc, valid = obs.pool_scan(_ranges(), 0.02, 30.0)
     h.push_tick(enc, valid, speed=1.0, imu=None)
     with pytest.raises(obs.ObservationError, match='gaps'):
-        obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0)
+        obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0, a_lat=2.0)
 
 
 def test_reactive_mode_zeroes_map_blocks_even_if_given():
     h = _history()
-    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0,
+    o = obs.build_observation(h, imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0, a_lat=2.0,
                               preview=np.ones((4, 32)), race=np.ones(6))
     assert np.all(o['preview'] == 0.0) and np.all(o['race'] == 0.0)
 
 
 def test_map_mode_needs_its_blocks():
     with pytest.raises(obs.ObservationError, match='preview'):
-        obs.build_observation(_history(), imu_present=True, mode=obs.MODE_MAP, v_cap=1.0)
+        obs.build_observation(_history(), imu_present=True, mode=obs.MODE_MAP, v_cap=1.0, a_lat=2.0)
 
 
 def test_map_mode_copies_blocks():
     pv = np.arange(128, dtype=np.float32).reshape(4, 32) / 100
-    o = obs.build_observation(_history(), imu_present=True, mode=obs.MODE_MAP, v_cap=1.0,
+    o = obs.build_observation(_history(), imu_present=True, mode=obs.MODE_MAP, v_cap=1.0, a_lat=2.0,
                               preview=pv, race=np.full(6, 0.5))
     assert np.array_equal(o['preview'], pv) and o['ego'][19] == 1.0
 
 
 def test_camera_flags():
-    o = obs.build_observation(_history(), imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0,
+    o = obs.build_observation(_history(), imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0, a_lat=2.0,
                               camera=np.ones(64), camera_age=0.1)
     assert o['ego'][21] == 1.0 and o['ego'][22] == pytest.approx(0.5, abs=1e-6)
-    o = obs.build_observation(_history(), imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0,
+    o = obs.build_observation(_history(), imu_present=True, mode=obs.MODE_REACTIVE, v_cap=1.0, a_lat=2.0,
                               camera=np.ones(64), camera_age=5.0)
     assert o['ego'][22] == 1.0                          # clipped
 
@@ -169,15 +170,17 @@ def test_non_finite_inputs_raise(bad):
     with pytest.raises(obs.ObservationError, match='IMU'):
         h.push_tick(enc, valid, speed=0.0, imu=(bad, 0.0, 0.0))
     with pytest.raises(obs.ObservationError, match='v_cap'):
-        obs.build_observation(_history(), imu_present=True, mode=0, v_cap=bad)
+        obs.build_observation(_history(), imu_present=True, mode=0, v_cap=bad, a_lat=2.0)
+    with pytest.raises(obs.ObservationError, match='a_lat'):
+        obs.build_observation(_history(), imu_present=True, mode=0, v_cap=1.0, a_lat=bad)
     with pytest.raises(obs.ObservationError, match='not finite'):
-        obs.build_observation(_history(), imu_present=True, mode=1, v_cap=1.0,
+        obs.build_observation(_history(), imu_present=True, mode=1, v_cap=1.0, a_lat=2.0,
                               preview=np.full((4, 32), bad), race=np.zeros(6))
 
 
 def test_empty_history_raises():
     with pytest.raises(obs.ObservationError, match='no scan'):
-        obs.build_observation(obs.History(), imu_present=False, mode=0, v_cap=1.0)
+        obs.build_observation(obs.History(), imu_present=False, mode=0, v_cap=1.0, a_lat=2.0)
 
 
 def test_reset_clears_everything():

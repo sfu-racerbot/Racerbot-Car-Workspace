@@ -1,6 +1,6 @@
 """Shared helpers for neural_racer's tests: path setup and synthetic models.
 
-Random weights here have the exact v1 shapes, so every test in this folder
+Random weights here have the exact spec-v2 shapes, so every test in this folder
 runs on the Jetson with no PyTorch. The comparison against PyTorch's own
 forward pass lives in tools/neural_racer/tests/test_export_golden.py.
 """
@@ -17,6 +17,8 @@ for rel in ('..', '../../gap_follow', '../../drive_intent'):
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 
+from neural_racer import observation as obs  # noqa: E402
+
 FULL = ((32, 64, 64, 64), 256)
 HALF = ((16, 32, 32, 32), 128)
 
@@ -27,7 +29,7 @@ def random_weights(seed: int = 0, width=FULL, scale: float = 0.3) -> dict:
     shapes = {
         'scan.c0': (c0, 4, 7), 'scan.c1': (c1, c0, 5), 'scan.c2': (c2, c1, 5),
         'scan.c3': (c3, c2, 3), 'scan.fc': (fc, c3 * 17),
-        'ego.fc0': (64, 23), 'ego.fc1': (64, 64),
+        'ego.fc0': (64, obs.EGO_DIM), 'ego.fc1': (64, 64),
         'prev.c0': (32, 4, 5), 'prev.c1': (32, 32, 3), 'prev.fc': (64, 256),
         'race.fc': (32, 6),
         'fuse.fc': (256, fc + 64 + 64 + 32 + 64),
@@ -54,7 +56,7 @@ def random_weights(seed: int = 0, width=FULL, scale: float = 0.3) -> dict:
 
 
 def card(width=FULL, **extra) -> dict:
-    c = {'obs_spec_version': 1, 'scan_channels': list(width[0]), 'scan_fc': width[1],
+    c = {'obs_spec_version': obs.OBS_SPEC_VERSION, 'scan_channels': list(width[0]), 'scan_fc': width[1],
          'modalities': ['scan', 'ego', 'imu', 'preview', 'race'],
          'run_name': 'test', 'snapshot_id': 'test-0'}
     c.update(extra)
@@ -86,7 +88,7 @@ def make_golden(policy, seqs: int = 2, steps: int = 5, seed: int = 0) -> dict:
     fixture for the plumbing; the real golden comes from PyTorch)."""
     rng = np.random.default_rng(seed)
     g = {'scan': rng.random((seqs, steps, 4, 270)).astype(np.float32),
-         'ego': rng.random((seqs, steps, 23)).astype(np.float32),
+         'ego': rng.random((seqs, steps, obs.EGO_DIM)).astype(np.float32),
          'preview': rng.standard_normal((seqs, steps, 4, 32)).astype(np.float32),
          'race': rng.random((seqs, steps, 6)).astype(np.float32),
          'camera': np.zeros((seqs, steps, 64), np.float32)}

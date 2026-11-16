@@ -60,10 +60,16 @@ class _Conv:
 
 
 class PolicyNumpy:
-    """One car, one tick at a time. Keeps the GRU state between calls."""
+    """One car, one tick at a time. Keeps the GRU state between calls -- unless the
+    model card says `recurrent: false` (the MLP ablation, distill --memory none):
+    that network was trained with the memory's hidden input held at zero every
+    tick (model.PolicyNet.recur), so here too. Before 2026-11-06 the card's flag
+    was ignored, an MLP model failed its golden check by 2.05, and the referee
+    raced MLP snapshots with a memory they never had."""
 
     def __init__(self, weights: dict, card: dict | None = None):
         self.w = {k: np.asarray(v, dtype=np.float32) for k, v in weights.items()}
+        self.recurrent = bool((card or {}).get('recurrent', True))
         self._check()
         self.scan_convs = [self._conv(n, s, p) for n, s, p in SCAN_CONVS]
         self.prev_convs = [self._conv(n, s, p) for n, s, p in PREVIEW_CONVS]
@@ -126,6 +132,8 @@ class PolicyNumpy:
         u = _silu(self._lin('fuse.fc', np.concatenate([z, z_cam])))
 
         H = GRU_HIDDEN
+        if not self.recurrent:
+            self.h = np.zeros(H, dtype=np.float32)
         gi = self.w['gru.weight_ih'] @ u + self.w['gru.bias_ih']
         gh = self.w['gru.weight_hh'] @ self.h + self.w['gru.bias_hh']
         r = _sigmoid(gi[:H] + gh[:H])

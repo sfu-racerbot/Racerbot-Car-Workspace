@@ -128,9 +128,10 @@ def test_speed_loop_matches_plant():
 
 
 def test_grip_matches_sim_fidelity():
+    """The friction circle (grip_model 0) against the CPU referee's plain calibration."""
     fidelity.ensure_paths()
     from sim_fidelity.grip import GripEnvelope
-    p = CarParams()
+    p = CarParams(grip_model=0.0)
     env = GripEnvelope(friction_accel_limit=p.a_max, wheelbase=p.wheelbase,
                        longitudinal_coupling=p.longitudinal_grip_coupling)
     bp = BatchParams.constant(p, 1, 'cpu')
@@ -139,6 +140,22 @@ def test_grip_matches_sim_fidelity():
         s, v, a = rng.uniform(-0.45, 0.45), rng.uniform(0.0, 6.5), rng.uniform(-6, 6)
         ours = float(actuation.grip_clamp(torch.tensor([s]), torch.tensor([v]), torch.tensor([a]), bp))
         assert ours == pytest.approx(env.apply(s, v, a), abs=1e-6)
+
+
+def test_progressive_grip_is_the_measured_curve():
+    """grip_model 1 (the default since 2026-11-08): the wheel angle that turns the car by what main's
+    ProgressiveGrip delivers -- the measured curve, scaled -- whatever the braking."""
+    p = CarParams()
+    bp = BatchParams.constant(p, 1, 'cpu')
+    for asked, k in ((1.5, 1.0), (3.0, 1.0), (4.5, 1.0), (4.5, 1.2), (9.0, 0.9)):
+        bp.grip_scale = torch.tensor([k])
+        v = 3.0
+        s = math.atan(asked * p.wheelbase / v ** 2)
+        want = k * float(np.interp(asked / k, actuation.GRIP_ASKED, actuation.GRIP_DELIVERED))
+        for a in (-3.0, 0.0, 1.5):
+            got = float(actuation.grip_clamp(torch.tensor([s]), torch.tensor([v]), torch.tensor([a]), bp))
+            assert math.tan(got) * v ** 2 / p.wheelbase == pytest.approx(want, rel=1e-4)
+    assert want < 9.0 and actuation.GRIP_DELIVERED[1] == 2.0           # below 2 m/s^2 the car turns as asked
 
 
 def test_delay_line_matches_transport_delay():
@@ -153,8 +170,11 @@ def test_delay_line_matches_transport_delay():
 
 
 def test_car1_overrides_applied():
-    """Oracle: vesc.yaml speed_max 23250 eRPM at car 1's 3650 gain, and car 1's
-    2026-10-21 circles (docs/hardware-reference.md)."""
+    """Oracle: vesc.yaml speed_max 23250 eRPM at car 1's 4600 gain (main ea5f114), and car 1's
+    2026-10-21 circles (docs/hardware-reference.md). Training's motor tops out at TRAIN_SPEED_MAX, above
+    the VESC's configured limit."""
+    from neural_racer_train.gpu_sim import params
     p = CarParams()
-    assert p.speed_max == pytest.approx(23250 / 3650, abs=1e-12)
+    assert params.CAR1_OVERRIDES['speed_max'] == pytest.approx(23250 / 4600, abs=1e-12)
+    assert p.speed_max == params.TRAIN_SPEED_MAX == 10.0
     assert (p.steering_max_left, p.steering_max_right) == (0.401, -0.388)

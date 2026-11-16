@@ -78,7 +78,19 @@ auto_map_race_node:
     # accumulated yaw whatever its size. 300 leaves room for a lap driven
     # with some counter-steer in it.
     minimum_lap_turn_deg: 300.0
-    minimum_lap_duration_sec: 15.0
+    # Run 20261026-194913 mapped 28.7 m: even at gap_follow's 5.0 m/s
+    # cap a circuit takes >= 28.7/5.0 = 5.74 s. A 4 s floor leaves it
+    # open on the first return; 15 s forced two circuits in indoor_oval.
+    # Car 1's 1.05 m minimum radius (docs/hardware-reference.md) gives
+    # 5.0/1.05 = 4.76 rad/s = 273 deg/s: 300 deg takes >= 1.1 s.
+    # Keep the floor above that, below 5.74 s; turning is the lap gate.
+    minimum_lap_duration_sec: 4.0
+    # Once a lap has closed, the next must also take at least this fraction
+    # of it: the previous lap's time is the course length over the speed
+    # actually driven, so the gate follows the course. Car 1's 28.7 m in
+    # 16-17 s gives ~8 s; at 5.0 m/s (5.74 s a lap) 2.9 s, and the 4 s floor
+    # governs. Half a circuit never forces a second one, as fixed 15 s did.
+    minimum_lap_duration_fraction: 0.5
     departure_distance: 2.0
     # How close to its start the car has to pass for the lap to count as
     # closed. This was 0.75m, which existed to keep the start/finish seam
@@ -100,6 +112,17 @@ auto_map_race_node:
     # geometry (LapRecorder._reanchor). 0 disables.
     max_pose_jump_m: 0.12
     closure_heading_deg: 30.0
+    # Close the lap at the nearest point it comes to its start, not at the
+    # first tick inside closure_distance. Run 20261026-194913 (gyro-on) closed
+    # every lap at 28.1-29.7deg of heading error: the start sits in a curve,
+    # so the first tick inside the circle with the heading inside the 30deg
+    # gate is still ~29deg off the start heading. Replayed through
+    # LapRecorder with this on, the same four laps close at 13.1, 5.9, 1.0
+    # and 0.6deg, inside the 15deg quality check. The lap closes once the car
+    # is closest_approach_margin_m past that nearest point, or out of the
+    # circle, and only if it faced the start there (closure_heading_deg).
+    close_at_closest_approach: true
+    closest_approach_margin_m: 0.05
     # A reactive controller does not repeat its line, so the car can lap
     # a course indefinitely passing just outside a fixed closure_distance
     # -- and every miss costs a full revolution, about 2.3 minutes on the
@@ -118,7 +141,7 @@ auto_map_race_node:
     # anyway with a logged error -- the racing line is already on disk, and
     # pure_pursuit's pose_frozen watchdog is the backstop.
     map_save_timeout_sec: 20.0
-    output_directory: ~/.ros/racerbot_auto
+    output_directory: ~/racerbot-ws/data/racerbot_auto
 
     # The speed profile for a course the car has just discovered at
     # mapping_max_speed, on a line recorded from a live SLAM pose, in a room
