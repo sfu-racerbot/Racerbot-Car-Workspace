@@ -112,3 +112,17 @@ not the car's: on the race-day course and floor, chassis to nearest scan return 
 The simulated gap follow keeps 0.11 m further from walls than the car (its longer path and the 4-5% it runs slow),
 and both simulated tails are cleaner. Until the simulated world matches the car on this scale, clearance-only verdicts
 in the simulator (the parked speed-ups) cannot be ranked.
+
+## Car 1 cannot build a line on the race-day map (2026-11-16)
+
+`python3 -m pure_pursuit.race_line --car rb1 --from-run-dir <car 2's mapping run>` (#63's adopt path), shipped code:
+
+| car 2 mapping run | car 1 | car 2 |
+|---|---|---|
+| 20261111-143428 | min_time, 9.66 s | (not tried) |
+| 20261111-151125 (the run car 2 raced on; the simulator's `car2_course_2026_11_11` map) | **no line**: every candidate fails (min_time: body 0.224 against the 0.30 m tight floor, curvature 1.083 against car 1's 0.879 1/m) | min_time, 9.44 s |
+
+Car 1's planner curvature limit (0.879 1/m) is below what one corner of this line needs; car 1's own steering
+(0.33 rad, about 0.95 1/m) and its race-day gap-follow laps say the car can drive the course. Before floor test F3
+(car 1's map racer on car 2's map), either adopt a mapping run car 1's limits accept, or revisit car 1's planner
+steering limit and tight floor. Nothing was changed.
