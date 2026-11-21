@@ -1,0 +1,21 @@
+/lifecycle_manager_pf_localization:
+  ros__parameters:
+    /bond_disable_heartbeat_timeout: false
+    attempt_respawn_reconnection: true
+    autostart: true
+    bond_respawn_max_duration: 10.0
+    bond_timeout: 4.0
+    diagnostic_updater:
+      period: 1.0
+      use_fqn: false
+    node_names:
+    - map_server
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    start_type_description_service: true
+    use_sim_time: false

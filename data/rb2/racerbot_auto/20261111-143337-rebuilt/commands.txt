@@ -1,0 +1,10 @@
+========================================================================
+NO RACING FOLDER FROM RUN 20261111-143337.
+========================================================================
+
+  Why: no acceptable racing line: recorded: body 0.2000, limit 0.3000, shortfall 0.1000; min_curvature: corridor too narrow: 0.400 m, needs 0.610 m; min_time: minimum-curvature corridor unavailable: corridor too narrow: 0.400 m, needs 0.610 m
+
+  The map is kept in /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143337-rebuilt to look at. Map again:
+    ros2 run racerbot_launch map_course
+========================================================================
+

@@ -1,0 +1,41 @@
+========================================================================
+MAPPING FINISHED.  Saved in: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428
+========================================================================
+  - map.yaml + map.pgm (the map), posegraph (SLAM pose graph)
+  - raceline_profiled.csv (racing line with speeds)
+  - start_pose.yaml (where the car stopped mapping)
+
+BEFORE RACING: put the car anywhere on the course on the open track,
+facing the racing direction (the way it drove while mapping). The
+race launch finds it from its LiDAR and refuses, saying why, if it
+cannot: the map may be wrong, the place may look like another part
+of the course, or the car may be facing backwards.
+Use start:=start_pose to start exactly where mapping stopped instead.
+
+Terminal 1 -- hardware: the bringup you mapped with, still running.
+If you closed it, start it again:
+  ros2 launch f1tenth_stack bringup_launch.py
+
+Only with start:=start_pose -- check the car is on the mapping stop. This must print GO:
+  ros2 run pure_pursuit check_start --ros-args -p run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428
+
+Terminal 2 -- first check with wheels off the ground, then floor test at 1.5 m/s:
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428 profile:=raceline_floor_test.csv
+If raceline_floor_test.csv is missing, the builder did not finish; rebuild before floor testing.
+
+After the floor test, stop that launch. Pick ONE default-speed command, then hold LB to drive:
+  # pure pursuit (the default racing controller)
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428
+  # Stanley
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428 steering_law:=stanley
+  # LQR
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428 steering_law:=lqr
+  # MPC
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428 steering_law:=mpc
+  # LQR with the steering delays predicted out
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428 steering_law:=delay_lqr
+  # MPC with steering delay and servo prediction
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428 steering_law:=delay_mpc
+
+These commands are also in /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-143428/commands.txt
+========================================================================
