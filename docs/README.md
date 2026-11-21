@@ -41,6 +41,7 @@ After that, follow whichever branch below matches what you're doing.
 
 | Doc | What's in it, and who it's for |
 |---|---|
+| [neural-racer-real-runs.md](neural-racer-real-runs.md) | Score the simulated driver on recorded commands and compare a speed-dependent correction without driving either car. |
 | [launchstart.md](launchstart.md) | The daily cheat sheet: one copy-paste command per mode (drive, gap_follow, map a course in 3 laps, race on the saved map, dashboard, record, simulator, stop), with what you see when it works. For anyone running the car today. |
 | [operations.md](operations.md) | Step-by-step procedures: driving, mapping, localizing, running autonomy, racing, shutting down. For anyone actually using the car. |
 | [sim-validation.md](sim-validation.md) | Test your driving code against simulated physics without the car, and watch it on the dashboard from your laptop. For anyone who changed driving code and wants to know if it works. |
