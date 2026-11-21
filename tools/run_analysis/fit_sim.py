@@ -59,9 +59,12 @@ def empty_floor() -> str:
     return _FLOOR
 
 
-def simulate_commands(commands: np.ndarray, calibration, profile_name: str = "car", seed: int = 1):
+def simulate_commands(commands: np.ndarray, calibration, profile_name: str = "car", seed: int = 1,
+                      *, initial_speed=None, prior_speed_commands=()):
     """Drive the plant with ``commands`` ((N, 2) steering, speed at 40 Hz);
-    return (speed, yaw_rate) arrays of the true simulated state per tick."""
+    return (speed, yaw_rate) arrays of the true simulated state after each tick.
+    For a rolling start, supply true initial speed (m/s) and the preceding speed
+    commands, oldest first, to initialize the transport delay."""
     import gymnasium as gym
     import f1tenth_gym  # noqa: F401
     from f1tenth_gym.envs.dynamic_models import DynamicModel
@@ -84,7 +87,9 @@ def simulate_commands(commands: np.ndarray, calibration, profile_name: str = "ca
         render_enabled=False)
     env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=None)
     plant = FidelityPlant(env, profile, 1, seed, CONTROL_DT, calibration)
-    plant.reset(np.array([[0.0, -25.0, 0.0]]))
+    plant.reset(np.array([[0.0, -25.0, 0.0]]), speeds=None if initial_speed is None else [initial_speed])
+    for v in prior_speed_commands:
+        plant.speed_delays[0].push(v)
     speed, yaw_rate = [], []
     for steering, v in commands:
         plant.step([(float(steering), float(v))])

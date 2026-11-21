@@ -152,6 +152,38 @@ The VESC's speed loop is modelled as proportional each way, with a ceiling. Acce
 
 The braking ceiling comes from a fit-run stop (run `180355`, 3.10 m/s, 1.31 m by the wall). It predicts the held-out 5.41 m/s stop of run `175124` at 3.44 m, against 3.39 measured.
 
+### Car 2: testing how long a stop takes
+
+For tests that depend on **when the car slows down after a zero-speed command**, use `--car rb2 --floor sfu_course_2026_10_30_stops`.
+
+This variant changes only a forward stop with an exact zero-speed target. It brakes at up to 4.5 m/s² as before, but the braking force falls off sooner as the wheels slow. Nonzero targets, other floors and the real car are unchanged.
+
+The [October 30 recordings](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace/tree/9c2c2ed7bbf675674f30ca5937432a62b0eab3a3/data/racerbot_runs) contain the final speed command (`/ackermann_cmd`) and wheel speed (`/odom`). Eight fit stops gave a median decay rate of 3.107 per second between 1.0 and 0.3 m/s; the variant uses 3.0.
+
+Each replay starts at the recorded wheel speed, loads the preceding three speed commands for the 75 ms delay, then commands zero without using any more recorded speeds.
+
+Each cell is **original → stop variant** root mean square error (RMSE; smaller is better). Stop time runs from the zero command to 0.3 m/s, not to absolute rest. Tail time covers only 1.0 to 0.3 m/s.
+
+| Recordings | Stops | Stop time (s) | Tail time (s) | Wheel travel (m) |
+|---|---:|---:|---:|---:|
+| Fit | 8 | 0.255 → 0.054 | 0.216 → 0.026 | 0.268 → 0.159 |
+| Held out of the fit | 6 | 0.242 → 0.056 | 0.205 → 0.047 | 0.293 → 0.190 |
+| Outside the original floor split | 4 | 0.263 → 0.050 | 0.236 → 0.034 | 0.342 → 0.229 |
+
+**Which floor for distance?** Wheel travel does not measure wall clearance. On the existing wall-distance check from 5.41 m/s, the real car took 1.40 s and travelled 3.39 m. The variant predicts 1.425 s and 3.515 m; the original predicts 1.200 s and 3.379 m.
+
+Keep the original floor for that distance check. These runs do not establish how either model stops on other surfaces or in reverse.
+
+**Terminal, workspace root:** after the [simulator setup](simulator.md), replay the included measurements (no ROS or original bags needed):
+
+```bash
+python3 tools/run_analysis/validate_stop_tail.py
+```
+
+You should see `fit`, `held-out` and `additional` rows matching the table. Add `--runs /path/to/Racerbot-Car-2-Workspace/data/racerbot_runs` to extract them again from the linked revision (requires Python package `rosbags==0.10.11`).
+
+A stop must start above 2 m/s, sustain zero through the 0.3 m/s crossing, last 0.6–3 s and have no gap above 0.1 s in either signal.
+
 ### Odometry
 
 `/odom` speed reads 1.033 times true speed, so the simulated `/odom` does too. The speed command is scaled by 4614 / 4447.98 / 1.033 = 1.004. That follows from `vesc.yaml` commanding at 4614 eRPM per m/s while `/odom` reads at 4447.98.
