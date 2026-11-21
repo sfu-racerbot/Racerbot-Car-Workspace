@@ -16,8 +16,7 @@ from pathlib import Path
 START_POSE_FILE = 'start_pose.yaml'
 START_MODES = ('anywhere', 'start_pose')
 
-# steering_law values pure_pursuit_node accepts (pure_pursuit.yaml), in the
-# order they are offered, with a one-line description each.
+# Post-mapping hardware menu. Do not offer simulator-only laws here.
 STEERING_LAWS = (
     ('pure_pursuit', 'pure pursuit (the default racing controller)'),
     ('stanley', 'Stanley'),

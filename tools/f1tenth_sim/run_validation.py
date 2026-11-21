@@ -79,7 +79,7 @@ OVERTAKE_MIN_SIDE_CLEARANCE = 0.70
 OPPONENT_RESERVE_DISTANCE = 0.5
 SAFETY_MODES = ("fallback", "map")
 # The node's law parameter prefixes (pure_pursuit_node, the loop before make_law).
-LAW_PARAM_PREFIXES = ('stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
+LAW_PARAM_PREFIXES = ('adaptive_pure_pursuit', 'stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
 
 # Which fidelity fixes are in force. Set from --fidelity in main(); the
 # module-level default keeps probe scripts that import this file honest.
@@ -1031,7 +1031,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                   max_lateral_accel: Optional[float] = None,
                   safety: str = "fallback", laps: int = 1,
                   steering_limit: float | None = None,
-                  grip_schedule=()) -> dict:
+                  grip_schedule=(), planned_top_speed: float = 4.0) -> dict:
     """One solo lap of pure pursuit. The optional arguments default to the selected
     car's own: its calibration, the track's own line planned at the PathPlan defaults,
     and pure_pursuit.yaml's speed and lateral limits. ``grip_schedule``: ((sim time s, grip
@@ -1042,6 +1042,8 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
         raise ValueError(f"safety must be one of {SAFETY_MODES}")
     if laps < 1:
         raise ValueError("laps must be at least 1")
+    if not math.isfinite(planned_top_speed) or planned_top_speed <= 0:
+        raise ValueError("planned_top_speed must be positive and finite")
     if steering_limit is not None and (
             not math.isfinite(steering_limit) or steering_limit <= 0.0):
         raise ValueError("steering_limit must be positive and finite")
@@ -1054,7 +1056,8 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                        max_laps=laps)
     line = plant.env.unwrapped.track.raceline
     if plan is None:
-        plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
+        plan = PathPlan.from_track(plant.env.unwrapped.track, v_max=planned_top_speed,
+                                   car_id=car_id)
     # Start on the line the car is actually going to follow. Spawning it on
     # the shipped raceline while it tracks a different one would begin the lap
     # with most of a corridor's worth of cross-track error already on the
@@ -1066,6 +1069,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                             car_id=car_id, steering_limit=steering_limit)
     command_shaper = CommandShaper(car_id, max_speed, max_lateral_accel)
     max_cross_track = 0.0
+    peak_speed = 0.0
     cross_track_sum = 0.0
     cross_track_sq: list[float] = []
     truth_index = None
@@ -1147,6 +1151,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             obs, _reward, done, _truncated, info = plant.step(
                 [(steering, speed)]
             )
+            peak_speed = max(peak_speed, abs(float(plant.truth(0)[3])))
             lap_times_clock.append(float(info["sim_time"]))
             lap_counts.append(float(info["lap_counts"][0]))
             lap_times = lap_times_from_counts(lap_times_clock, lap_counts)
@@ -1176,6 +1181,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     result.update(
         {
             "steering_law": law_name,
+            "peak_speed_mps": round(peak_speed, 3),
             "max_cross_track_m": round(max_cross_track, 4),
             "mean_cross_track_m": round(
                 cross_track_sum / max(1, len(cross_track_sq)), 4),
@@ -1206,7 +1212,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             "mpc_latched": policy.latched(),
         })
     result["passed"] = (
-        result["laps"] >= 1.0
+        result["laps"] >= laps
         and not result["collision"]
         and max_cross_track < 0.5
     )
@@ -1317,9 +1323,8 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
                 max_engagement_range=5.0,
                 range_min=lidar.range_min,
                 cluster_gap_threshold=0.3,
+                half_fov=math.radians(30.0),
             )
-            if detection is not None and abs(detection[3]) > math.radians(30.0):
-                detection = None
 
             full_detection = None
             if detection is not None:
@@ -1625,6 +1630,8 @@ def _parse_law_params(overrides):
         for name in getattr(tracking_laws, f'{prefix.capitalize()}Params').__dataclass_fields__:
             known.add(f'{prefix}.{name}')
     known |= {'min_lookahead', 'max_lookahead', 'lookahead_speed_gain'}
+    known |= {'adaptive_pure_pursuit.' + name
+              for name in tracking_laws.AdaptivePurePursuitParams.__dataclass_fields__}
     params = {}
     for item in overrides:
         if '=' not in item:

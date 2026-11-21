@@ -51,6 +51,8 @@ def test_lap_times_from_cumulative_counts():
 @pytest.mark.parametrize("kwargs, message", [
     ({"safety": "nowhere"}, "safety"),
     ({"laps": 0}, "laps"),
+    ({"planned_top_speed": 0}, "planned_top_speed"),
+    ({"planned_top_speed": float("nan")}, "planned_top_speed"),
     ({"steering_limit": 0.0}, "steering_limit"),
     ({"steering_limit": float("nan")}, "steering_limit"),
 ])
@@ -70,3 +72,12 @@ def test_run_pure_solo_map_safety_completes_two_laps_and_restores_limit():
                               safety="map", laps=2, steering_limit=0.30)
     assert len(result["lap_times_s"]) == 2
     assert rv.STEERING_LIMIT == old_limit
+
+
+def test_two_lap_request_does_not_pass_after_one_clean_lap():
+    import eval_gap
+    result = rv.run_pure_solo(eval_gap.track_path("indoor_wide"), 12345, 20.0, car_id="rb2",
+                              safety="map", laps=2, law_name="adaptive_pure_pursuit",
+                              planned_top_speed=4.0, max_speed=4.0, max_lateral_accel=2.5)
+    assert len(result["lap_times_s"]) == 1
+    assert not result["passed"]

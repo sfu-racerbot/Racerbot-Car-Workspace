@@ -85,6 +85,13 @@ pure_pursuit_node:
     # a command moves the wheels. steering_time_constant (Stanley, LQR): a
     # low-pass on the output that keeps localisation jitter off the rack.
 
+    # --- Opt-in adaptive pure pursuit (simulator only) ---
+    adaptive_pure_pursuit.min_lookahead: 0.8
+    adaptive_pure_pursuit.max_lookahead: 1.1
+    adaptive_pure_pursuit.lookahead_speed_gain: 0.1
+    adaptive_pure_pursuit.curvature_gain: 0.15
+    adaptive_pure_pursuit.delay_compensation: 0.12
+
     # --- Stanley (docs/steering-laws.md#stanley) ---
     stanley.gain: 5.0        # 1/s -- lateral-error correction strength
     stanley.softening: 1.0   # m/s -- keeps the correction bounded at low speed

@@ -35,8 +35,9 @@ def _declared_launch_arguments(path):
     return names
 
 
-def test_every_steering_law_is_offered_and_every_offered_law_exists():
-    assert [law for law, _ in run_commands.STEERING_LAWS] == list(LAW_NAMES)
+def test_every_nonexperimental_law_is_offered_and_every_offered_law_exists():
+    assert [law for law, _ in run_commands.STEERING_LAWS] == [
+        law for law in LAW_NAMES if law != 'adaptive_pure_pursuit']
 
 
 def test_race_command_uses_only_arguments_race_launch_declares():
@@ -59,8 +60,11 @@ def test_race_command_names_the_run_and_the_law():
 
 def test_text_has_one_command_per_law_bringup_and_the_start_anywhere_rule():
     text = run_commands.commands_text(RUN)
+    # Mapping output is a menu for a physical car, not a simulator.
+    assert 'steering_law:=adaptive_pure_pursuit' not in text
     for law in LAW_NAMES:
-        assert f'  {run_commands.race_command(RUN, law)}\n' in text
+        if law != 'adaptive_pure_pursuit':
+            assert f'  {run_commands.race_command(RUN, law)}\n' in text
     assert '  ros2 launch f1tenth_stack bringup_launch.py\n' in text
     # tech lead, 2026-11-07: put the car anywhere on the course
     assert 'anywhere on the course' in text

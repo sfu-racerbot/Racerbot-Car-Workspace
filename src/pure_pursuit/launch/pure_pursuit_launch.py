@@ -40,7 +40,8 @@ def generate_launch_description():
     steering_law_arg = DeclareLaunchArgument(
         'steering_law',
         default_value=default_steering_law,
-        description='Steering law: pure_pursuit (default), stanley, lqr, or mpc. '
+        description='Steering law: pure_pursuit, adaptive_pure_pursuit (simulation only), stanley, '
+                    'lqr, mpc, delay_lqr, or delay_mpc. '
                     'Only select a law on the car after it has beaten pure '
                     'pursuit in the comparison harness (docs/sim-validation.md).'
     )

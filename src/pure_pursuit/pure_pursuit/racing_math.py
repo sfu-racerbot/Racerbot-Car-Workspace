@@ -1010,7 +1010,7 @@ def cluster_geometry(ranges: np.ndarray, angle_min: float, angle_increment: floa
 def detect_opponent_cluster(ranges: np.ndarray, angle_min: float, angle_increment: float,
                              max_range: float, min_width: float, max_width: float,
                              max_engagement_range: float, cluster_gap_threshold: float = 0.3,
-                             open_side_margin: float = 0.5):
+                             open_side_margin: float = 0.5, *, half_fov: float = math.inf):
     """Look for a single object in the scan shaped and sized like another
     race car, sitting out in the open track rather than flush against a
     wall.
@@ -1020,8 +1020,8 @@ def detect_opponent_cluster(ranges: np.ndarray, angle_min: float, angle_incremen
     spanning a physical width between `min_width` and `max_width` --
     narrow enough it isn't a wall segment (walls produce much longer or
     far more irregular runs), wide enough it isn't sensor noise or a
-    thin post. Among every cluster that qualifies, the closest one wins
-    (the one most immediately relevant to a racing decision right now).
+    thin post. Among qualifying clusters with centroid bearing within
+    +/- half_fov radians of forward, the closest one wins.
 
     This is a geometric heuristic, not object recognition -- no map is
     consulted, no machine learning, and nothing is tracked between calls
@@ -1038,7 +1038,7 @@ def detect_opponent_cluster(ranges: np.ndarray, angle_min: float, angle_incremen
             ranges, angle_min, angle_increment, start_idx, end_idx)
         if not (min_width <= width <= max_width):
             continue
-        if centroid_range > max_engagement_range:
+        if centroid_range > max_engagement_range or abs(centroid_angle) > half_fov:
             continue
 
         # Confirm open space immediately on both sides -- otherwise this
@@ -1303,7 +1303,7 @@ def detect_dynamic_cluster(measured: np.ndarray, expected: np.ndarray,
                             angle_min: float, angle_increment: float,
                             margin: float, min_width: float, max_width: float,
                             max_engagement_range: float, range_min: float = 0.0,
-                            cluster_gap_threshold: float = 0.3):
+                            cluster_gap_threshold: float = 0.3, *, half_fov: float = math.inf):
     """Find the closest car-plausible cluster of *dynamic* beams -- beams
     the map fails to explain (see dynamic_beam_mask). Contiguous flagged
     beams form a cluster, split where consecutive measured ranges jump by
@@ -1312,7 +1312,8 @@ def detect_dynamic_cluster(measured: np.ndarray, expected: np.ndarray,
     reuse the same limits as the heuristic detector, but note the width
     check here is only guarding against garbage (a flock of noise beams,
     two cars merged), not doing the car-vs-wall discrimination -- the map
-    subtraction itself already did that.
+    subtraction itself already did that. As in the heuristic, rank only
+    centroids within +/- half_fov radians of forward.
 
     Returns (start_idx, end_idx, centroid_range, centroid_angle) in the
     same shape detect_opponent_cluster returns, or None. Indices are into
@@ -1339,6 +1340,7 @@ def detect_dynamic_cluster(measured: np.ndarray, expected: np.ndarray,
                 measured, angle_min, angle_increment, start, end)
             if (min_width <= width <= max_width
                     and centroid_range <= max_engagement_range
+                    and abs(centroid_angle) <= half_fov
                     and (best is None or centroid_range < best[2])):
                 best = (start, end, centroid_range, centroid_angle)
             start = i if split else None

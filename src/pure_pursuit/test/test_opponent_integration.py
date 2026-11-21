@@ -102,8 +102,8 @@ def node(profiled_csv):
 
 def _set_pose(node, x, y, yaw=0.0):
     msg = PoseStamped()
-    msg.pose.position.x = x
-    msg.pose.position.y = y
+    msg.pose.position.x = float(x)
+    msg.pose.position.y = float(y)
     msg.pose.orientation.z = math.sin(yaw / 2.0)
     msg.pose.orientation.w = math.cos(yaw / 2.0)
     node.pose_callback(msg)
@@ -1097,6 +1097,35 @@ def test_map_mode_overtakes_using_map_subtraction(map_mode_node):
         node.control_loop()
     assert node.overtake_active is True
     assert node.overtake_side == 1
+
+
+@pytest.mark.parametrize('mode', ['map', 'heuristic'])
+@pytest.mark.parametrize('following,side_deg', [(False, -65), (True, 120)])
+def test_nearer_side_cluster_does_not_hide_the_leader(node, mode, following, side_deg):
+    """Rank eligible centroids, not all returns: keep full-scan indices for a pass."""
+    from types import SimpleNamespace
+
+    node.enable_opponent_following = following
+    node.opponent_detection_mode = mode
+    node._live_map_ray_caster = SimpleNamespace(
+        expected_ranges=lambda x, y, yaw, angles: np.full(len(angles), 10.0))
+    _set_pose(node, 0.0, 0.0)
+    scan = _clear_scan(n=541, angle_span=math.radians(270))
+    angles = scan.angle_min + np.arange(len(scan.ranges)) * scan.angle_increment
+    front = np.abs(angles) < math.radians(5)
+    side = np.abs(angles - math.radians(side_deg)) < math.radians(10)
+    ranges = np.full(len(angles), 10.0)
+    ranges[side], ranges[front] = 1.0, 2.0
+    scan.ranges = ranges.tolist()
+
+    for passing, visible, distance in [(False, front, 2.0), (True, side, 1.0)]:
+        node.overtake_active = passing
+        hit = node._detect_opponent(scan, ranges, 0.0, 0.0)
+        assert hit is not None
+        lo, hi, r, bearing = hit
+        assert visible[lo] and visible[hi] and lo < hi
+        assert r == distance
+        assert min(angles[visible]) <= bearing <= max(angles[visible])
 
 
 def test_map_subtraction_ignores_what_the_map_explains(map_mode_node):

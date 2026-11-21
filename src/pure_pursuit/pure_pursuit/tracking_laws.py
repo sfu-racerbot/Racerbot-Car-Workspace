@@ -98,7 +98,7 @@ class TrackingLaw(Protocol):
         ...
 
 
-LAW_NAMES = ('pure_pursuit', 'stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
+LAW_NAMES = ('pure_pursuit', 'adaptive_pure_pursuit', 'stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
 DEADLINE_LAWS = frozenset({'mpc', 'delay_mpc'})
 
 
@@ -275,6 +275,78 @@ class PurePursuitLaw:
             f"kappa={kappa:+.3f}/m")
         return SteeringResult(steering=steering, unclipped=float(unclipped),
                               detail=detail)
+
+
+# ---------------------------------------------------------------------------
+# Adaptive pure pursuit: choose the target from the delay-predicted pose.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AdaptivePurePursuitParams:
+    min_lookahead: float = 0.8
+    max_lookahead: float = 1.1
+    lookahead_speed_gain: float = 0.1
+    curvature_gain: float = 0.15
+    delay_compensation: float = 0.12
+
+
+class AdaptivePurePursuitLaw:
+    """Delay-predicted pursuit of an arc-interpolated, curvature-adaptive target."""
+
+    name = 'adaptive_pure_pursuit'
+
+    def __init__(self, limits: VehicleLimits, params: AdaptivePurePursuitParams):
+        for key in ('min_lookahead', 'max_lookahead'):
+            value = getattr(params, key)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f'adaptive_pure_pursuit.{key} must be finite and > 0')
+        if params.max_lookahead < params.min_lookahead:
+            raise ValueError('adaptive_pure_pursuit.max_lookahead must be >= min_lookahead')
+        for key in ('lookahead_speed_gain', 'curvature_gain'):
+            value = getattr(params, key)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f'adaptive_pure_pursuit.{key} must be finite and >= 0')
+        _check_delay('adaptive_pure_pursuit.delay_compensation', params.delay_compensation)
+        self.limits, self.params = limits, params
+
+    def reset(self) -> None:
+        return None
+
+    def lookahead(self, speed: float, arc: float, path: PathContext) -> float:
+        p = self.params
+        base = racing_math.adaptive_lookahead(
+            speed, p.lookahead_speed_gain, p.min_lookahead, p.max_lookahead)
+        total = float(path.cumulative[-1] + (path.seg_len[-1] if path.closed else 0))
+        ahead = path.cumulative - arc
+        if path.closed:
+            ahead %= total
+        window = (ahead >= 0) & (ahead <= base)
+        curvature = max(abs(sample_at_arc(path.curvature, path.cumulative, arc,
+                                         path.closed, path.seg_len)),
+                        abs(sample_at_arc(path.curvature, path.cumulative, arc + base,
+                                          path.closed, path.seg_len)),
+                        float(np.max(np.abs(path.curvature[window]), initial=0.0)))
+        return float(np.clip(base / (1 + p.curvature_gain * curvature),
+                             p.min_lookahead, p.max_lookahead))
+
+    def steer(self, inp: TrackingInput, path: PathContext) -> SteeringResult:
+        _require_finite(inp.x, inp.y, inp.yaw, inp.speed, inp.previous_steering)
+        if len(path.xy) < 2 or not np.any(path.seg_len > 0):
+            raise TrackingLawError('adaptive_pure_pursuit needs a nondegenerate path')
+        predicted = predict_input(inp, path, self.params.delay_compensation, self.limits.wheelbase)
+        projection = racing_math.project_onto_path(
+            path.xy, path.seg_len, (predicted.x, predicted.y), predicted.nearest_idx, path.closed)
+        lookahead = self.lookahead(predicted.speed, projection.arc_length, path)
+        arc = projection.arc_length + lookahead
+        x, y = (sample_at_arc(path.xy[:, axis], path.cumulative, arc, path.closed, path.seg_len)
+                for axis in (0, 1))
+        xb, yb = racing_math.world_to_body(x - predicted.x, y - predicted.y, predicted.yaw)
+        command = racing_math.steering_from_curvature(
+            racing_math.steering_arc_curvature(xb, yb), self.limits.wheelbase)
+        steering = float(np.clip(command, -self.limits.max_steering_angle,
+                                 self.limits.max_steering_angle))
+        return SteeringResult(steering=steering, unclipped=command,
+                              detail=f'adaptive_pure_pursuit lookahead={lookahead:.3f}m')
 
 
 # ---------------------------------------------------------------------------
@@ -1361,6 +1433,12 @@ def make_law(name: str, limits: VehicleLimits,
             max_lookahead=float(params.get('max_lookahead', 1.5)),
             lookahead_speed_gain=float(params.get('lookahead_speed_gain', 0.15)),
         ))
+    if name == 'adaptive_pure_pursuit':
+        from dataclasses import fields
+        defaults = AdaptivePurePursuitParams()
+        return AdaptivePurePursuitLaw(limits, AdaptivePurePursuitParams(**{
+            f.name: float(params.get('adaptive_pure_pursuit.' + f.name, getattr(defaults, f.name)))
+            for f in fields(defaults)}))
     if name == 'stanley':
         d = StanleyParams()
         return StanleyLaw(limits, StanleyParams(

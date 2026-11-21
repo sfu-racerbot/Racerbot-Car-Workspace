@@ -407,6 +407,11 @@ class PurePursuitNode(Node):
         # Half-window for smoothing applied to the path ONLY for the signed
         # curvature the laws read; the line being tracked stays unsmoothed.
         self.declare_parameter('tracking_curvature_smoothing', 2)
+        self.declare_parameter('adaptive_pure_pursuit.min_lookahead', 0.8)
+        self.declare_parameter('adaptive_pure_pursuit.max_lookahead', 1.1)
+        self.declare_parameter('adaptive_pure_pursuit.lookahead_speed_gain', 0.1)
+        self.declare_parameter('adaptive_pure_pursuit.curvature_gain', 0.15)
+        self.declare_parameter('adaptive_pure_pursuit.delay_compensation', 0.12)
         self.declare_parameter('stanley.gain', 5.0)
         self.declare_parameter('stanley.softening', 1.0)
         self.declare_parameter('stanley.delay_compensation', 0.10)
@@ -813,7 +818,7 @@ class PurePursuitNode(Node):
             'max_lookahead': self.max_lookahead,
             'lookahead_speed_gain': self.lookahead_speed_gain,
         }
-        for prefix in ('stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc'):
+        for prefix in self._LAW_PARAM_NAMES:
             for full_name in self._declared_law_param_names(prefix):
                 self._law_params[full_name] = self.get_parameter(full_name).value
         try:
@@ -1040,6 +1045,9 @@ class PurePursuitNode(Node):
 
     # Every launch-time parameter of each alternative law, by law.
     _LAW_PARAM_NAMES = {
+        'adaptive_pure_pursuit': tuple('adaptive_pure_pursuit.' + key for key in (
+            'min_lookahead', 'max_lookahead', 'lookahead_speed_gain',
+            'curvature_gain', 'delay_compensation')),
         'stanley': ('stanley.gain', 'stanley.softening', 'stanley.delay_compensation',
                     'stanley.steering_time_constant'),
         'lqr': ('lqr.q_lateral', 'lqr.q_heading', 'lqr.r_steer', 'lqr.v_grid_max',
@@ -1252,7 +1260,7 @@ class PurePursuitNode(Node):
             # built once in __init__ and cached, so accepting a runtime change
             # would report a value the control loop never uses. Refuse loudly.
             if (parameter.name == 'steering_law'
-                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.', 'delay_lqr.', 'delay_mpc.'))
+                    or parameter.name.partition('.')[0] in self._LAW_PARAM_NAMES
                     or parameter.name == 'tracking_curvature_smoothing'):
                 return SetParametersResult(
                     successful=False,
@@ -2726,6 +2734,14 @@ class PurePursuitNode(Node):
         same forward-FOV gate: a car far off to the side is not one we
         are racing against right now.
         """
+        # Rank whole clusters inside the observation cone. Filtering only the
+        # winner let a nearer side return hide a leader straight ahead.
+        if self.overtake_active:
+            half_fov = max(abs(scan.angle_min), abs(scan.angle_max))
+        elif self.enable_opponent_following:
+            half_fov = math.pi / 2
+        else:
+            half_fov = math.radians(self.avoidance_fov_deg) / 2
         if self.opponent_detection_mode == 'map' and self.map_ray_caster is not None:
             # Every map_beam_step-th beam is plenty of resolution for a
             # car-sized object, and keeps the per-tick ray-cast cost tiny.
@@ -2743,7 +2759,7 @@ class PurePursuitNode(Node):
                 self.map_subtraction_margin,
                 self.opponent_min_width, self.opponent_max_width,
                 self.opponent_engagement_range, range_min=scan.range_min,
-                cluster_gap_threshold=self.opponent_cluster_gap)
+                cluster_gap_threshold=self.opponent_cluster_gap, half_fov=half_fov)
             if candidate is not None:
                 # Indices come back in downsampled space -- map them onto
                 # the full scan for pick_pass_side and friends.
@@ -2754,20 +2770,7 @@ class PurePursuitNode(Node):
                 ranges, scan.angle_min, scan.angle_increment, self.max_range,
                 self.opponent_min_width, self.opponent_max_width,
                 self.opponent_engagement_range, self.opponent_cluster_gap,
-                self.opponent_open_side_margin)
-
-        if candidate is None:
-            return None
-        # Following needs the car through bends, not just the +/-30 degree
-        # avoidance cone. Confirmation/wall rejection remain unchanged.
-        if self.overtake_active:
-            # Completion needs an actual sighting alongside/behind. Use only
-            # the scan's available coverage; never invent a rear observation.
-            half_fov = max(abs(scan.angle_min), abs(scan.angle_max))
-        else:
-            half_fov = math.pi / 2 if self.enable_opponent_following else math.radians(self.avoidance_fov_deg) / 2.0
-        if not (-half_fov <= candidate[3] <= half_fov):
-            return None
+                self.opponent_open_side_margin, half_fov=half_fov)
         return candidate
 
     def _update_opponent_and_overtake(self, nearest_idx: int, *, allow_pass=True, desired_steering=None):
