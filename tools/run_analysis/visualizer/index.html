@@ -27,7 +27,7 @@
   </section>
   <p class="alignment"><b>Time zero:</b> each recording’s first displayed telemetry sample, not first motion or controller activation.</p>
   <section id="panels" aria-label="Run analysis"></section>
-  <footer><b>Reading the traces</b> · XY is wheel odometry relative to each run’s first pose, not a surveyed track. Charts share axes and start at the first displayed topic. Dots show the latest recorded sample at the cursor; runs are not lap-aligned.</footer>
+  <footer><b>Reading the traces</b> · The dot marks the latest odometry sample at the cursor. Telemetry charts share axes; recordings are not lap-aligned.</footer>
 </main>
 <template id="panel">
   <article class="panel">
@@ -37,6 +37,7 @@
     </header>
     <div class="trajectory">
       <div class="map-label"><span class="label">ODOMETRY TRACE</span><span>XY / METERS</span></div>
+      <p class="map-note">Same scale, separate starting points; not a shared map.</p>
       <svg class="map" viewBox="0 0 500 188" role="img" aria-label="Wheel odometry trajectory"></svg>
       <div class="map-key"><span>○ Start</span><span>● Cursor</span><span class="state"></span></div>
     </div>

@@ -118,6 +118,7 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
   if (i) root.classList.add("b");
   q(".badge").textContent = letter;
   q(".source").textContent = run.source;
+  if (!compare) q(".map-note").textContent = "Wheel odometry relative to the first recorded pose.";
   q(".late").hidden = !run.startedLate;
   q(".meta").textContent = run.algorithms.length ? run.algorithms.join(", ") : run.name;
   const menu = q(".run-select");
