@@ -16,11 +16,11 @@ function commandPath(rows, column, x, y) {
   return path;
 }
 
-function steeringLabel(cmd, time) {
-  if (!cmd) return "—°";
-  const value = cmd[2].toFixed(2) + "°";
+function commandLabel(cmd, time, column, unit) {
+  if (!cmd) return "—" + unit;
+  const value = cmd[column].toFixed(2) + unit;
   const age = time - cmd[0];
   return age > COMMAND_MAX_AGE ? "Gap · last " + value + " (" + age.toFixed(1) + " s ago)" : value;
 }
 
-if (typeof module !== "undefined") module.exports = {commandPath, steeringLabel};
+if (typeof module !== "undefined") module.exports = {commandPath, commandLabel};

@@ -143,6 +143,7 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
   const speed = chart(q(".speed"), [[run.cmd, 1, "target"], [run.odom, 3, "odom"]], speedRange);
   const steer = chart(q(".steer"), [[run.cmd, 2, "angle"]], steerRange);
   const speedVal = q(".live-speed"), steerVal = q(".live-steer"), state = q(".state"), poseState = q(".pose-state");
+  const cmdSpeedVal = q(".live-command");
   panels.append(root);
   return t => {
     const ended = t > run.duration;
@@ -152,7 +153,8 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
     poseState.textContent = odom ? "● Cursor" : t < run.odom[0][0] ? "Waiting for odometry" :
       t > run.odom.at(-1)[0] ? "Odometry ended" : "Odometry gap";
     speedVal.textContent = (odom ? odom[3].toFixed(2) : "—") + " m/s";
-    steerVal.textContent = steeringLabel(cmd, t);
+    cmdSpeedVal.textContent = commandLabel(cmd, t, 1, " m/s");
+    steerVal.textContent = commandLabel(cmd, t, 2, "°");
     state.textContent = ended ? "Run ended" : joy ? "LB " + (joy[1] ? "held" : "released") : "LB not sampled";
   };
 }
