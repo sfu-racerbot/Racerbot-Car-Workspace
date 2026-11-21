@@ -59,6 +59,15 @@ def test_metadata_remains_text_inside_report():
     assert json.loads(raw) == [{"name": name}]
 
 
+@pytest.mark.parametrize("flag,expected", [("true", True), ("false", False), ("null", False)])
+def test_late_warning_follows_recorder_metadata_even_without_algorithm(tmp_path, flag, expected):
+    cache = tmp_path / "analysis"
+    cache.mkdir()
+    np.savez(cache / "run.npz", odom=np.array([[0, 1, 0, 0, 0, 0, 1]]))
+    (tmp_path / "auto_record.yaml").write_text(f"activity:\n  started_late: {flag}\n")
+    assert viz.load(tmp_path)["startedLate"] is expected
+
+
 def test_cached_runs_cli_does_not_clobber_output(tmp_path):
     # Independent oracle: raw wheel-odometry XY and speed columns in runlog.Run.
     paths = [viz.DATA / "rb1/racerbot_runs/20261026-194514", viz.DATA / "rb2/racerbot_runs/20261030-184826"]

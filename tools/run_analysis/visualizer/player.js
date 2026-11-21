@@ -118,6 +118,7 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
   if (i) root.classList.add("b");
   q(".badge").textContent = letter;
   q(".source").textContent = run.source;
+  q(".late").hidden = !run.startedLate;
   q(".meta").textContent = run.algorithms.length ? run.algorithms.join(", ") : run.name;
   const menu = q(".run-select");
   menu.setAttribute("aria-label", "Recording " + letter);

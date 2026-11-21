@@ -25,13 +25,14 @@
     <input id="scrub" type="range" min="0" max="1" step="any" value="0" aria-label="Elapsed replay time">
     <label class="rate"><span class="sr-only">Playback speed</span><select id="rate"><option>0.5×</option><option selected>1×</option><option>2×</option><option>4×</option></select></label>
   </section>
+  <p class="alignment"><b>Time zero:</b> each recording’s first displayed telemetry sample, not first motion or controller activation.</p>
   <section id="panels" aria-label="Run analysis"></section>
   <footer><b>Reading the traces</b> · XY is wheel odometry relative to each run’s first pose, not a surveyed track. Charts share axes and start at the first displayed topic. Dots show the latest recorded sample at the cursor; runs are not lap-aligned.</footer>
 </main>
 <template id="panel">
   <article class="panel">
     <header class="panel-head">
-      <div class="panel-tag"><span class="badge"></span><span class="label">RECORDING</span><span class="source"></span></div>
+      <div class="panel-tag"><span class="badge"></span><span class="label">RECORDING</span><span class="late" hidden>Late start · already moving</span><span class="source"></span></div>
       <select class="run-select"></select><div class="meta"></div>
     </header>
     <div class="trajectory">
