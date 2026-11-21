@@ -407,6 +407,11 @@ class PurePursuitNode(Node):
         # Half-window for smoothing applied to the path ONLY for the signed
         # curvature the laws read; the line being tracked stays unsmoothed.
         self.declare_parameter('tracking_curvature_smoothing', 2)
+        self.declare_parameter('adaptive_pure_pursuit.min_lookahead', 0.8)
+        self.declare_parameter('adaptive_pure_pursuit.max_lookahead', 2.5)
+        self.declare_parameter('adaptive_pure_pursuit.lookahead_speed_gain', 0.3)
+        self.declare_parameter('adaptive_pure_pursuit.curvature_gain', 0.1)
+        self.declare_parameter('adaptive_pure_pursuit.delay_compensation', 0.1)
         self.declare_parameter('stanley.gain', 5.0)
         self.declare_parameter('stanley.softening', 1.0)
         self.declare_parameter('stanley.delay_compensation', 0.10)
@@ -813,7 +818,7 @@ class PurePursuitNode(Node):
             'max_lookahead': self.max_lookahead,
             'lookahead_speed_gain': self.lookahead_speed_gain,
         }
-        for prefix in ('stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc'):
+        for prefix in self._LAW_PARAM_NAMES:
             for full_name in self._declared_law_param_names(prefix):
                 self._law_params[full_name] = self.get_parameter(full_name).value
         try:
@@ -1040,6 +1045,9 @@ class PurePursuitNode(Node):
 
     # Every launch-time parameter of each alternative law, by law.
     _LAW_PARAM_NAMES = {
+        'adaptive_pure_pursuit': tuple('adaptive_pure_pursuit.' + key for key in (
+            'min_lookahead', 'max_lookahead', 'lookahead_speed_gain',
+            'curvature_gain', 'delay_compensation')),
         'stanley': ('stanley.gain', 'stanley.softening', 'stanley.delay_compensation',
                     'stanley.steering_time_constant'),
         'lqr': ('lqr.q_lateral', 'lqr.q_heading', 'lqr.r_steer', 'lqr.v_grid_max',
@@ -1252,7 +1260,7 @@ class PurePursuitNode(Node):
             # built once in __init__ and cached, so accepting a runtime change
             # would report a value the control loop never uses. Refuse loudly.
             if (parameter.name == 'steering_law'
-                    or parameter.name.startswith(('stanley.', 'lqr.', 'mpc.', 'delay_lqr.', 'delay_mpc.'))
+                    or parameter.name.startswith(('adaptive_pure_pursuit.', 'stanley.', 'lqr.', 'mpc.', 'delay_lqr.', 'delay_mpc.'))
                     or parameter.name == 'tracking_curvature_smoothing'):
                 return SetParametersResult(
                     successful=False,

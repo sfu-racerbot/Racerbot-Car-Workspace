@@ -79,7 +79,7 @@ OVERTAKE_MIN_SIDE_CLEARANCE = 0.70
 OPPONENT_RESERVE_DISTANCE = 0.5
 SAFETY_MODES = ("fallback", "map")
 # The node's law parameter prefixes (pure_pursuit_node, the loop before make_law).
-LAW_PARAM_PREFIXES = ('stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
+LAW_PARAM_PREFIXES = ('adaptive_pure_pursuit', 'stanley', 'lqr', 'mpc', 'delay_lqr', 'delay_mpc')
 
 # Which fidelity fixes are in force. Set from --fidelity in main(); the
 # module-level default keeps probe scripts that import this file honest.
@@ -1625,6 +1625,8 @@ def _parse_law_params(overrides):
         for name in getattr(tracking_laws, f'{prefix.capitalize()}Params').__dataclass_fields__:
             known.add(f'{prefix}.{name}')
     known |= {'min_lookahead', 'max_lookahead', 'lookahead_speed_gain'}
+    known |= {'adaptive_pure_pursuit.' + name
+              for name in tracking_laws.AdaptivePurePursuitParams.__dataclass_fields__}
     params = {}
     for item in overrides:
         if '=' not in item:
