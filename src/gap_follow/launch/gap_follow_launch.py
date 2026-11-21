@@ -90,8 +90,8 @@ def generate_launch_description(imu_probe=None):
 
     time_trial_arg = DeclareLaunchArgument(
         'time_trial', default_value='false',
-        description='true: one car against the clock. Aims at the deepest point of each '
-                    'gap and raises max_lateral_accel to 3.0. Turns opponent awareness '
+        description='true: one car against the clock. Aims deep, centering wide bands '
+                    'in long views, and raises max_lateral_accel to 3.0. Turns opponent awareness '
                     'off whatever opponent_awareness says, so never with another car on '
                     'the track. Simulator-validated only '
                     '(docs/gap-follow.md#speed-on-the-real-course-2026-10-30).')

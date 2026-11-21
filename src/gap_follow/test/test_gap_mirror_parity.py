@@ -100,6 +100,16 @@ def test_mirror_reads_every_parameter_it_needs_from_the_shipped_yaml():
     assert set(params) <= gap_mirror.REQUIRED_PARAMS
 
 
+def test_mirror_open_aim_moves_from_the_edge_to_the_middle():
+    from test_gap_follow_speed_shaping_node import _sector_scan
+    scan = _sector_scan(8.0, 26.0, far=10.0)
+    params = gap_mirror.node_params() | {'aim_depth_bias': 1.0}
+    for width, expected in [(0.0, 0.0), (1.0, math.radians(8.0))]:
+        mirror = gap_mirror.GapController(params | {'open_aim_min_width': width}, _Lidar(scan))
+        mirror.command(np.asarray(scan.ranges), 1.0, 0)
+        assert mirror.telemetry['target_angle'] == pytest.approx(expected, abs=scan.angle_increment)
+
+
 def test_mirror_refuses_a_config_it_does_not_model(tmp_path):
     text = open(PACKAGED_CONFIG).read().replace(
         'enable_cornering_anticipation: false', 'enable_cornering_anticipation: true')
