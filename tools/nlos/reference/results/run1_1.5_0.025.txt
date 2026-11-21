@@ -1,0 +1,12 @@
+/home/ubuntu/nlos_proto/run1.py:52: RuntimeWarning: Mean of empty slice
+  print(f' {D:5.2f} {xe:5.1f}  | {nh:3d}/{len(hid)}   {nd:3d} ({(nd/max(nh,1)):.2f})   {nl:3d} | {np.sqrt(np.nanmean(e**2)):.3f}   {np.median(cen) if cen else np.nan:.3f}   {ff} | {max(depth) if depth else 0:.1f}')
+W=1.5 panel L=0.800 P0=[0.93431458 0.        ] P1=[1.5        0.56568542] fp_k=0.025; background static cells 605
+  D[m]  ego_x | hidden_from_LOS  NLOS_det(of hidden)  LOS_det | outline RMSE[m]  centre err med[m]  fitfail | max depth y-W seen [m]
+  7.23  -6.0  |  75/75     0 (0.00)     0 | nan   nan   4 | 0.0
+  6.23  -5.0  |  75/75     0 (0.00)     0 | nan   nan   3 | 0.0
+  5.24  -4.0  |  73/75     0 (0.00)     2 | nan   nan   2 | 0.0
+  4.24  -3.0  |  72/75    19 (0.26)     3 | 0.013   0.261   0 | 4.0
+  3.25  -2.0  |  71/75    33 (0.46)     4 | 0.020   0.244   0 | 4.8
+  2.76  -1.5  |  69/75    37 (0.54)     6 | 0.022   0.244   2 | 4.4
+  2.27  -1.0  |  66/75    33 (0.50)     9 | 0.018   0.235   0 | 4.4
+  1.78  -0.5  |  59/75    28 (0.47)    16 | 0.071   0.234   0 | 4.8
