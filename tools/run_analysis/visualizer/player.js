@@ -129,7 +129,7 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
   runs.forEach((r, n) => menu.add(new Option(title(r), n)));
   menu.value = selected[i];
   menu.onchange = () => {
-    selected[i] = Number(menu.value); refresh();
+    selected[i] = Number(menu.value); refresh(time);
     panels.querySelectorAll(".run-select")[i].focus();
   };
   for (const [cls, value, unit] of [["duration", run.duration, "s"], ["distance", run.distance, "m"], ["peak", run.peak, "m/s"]]) {
@@ -207,6 +207,12 @@ $("play").onclick = () => {
   $("play").textContent = "Ⅱ Pause"; lastTick = performance.now(); frame = requestAnimationFrame(tick);
 };
 scrub.oninput = () => seek(Number(scrub.value));
+scrub.onkeydown = e => {
+  const direction = {ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1}[e.key];
+  if (!direction) return;
+  e.preventDefault();
+  seek((Math.round(time * 10) + direction) / 10);
+};
 $("single").onclick = () => { compare = false; refresh(time); };
 $("compare").onclick = () => { compare = true; refresh(time); };
 refresh();

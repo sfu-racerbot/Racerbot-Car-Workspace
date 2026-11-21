@@ -79,6 +79,7 @@ footer {font-size: 12px; color: var(--muted); padding: 18px 0 28px; max-width: 1
 .sr-only {position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%)}
 @media(max-width: 720px) {
   #panels {grid-template-columns: 1fr} .intro {align-items: flex-start; flex-direction: column; margin-top: 18px}
-  .mast-inner {gap: 8px} .division {display: none} .transport {flex-wrap: wrap; gap: 9px}
-  #scrub {order: 5; min-width: 100%} .rate {margin-left: auto} .map {height: 190px}
+  .mast-inner {gap: 8px} .division {display: none}
+  .transport {display: grid; grid-template-columns: auto 1fr auto; gap: 9px}
+  .clock {grid-column: 2 / -1} #scrub {grid-column: 1 / 3} .map {height: 190px}
 }
