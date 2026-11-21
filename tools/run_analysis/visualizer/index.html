@@ -27,7 +27,7 @@
   </section>
   <p class="alignment"><b>Time zero:</b> each recording’s first displayed telemetry sample, not first motion or controller activation.</p>
   <section id="panels" aria-label="Run analysis"></section>
-  <footer><b>Reading the traces</b> · The dot marks the latest odometry sample at the cursor. Telemetry charts share axes; recordings are not lap-aligned.</footer>
+  <footer><b>Reading the traces</b> · Distance sums the steps in the wheel-odometry path; it is not an independent measurement of ground travel. The dot marks the latest odometry sample at the cursor. Telemetry charts share axes; recordings are not lap-aligned.</footer>
 </main>
 <template id="panel">
   <article class="panel">
@@ -43,7 +43,7 @@
     </div>
     <div class="stats">
       <div><span class="label">DURATION</span><strong class="duration"></strong></div>
-      <div><span class="label">DISTANCE</span><strong class="distance"></strong></div>
+      <div><span class="label">WHEEL ODOMETRY DISTANCE</span><strong class="distance"></strong></div>
       <div><span class="label">PEAK SPEED</span><strong class="peak"></strong></div>
     </div>
     <div class="signals">
