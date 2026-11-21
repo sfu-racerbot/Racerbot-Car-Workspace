@@ -46,23 +46,26 @@ def cached_streams(cache):
 def mcap_streams(files):
     try:
         from mcap.exceptions import McapError
-        from mcap_ros2.reader import read_ros2_messages
+        from mcap.reader import make_reader
+        from mcap_ros2.decoder import DecoderFactory
     except ImportError as exc:
         raise ValueError("uncached bag: install mcap-ros2-support==0.5.7") from exc
 
     arrays = {topic: [] for topic in TOPICS}
     for path in files:
         try:
-            for record in read_ros2_messages(path, topics=TOPICS):
-                topic, msg, t = record.channel.topic, record.ros_msg, record.log_time_ns / 1e9
-                if topic == "/odom":
-                    pos = msg.pose.pose.position
-                    row = [t, pos.x, pos.y, msg.twist.twist.linear.x]
-                elif topic == "/joy":
-                    row = [t, msg.buttons[4] if len(msg.buttons) > 4 else 0]
-                else:
-                    row = [t, msg.drive.speed, msg.drive.steering_angle]
-                arrays[topic].append(row)
+            with path.open("rb") as stream:
+                reader = make_reader(stream, decoder_factories=[DecoderFactory()])
+                for _, channel, record, msg in reader.iter_decoded_messages(topics=TOPICS):
+                    topic, t = channel.topic, record.log_time / 1e9
+                    if topic == "/odom":
+                        pos = msg.pose.pose.position
+                        row = [t, pos.x, pos.y, msg.twist.twist.linear.x]
+                    elif topic == "/joy":
+                        row = [t, msg.buttons[4] if len(msg.buttons) > 4 else 0]
+                    else:
+                        row = [t, msg.drive.speed, msg.drive.steering_angle]
+                    arrays[topic].append(row)
         except (McapError, EOFError, AttributeError) as exc:
             raise ValueError(f"could not read {path.name}: {exc}") from exc
     return arrays
