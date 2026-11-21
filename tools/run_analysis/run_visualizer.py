@@ -59,9 +59,7 @@ def mcap_streams(files):
                     pos = msg.pose.pose.position
                     row = [t, pos.x, pos.y, msg.twist.twist.linear.x]
                 elif topic == "/joy":
-                    if len(msg.buttons) <= 4:
-                        continue
-                    row = [t, msg.buttons[4]]
+                    row = [t, msg.buttons[4] if len(msg.buttons) > 4 else 0]
                 else:
                     row = [t, msg.drive.speed, msg.drive.steering_angle]
                 arrays[topic].append(row)

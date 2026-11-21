@@ -90,3 +90,14 @@ def test_split_mcap_matches_independently_decoded_cache():
     assert actual["cmdTopic"] == expected["cmdTopic"] == "/drive"
     for key in ("odom", "cmd", "joy"):
         np.testing.assert_allclose(actual[key], expected[key], rtol=0, atol=1.1e-5)
+
+
+def test_short_joystick_message_releases_lb(tmp_path):
+    writer = pytest.importorskip("mcap_ros2.writer", reason="raw MCAP tests require mcap-ros2-support")
+    path = tmp_path / "buttons.mcap"
+    with writer.Writer(str(path)) as bag:
+        schema = bag.register_msgdef("test_msgs/msg/Buttons", "int32[] buttons")
+        for second, buttons in enumerate(([0, 0, 0, 0, 1], [], [0, 0, 0, 0, 1]), 1):
+            bag.write_message("/joy", schema, {"buttons": buttons}, log_time=second * 10**9)
+    # Match runlog.read_bag: no button at index 4 means LB was not pressed.
+    assert viz.mcap_streams([path])["/joy"] == [[1, 1], [2, 0], [3, 1]]
