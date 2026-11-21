@@ -112,15 +112,19 @@ def load(path):
         data = prepare(mcap_streams(files))
         source = "MCAP"
     algorithms = []
+    started_late = False
     metadata = path / "auto_record.yaml"
     if metadata.is_file():
         meta = yaml.safe_load(metadata.read_text(encoding="utf-8"))
+        if isinstance(meta, dict) and isinstance(meta.get("activity"), dict):
+            started_late = meta["activity"].get("started_late") is True
         if isinstance(meta, dict) and isinstance(meta.get("algorithms"), dict):
             nodes = meta["algorithms"].get(data["cmdTopic"])
             if isinstance(nodes, list):
                 algorithms = [n for n in nodes if isinstance(n, str)]
     car = path.parent.parent.name if path.parent.name == "racerbot_runs" else ""
-    return dict(data, car=car, name=path.name, source=source, algorithms=algorithms)
+    return dict(data, car=car, name=path.name, source=source, algorithms=algorithms,
+                startedLate=started_late)
 
 
 def render(runs):
