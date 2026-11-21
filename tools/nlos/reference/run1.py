@@ -4,7 +4,7 @@ PY=np.random.default_rng(7)
 W=float(sys.argv[1]) if len(sys.argv)>1 else 1.5
 fp_k=float(sys.argv[2]) if len(sys.argv)>2 else 0.0
 sc=Scene(W=W)
-angles=np.linspace(-np.radians(135),np.radians(135),1081)[300:781]
+angles=np.linspace(-np.radians(135),np.radians(135),1081)
 t_true=sc.t; n_true=sc.n
 def prior(pose, err=(0.0,0.0,0.0)):
     x,y,yaw=pose[0]+err[0],pose[1]+err[1],pose[2]+err[2]

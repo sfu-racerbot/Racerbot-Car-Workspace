@@ -2,7 +2,7 @@ import numpy as np, sys
 from nlos_proto import *
 W=float(sys.argv[1]); fp_k=float(sys.argv[2]); v=float(sys.argv[3]) if len(sys.argv)>3 else 4.0; MAXP=float(sys.argv[4]) if len(sys.argv)>4 else 1e9
 rng=np.random.default_rng(3)
-sc=Scene(W=W); angles=np.linspace(-np.radians(135),np.radians(135),1081)[300:781]
+sc=Scene(W=W); angles=np.linspace(-np.radians(135),np.radians(135),1081)
 def prior(pose, err=(0,0,0)):
     x,y,yaw=pose[0]+err[0],pose[1]+err[1],pose[2]+err[2]
     R=np.array([[np.cos(yaw),np.sin(yaw)],[-np.sin(yaw),np.cos(yaw)]])

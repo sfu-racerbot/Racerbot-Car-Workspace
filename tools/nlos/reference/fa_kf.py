@@ -1,7 +1,7 @@
 import numpy as np
 from nlos_proto import *
 # (a) false alarms on an empty approach with an independently learned background
-W=1.5; sc=Scene(W=W); angles=np.linspace(-np.radians(135),np.radians(135),1081)[300:781]
+W=1.5; sc=Scene(W=W); angles=np.linspace(-np.radians(135),np.radians(135),1081)
 def prior(pose, err=(0,0,0)):
     x,y,yaw=pose[0]+err[0],pose[1]+err[1],pose[2]+err[2]
     R=np.array([[np.cos(yaw),np.sin(yaw)],[-np.sin(yaw),np.cos(yaw)]])

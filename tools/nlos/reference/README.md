@@ -9,4 +9,6 @@ Reference only. Slow on purpose (per-beam Python loops). Do not import from `src
 - `fa_kf.py`, `fa2.py`: false alarms on empty approaches against background coverage; Kalman filter error statistics.
 - `results/`: raw outputs quoted in section 2.5 of the plan.
 
+Line-of-sight baselines use the full ±135° scan (1081 beams).
+
 Run with any Python that has NumPy and SciPy, from this directory.

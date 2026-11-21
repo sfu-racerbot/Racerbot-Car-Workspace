@@ -119,7 +119,7 @@ Do not re-derive these. Do not contradict them without new evidence.
 
 ### 2.5 Prototype results (simulation only)
 
-Scene: L-corner, both corridors 1.5 m wide, 0.80 m chamfer panel (pattern P1) across the outer corner, perfect mirror, range noise 5 mm, pose prior error 0.15 m and 3°, ego on the centre line at 4 m/s, hidden car 0.50 × 0.28 m. Reference code and raw outputs: `tools/nlos/reference/` (committed in WP0). "Footprint" is the beam width in the scan plane per metre of path; a beam whose footprint touches matte is assumed to return the matte.
+Line of sight is judged on the full ±135° scan. Scene: L-corner, both corridors 1.5 m wide, 0.80 m chamfer panel (pattern P1) across the outer corner, perfect mirror, range noise 5 mm, pose prior error 0.15 m and 3°, ego on the centre line at 4 m/s, hidden car 0.50 × 0.28 m. Reference code and raw outputs: `tools/nlos/reference/` (committed in WP0). "Footprint" is the beam width in the scan plane per metre of path; a beam whose footprint touches matte is assumed to return the matte.
 
 | Quantity | Thin beam, no path limit | Footprint 25 mm/m, no path limit | Footprint 12 mm/m, ghost path ≤ 6 m (the defaults) |
 |---|---|---|---|
@@ -127,9 +127,9 @@ Scene: L-corner, both corridors 1.5 m wide, 0.80 m chamfer panel (pattern P1) ac
 | Same positions visible by line of sight | 3-12 % | 3-12 % | not run |
 | Surface error of unfolded points (RMS) | 2.3-2.9 cm | 1.3-2.2 cm | not run |
 | Distance from cluster centroid to car centre | 0.21-0.26 m | 0.23-0.26 m | not run |
-| Stopped car 1-2 m past the corner: ego travel gained over line of sight | 4.9-5.9 m | 1.5-2.6 m | 1.2-1.9 m (0.30-0.47 s at 4 m/s) |
-| Stopped car 0.5 m past the corner | 3.4-4.0 m | -0.5 to 1.1 m | -0.1 to 0.9 m |
-| Stopped car 2-3 m past the corner, middle or inner lane | seen 5.5-6.5 m before the corner | seen 1.6-2.7 m before | seen 0.4-1.4 m before; never seen by line of sight before the turn |
+| Stopped car 1-2 m past the corner: ego travel gained over line of sight | 4.0-6.0 m | 1.5-2.6 m | 1.2-1.9 m (0.30-0.47 s at 4 m/s) |
+| Stopped car 0.5 m past the corner | 2.2-3.7 m | -0.6 to 1.1 m | 0.0 to 0.9 m |
+| Stopped car 3 m past the corner | 4.3-5.7 m | 2.4-2.8 m; outer lane not detected | 0.5 m; outer lane not detected |
 
 Panel line fit (footprint 12 mm/m, 150 random poses per distance bin): angle error median 0.003 rad, 95th percentile below 0.010 rad; error of the `p0` end along the panel median 0.5-1.4 cm, 95th percentile below 3.2 cm; fit failures 0-3 % up to 5.5 m, 7 % at 5.5-6.5 m.
 
@@ -627,7 +627,7 @@ class NlosPipeline:
 **Tests** (`test_pipeline.py`, `test_offline.py`)
 - Snapshot schema: exact key set of 4.6 for an empty registry, a visible panel with no track, and a confirmed track; `json.dumps(snapshot, allow_nan=False)` succeeds in all three.
 - `pose=None`, stale pose, missing background, wrong beam count between calls (1081 then 541), all-no-return scan: no exception, documented output.
-- Demo, thin beam (`--footprint-k 0 --max-ghost-path 30`): `gain_m >= 3.0`, `surface_rmse_m <= 0.05`. (Reference: 5.5 m, 0.03 m.)
+- Demo, thin beam (`--footprint-k 0 --max-ghost-path 30`): `gain_m >= 3.0`, `surface_rmse_m <= 0.05`. (Reference: 5.1 m, 0.03 m.)
 - Demo, defaults: `0.8 <= gain_m <= 2.5`. (Reference: 1.5 m.)
 - False alarms: four empty approaches (y uniform in [0.4, 1.1], x from -7 to 0.9 in 0.1 m steps, yaw N(0, 0.05), fixed seed): no confirmed track in any of the 316 scans and at most 2 scans with any cluster. (Reference: 0 and 0.)
 - Coverage: the same four approaches with a background learned only for x < -0.2 report `"background": "uncovered"` for every scan with x > 0.1 and produce no track there.
@@ -824,7 +824,7 @@ Before any driving near a panel: WP9 must have passed, and the first laps are wi
 - **Car ahead disappears.** The other car drives ahead at 0.5-1× the ego's speed; 10 laps.
 - Background learned on the same day from at least 10 solo laps: 4 on the racing line, 3 held about 0.3 m to its left, 3 about 0.3 m to its right, all the way through the corner (coverage rule, 4.4). Check with `learn_background.py` that no evaluated run reports `uncovered`.
 
-**Gate G2 (end of week 10).** For the stopped object 1-2 m past the corner: median gain over oracle line of sight ≥ 1.0 m of ego travel, and at most 1 false confirmed track per 5 minutes of solo laps. If the gain is positive but below 1.0 m, report it as is and drop E4. If negative or zero, the paper's claim becomes "localises hidden cars that line of sight cannot see before the turn" (the 2-3 m deep, inner-lane case) instead of "earlier warning".
+**Gate G2 (end of week 10).** For the stopped object 1-2 m past the corner: median gain over oracle line of sight ≥ 1.0 m of ego travel, and at most 1 false confirmed track per 5 minutes of solo laps. If the gain is positive but below 1.0 m, report it as is and drop E4. If negative or zero, drop the "earlier warning" claim: the paper reports the measured limits and the localisation accuracy from E1 and E2.
 
 ### E4. Closed loop (weeks 11-12, stretch, needs WP14)
 

@@ -1,14 +1,14 @@
 W=1.5 fp_k=0.012 v=4.0 m/s; stationary car in B; ego on centreline of A; x_corner(inner)=0, ego stops being hidden-relevant at x~0
  car (x_h, depth beyond inner corner) | first NLOS confirm at ego x | first LOS at ego x | warning gain [m] / [s] | NLOS beams at confirm
-  (1.25, 0.5) | -2.9 | -3.0 | -0.10 m / -0.02 s | 7
+  (1.25, 0.5) | -3.0 | -3.0 | 0.00 m / 0.00 s | 6
   (1.25, 1.0) | -2.5 | -1.0 | 1.50 m / 0.37 s | 6
   (1.25, 2.0) | -1.4 | -0.2 | 1.20 m / 0.30 s | 5
-  (1.25, 3.0) | None | None | nan m / nan s | 0
+  (1.25, 3.0) | None | -0.0 | nan m / nan s | 0
   (1.00, 0.5) | -2.9 | -2.6 | 0.30 m / 0.07 s | 6
   (1.00, 1.0) | -2.4 | -0.7 | 1.70 m / 0.42 s | 8
-  (1.00, 2.0) | -1.4 | None | nan m / nan s | 7
-  (1.00, 3.0) | -0.4 | None | nan m / nan s | 5
+  (1.00, 2.0) | -1.4 | -0.1 | 1.30 m / 0.32 s | 7
+  (1.00, 3.0) | -0.4 | 0.1 | 0.50 m / 0.12 s | 5
   (0.75, 0.5) | -2.9 | -2.0 | 0.90 m / 0.22 s | 7
   (0.75, 1.0) | -2.4 | -0.5 | 1.90 m / 0.47 s | 8
-  (0.75, 2.0) | -1.4 | None | nan m / nan s | 9
-  (0.75, 3.0) | -0.4 | None | nan m / nan s | 13
+  (0.75, 2.0) | -1.4 | -0.0 | 1.40 m / 0.35 s | 9
+  (0.75, 3.0) | -0.4 | 0.1 | 0.50 m / 0.12 s | 13
