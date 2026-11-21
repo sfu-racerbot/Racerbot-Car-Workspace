@@ -68,6 +68,8 @@ h1 {font-size: clamp(32px,4vw,50px); line-height: 1.05; letter-spacing: -.055em;
 .legend span {display: inline-flex; align-items: center; gap: 4px}
 .legend i {width: 14px; border-top: 2px solid var(--trace)}
 .legend .cmd-key i {border-top: 2px dashed #616c79}
+.measurements {flex-wrap: wrap; row-gap: 3px}
+.live-command {font: 600 12px var(--mono); color: #495966}
 .chart {width: 100%; display: block; height: 94px; margin: 0 0 8px; cursor: crosshair}
 .chart:last-child {margin: 0}
 svg text {font: 10px var(--mono)}
