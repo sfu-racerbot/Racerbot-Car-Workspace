@@ -135,6 +135,7 @@ def render(runs):
     payload = json.dumps(runs, separators=(",", ":"), allow_nan=False).replace("<", "\\u003c")
     return ((assets / "index.html").read_text(encoding="utf-8")
             .replace("/* STYLES */", (assets / "style.css").read_text(encoding="utf-8"))
+            .replace("/* COMMANDS */", (assets / "commands.js").read_text(encoding="utf-8"))
             .replace("/* PLAYER */", (assets / "player.js").read_text(encoding="utf-8"))
             .replace("<!-- RUN_DATA -->", payload))
 

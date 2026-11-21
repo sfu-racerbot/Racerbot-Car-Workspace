@@ -93,10 +93,13 @@ function chart(plot, series, bounds) {
     svg(plot, "text", {x: x(duration*f), y: 95, fill: "#566861", "text-anchor": f === 0 ? "start" : f === 1 ? "end" : "middle"},
         (duration*f).toFixed(1) + " s");
   }
-  for (const [rows, col, isDashed] of series) {
-    path(plot, rows, r => [x(r[0]), y(r[col])], isDashed ?
-      {stroke: "#657382", "stroke-width": 1.3, "stroke-dasharray": "4 3"} :
-      {stroke: "var(--trace)", "stroke-width": 1.8});
+  for (const [rows, col, kind] of series) {
+    if (kind === "odom") {
+      path(plot, rows, r => [x(r[0]), y(r[col])], {stroke: "var(--trace)", "stroke-width": 1.8});
+    } else {
+      const attrs = kind === "target" ? {stroke: "#657382", "stroke-dasharray": "4 3"} : {stroke: "var(--trace)"};
+      svg(plot, "path", {d: commandPath(rows, col, x, y), fill: "none", "stroke-width": 1.5, ...attrs});
+    }
   }
   if (!series.some(([rows]) => rows.length)) {
     svg(plot, "text", {x: 260, y: 46, "text-anchor": "middle", fill: "#516760"}, "No command samples");
@@ -135,10 +138,10 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
   }
   const map = trajectory(q(".map"), run, ext, scale);
   q(".cmd-key").hidden = !run.cmdTopic;
-  q(".topic").textContent = run.cmdTopic ? run.cmdTopic + " · degrees" : "No /drive or /ackermann_cmd";
+  q(".topic").textContent = run.cmdTopic ? run.cmdTopic + " · blank after " + COMMAND_MAX_AGE + " s without a sample" : "No /drive or /ackermann_cmd";
   q(".speed").setAttribute("aria-label", "Speed (m/s) over elapsed time");
-  const speed = chart(q(".speed"), [[run.cmd, 1, true], [run.odom, 3, false]], speedRange);
-  const steer = chart(q(".steer"), [[run.cmd, 2, false]], steerRange);
+  const speed = chart(q(".speed"), [[run.cmd, 1, "target"], [run.odom, 3, "odom"]], speedRange);
+  const steer = chart(q(".steer"), [[run.cmd, 2, "angle"]], steerRange);
   const speedVal = q(".live-speed"), steerVal = q(".live-steer"), state = q(".state");
   panels.append(root);
   return t => {
@@ -146,7 +149,7 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
     const odom = sample(run.odom, t), cmd = sample(run.cmd, t), joy = sample(run.joy, t);
     map(odom); speed(t); steer(t);
     speedVal.textContent = (odom ? odom[3].toFixed(2) : "—") + " m/s";
-    steerVal.textContent = (cmd ? cmd[2].toFixed(1) : "—") + "°";
+    steerVal.textContent = steeringLabel(cmd, t);
     state.textContent = ended ? "Run ended" : joy ? "LB " + (joy[1] ? "held" : "released") : "LB not sampled";
   };
 }
