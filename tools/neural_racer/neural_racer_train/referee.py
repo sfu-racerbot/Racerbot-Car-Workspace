@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from neural_racer_train import fidelity
+from neural_racer_train.speed_calibration import calibrated_steer
 from neural_racer import observation as obs
 from neural_racer.policy_numpy import PolicyNumpy
 from neural_racer.safety_wrapper import SafetyWrapper, WrapperConfig, scan_angles
@@ -51,13 +52,14 @@ class NeuralDriver:
     """The car's code path: History -> build_observation -> PolicyNumpy -> SafetyWrapper."""
 
     def __init__(self, weights: dict, card: dict | None = None, v_cap: float = 2.5,
-                 imu_offset_from_cog: float = 0.27, imu: bool = True):
+                 imu_offset_from_cog: float = 0.27, imu: bool = True, steering_gains=None):
         self.policy = PolicyNumpy(weights, card)
         self.wrapper = SafetyWrapper(WrapperConfig(max_speed=v_cap))
         self.v_cap, self.imu, self.d = v_cap, imu, imu_offset_from_cog
         self.history = obs.History()
         self.prev_steer = 0.0
         self.prev_state = None
+        self.steering_gains = steering_gains
         self.angles = None
 
     def _imu(self, s):
@@ -85,7 +87,9 @@ class NeuralDriver:
             return 0.0, 0.0
         self.prev_state = np.array(truth, dtype=np.float64)
         out = self.policy.step(o)
-        res = self.wrapper.apply(out.steering, out.speed, out.ego_path, scan, self.angles,
+        steering = out.steering if self.steering_gains is None else calibrated_steer(
+            out.steering, float(state[3]), self.steering_gains)
+        res = self.wrapper.apply(steering, out.speed, out.ego_path, scan, self.angles,
                                  SCAN_RANGE_MIN, SCAN_RANGE_MAX, self.prev_steer, 0.025)
         if res.stopped:
             self.history.reset()

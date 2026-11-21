@@ -7,8 +7,10 @@ Oracles: FidelityPlant's own chassis contact geometry (never gym's flag), and
 ground-truth progress along the track's own line.
 """
 import math
+from types import SimpleNamespace
 
 import conftest  # noqa: F401
+import numpy as np
 import pytest
 
 from neural_racer_train import fidelity, referee
@@ -28,6 +30,18 @@ class Straight:
 def test_real_gap_follow_makes_progress_without_contact():
     r = referee.race('Spielberg', {'gap': referee.gap_factory()}, seed=0, laps=1, timeout_s=25)
     assert r.progress[0] > 10.0 and r.contact == [False]
+
+
+def test_neural_calibration_uses_measured_speed_before_wrapper(monkeypatch):
+    output = SimpleNamespace(steering=.04, speed=2., ego_path=np.zeros((6, 2)))
+    monkeypatch.setattr(referee, 'PolicyNumpy', lambda *args: SimpleNamespace(step=lambda _: output))
+    truth = np.zeros(7)
+    measured = truth.copy()
+    measured[3] = 3.5
+    sensors = {'scan': np.full(1081, 10.), 'std_state': measured}
+    for gains, expected in [(None, .04), ({'[3,inf)': .5}, .02)]:
+        driver = referee.NeuralDriver({}, v_cap=1., imu=False, steering_gains=gains)
+        assert driver.command(sensors, truth, 0) == pytest.approx((expected, 1.))
 
 
 def test_wall_contact_is_flagged_and_at_fault():
