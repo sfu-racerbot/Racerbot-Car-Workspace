@@ -18,7 +18,7 @@
 
 ## 1. Turn recordings into examples
 
-**Terminal 1 — laptop, from the top folder of Racerbot-Car-Workspace.** Tested with Python 3.10. The scratch directory keeps large arrays out of git.
+**Terminal 1 — laptop, from the car repository's top folder.** Tested with Python 3.10. The scratch directory keeps large arrays out of git.
 
 ```bash
 WORK=$(mktemp -d)
@@ -51,7 +51,9 @@ The extractor reads the split MCAP files in metadata order. It requires LB held 
 
 Header times must increase on each topic (one named stream of messages). Up to 5 ms of header lead is allowed for clock skew.
 
-The target must arrive after the scan in recorder order, with a header no earlier than the scan's. A release cancels a pending pair. Missing pairs, rejected scans, long scan gaps and releases break history; safety stops also reset the policy in replay. Invalid laser returns stay in the scan for the deployed safety wrapper to judge.
+If several scans are waiting, a command labels the newest eligible scan whose header does not follow its own. A newer scan stays queued if its header is too late for that command. A bumper release cancels all pending pairs.
+
+Missing pairs, rejected scans, long scan gaps and releases break history; safety stops also reset the policy in replay. Invalid laser returns stay in the scan for the deployed safety wrapper to judge.
 
 The manifest records rejection counts, missing topics and IMU message counts. Unknown course or traffic stays `unknown`. Known labels come from the [course analysis](rb1-lap-gap-2026-10-30.md#the-runs) and [map catalog](../tools/f1tenth_sim/maps/catalog.yaml). A two-car run is a whole session, not a label for an opponent in each scan.
 
@@ -97,17 +99,18 @@ RACERBOT_CAR=rb2 python "$NR" simulate "$MODEL" "$WORK/score.json" "$WORK/races.
 
 ## What the first comparison found
 
-At workspace base `7b2003f`, 46,612 of 213,540 scans across 35 of 36 recordings could be paired. Gains fitted on October 19 and 26 were 1.116 below 1 m/s, 0.994 from 1 to below 3 m/s and 0.520 at or above 3 m/s. Unseen speed bands use gain 1. Speed predictions are not calibrated.
+The recordings at revision `7b2003f` yielded 50,670 accepted pairs from 213,540 scans; 35 of 36 recordings contributed. Gains fitted on October 19 and 26 were 1.115 from 0 to below 1 m/s, 0.996 from 1 to below 3 m/s and 0.515 at or above 3 m/s. Unseen speed bands use gain 1. Speed predictions are not calibrated.
 
 | October 30 validation slice | Examples | Base steering MAE (rad) | Adapted (rad) |
 |---|---:|---:|---:|
-| All | 30,331 | 0.0848 | 0.0812 |
-| Below 1 m/s, excluding reverse | 2,907 | 0.1065 | 0.1102 |
-| From 1 to below 3 m/s | 19,517 | 0.0899 | 0.0899 |
-| At least 3 m/s | 7,897 | 0.0642 | 0.0491 |
+| All | 34,146 | 0.0930 | 0.0893 |
+| Below 1 m/s, excluding reverse | 3,060 | 0.1125 | 0.1159 |
+| From 1 to below 3 m/s | 21,814 | 0.1016 | 0.1015 |
+| At least 3 m/s | 9,262 | 0.0662 | 0.0518 |
+| Verified October course | 29,604 | 0.0916 | 0.0878 |
 | Confirmed two-car sessions | 7,717 | 0.0915 | 0.0881 |
 
-Speed error stayed at **2.218 m/s**. Both versions triggered a safety limit on every scored October 30 tick. The change improved steering mostly at higher speeds, and worsened it at low speeds. October 30 did not supply fit examples, but it was used to compare design choices; it is not an untouched final test set.
+Speed error stayed at **2.207 m/s**. Both versions triggered a safety limit on every scored October 30 tick. The change improved steering mostly at higher speeds, and worsened it at low speeds. October 30 did not supply fit examples, but it was used to compare design choices; it is not an untouched final test set.
 
 **Neither version finished a lap in 12 trials each** with simulated rb2 and IMU masked. We used three seeds per start: the October course solo and behind gap-follow, the November race-day course solo, and Spielberg solo. Time limit: 60 s, except 150 s at Spielberg.
 
