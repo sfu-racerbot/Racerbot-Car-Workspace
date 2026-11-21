@@ -41,7 +41,21 @@ neural_racer_node:
     reserve_distance: 0.20
     max_braking_decel: 3.0
     braking_latency_sec: 0.25
+    # The braking cap's clearance is gap_follow's swept path: how far the body
+    # can drive along the arc it is steering, over the forward window's beams.
+    forward_fov_deg: 180.0
+    swept_clearance_margin: 0.05
+    swept_clearance_max_length: 3.0
     max_lateral_accel: 2.0       # the cornering cap; raising it is a Phase 10+ decision
     max_steering_rate: 2.0
     command_slew_max_dt: 0.10
     max_invalid_fraction: 0.30
+    # gap_follow's flank creep (gap_follow.yaml, PR #52, 2026-11-12): with the braking cap at
+    # zero, a crawl at up to escape_creep_speed is allowed while the body, widened by
+    # flank_creep_margin a side, can drive flank_creep_length along both the arc asked for and
+    # the slew-limited one without meeting a return. Without it a car a few cm off a wall,
+    # parallel, with open road ahead, stops for good. Touching, steering into the wall, or a wall
+    # ahead still stops. 0 = off. The node refuses a crawl that cannot stop inside its length.
+    flank_creep_length: 0.50
+    flank_creep_margin: 0.02
+    escape_creep_speed: 0.40
