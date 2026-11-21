@@ -105,6 +105,7 @@ def test_ttc_margin_covers_just_outside_the_body(node):
     (['-p', 'braking_latency_sec:=-0.1'], 'braking_latency_sec'),
     (['-p', 'braking_latency_sec:=1.5'], 'braking_latency_sec'),
     (['-p', 'steering_gain_speed_ref:=-1.0'], 'steering_gain_speed_ref'),
+    (['-p', 'open_aim_min_width:=-0.01'], 'open_aim_min_width'),
     (['-p', 'aim_depth_bias:=-0.1'], 'aim_depth_bias'),
     (['-p', 'aim_depth_bias:=1.1'], 'aim_depth_bias'),
     (['-p', 'aim_depth_bias_fallback:=-0.1'], 'aim_depth_bias_fallback'),
@@ -265,6 +266,20 @@ def test_the_node_steers_at_the_deepest_beam_when_asked(node):
     node.aim_depth_bias = 0.0
     midpoint = _drive(node, msg, 1.0).steering_angle
     assert bias_one > midpoint + 0.05  # rad: the wheels really moved toward the deep beam
+
+
+def test_open_aim_steers_at_the_middle_of_the_long_view():
+    node = _make(['-p', 'aim_depth_bias:=1.0', '-p', 'open_aim_min_width:=1.0'])
+    try:
+        # The opening is symmetric about +8 deg and includes straight ahead.
+        # Disparity inflation trims both shoulders equally. Aiming straight
+        # (the legacy tie-break) or at the sector edge is outside 1 beam.
+        scan = _sector_scan(8.0, 26.0, far=10.0)
+        drive = _drive(node, scan, 1.0)
+        assert drive.steering_angle == pytest.approx(math.radians(8.0), abs=scan.angle_increment)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 def test_a_fallback_gap_takes_its_own_aim_bias(node):

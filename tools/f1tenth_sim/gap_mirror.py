@@ -132,6 +132,7 @@ REQUIRED_PARAMS = frozenset((
     "flank_creep_length",
     "flank_creep_margin",
     "aim_depth_bias",
+    "open_aim_min_width",
     "aim_depth_bias_fallback",
     "fallback_min_gap_distance",
     "forward_fov_deg",
@@ -209,9 +210,10 @@ REQUIRED_PARAMS = frozenset((
 ))
 
 
-STATIC_GATE_PARAMS = ("opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed",
-                      # escape-arc credit (2026-11-14): 0 is the behaviour before it existed
-                      "swept_clearance_reach", "swept_clearance_reach_rate")
+REPLAY_OPTIONAL_PARAMS = (
+    "opponent_follow_static_radial_speed", "opponent_follow_static_tangential_speed",
+    "swept_clearance_reach", "swept_clearance_reach_rate", "open_aim_min_width",
+)
 
 # Parameters added after the first real-car run of the October 2026 rework,
 # with the value that reproduces the behaviour from before they existed. Lets
@@ -241,6 +243,7 @@ LEGACY_VALUES = {
     "speed_hold_sec": 0.0,
     "steering_gain_speed_ref": 0.0,
     "aim_depth_bias": 0.0,
+    "open_aim_min_width": 0.0,
     "aim_depth_bias_fallback": 0.0,
     "narrow_corridor_speed": 1e9,  # off
     "narrow_corridor_clearance": 0.05,
@@ -327,9 +330,8 @@ class GapController:
     """
 
     def __init__(self, params: dict, lidar):
-        # Parameter sets recorded before the static-confirmation gate existed (replay fixtures, older runs) have
-        # the gate off, exactly as LEGACY_VALUES says; every other missing parameter is still an error.
-        params = {**{name: LEGACY_VALUES[name] for name in STATIC_GATE_PARAMS}, **params}
+        # Old replay fixtures predate these features. Other missing parameters are still an error.
+        params = {**{name: LEGACY_VALUES[name] for name in REPLAY_OPTIONAL_PARAMS}, **params}
         missing = sorted(REQUIRED_PARAMS - set(params))
         if missing:
             raise KeyError(f"GapController is missing parameters: {missing}")
@@ -585,7 +587,8 @@ class GapController:
 
         target_in_window = gap_logic.aim_within_gap(
             processed, gap_start, gap_end, beam_angles,
-            p["aim_depth_bias_fallback"] if used_fallback else p["aim_depth_bias"])
+            p["aim_depth_bias_fallback"] if used_fallback else p["aim_depth_bias"],
+            open_aim_min_width=p["open_aim_min_width"], max_range=p["max_range"])
         self.previous_target_idx = target_in_window
         target_angle = float(beam_angles[target_in_window])
         target_distance = float(processed[target_in_window])
