@@ -1,0 +1,40 @@
+standby_prepared: '2026-11-16T09:56:52-08:00'
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-16T09:56:57-08:00'
+algorithms:
+  /drive:
+  - /gap_follow_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_race_diag_node
+- /auto_record
+- /auto_rosbag2_recorder
+- /foxglove_bridge
+- /gap_follow_node
+- /imu_bridge_node
+- /joy
+- /static_baselink_to_laser
+- /urg_node
+- /vehicle_state_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+params_snapshot: started
+bag_live_sec: 2.0
+stopped: '2026-11-16T09:57:31-08:00'
+stop_reason: no algorithm publishing for 3.0 s
+duration_sec: 34.2
+recorder_exit_code: 0
+bag_exit_code: 0
+recorder_failures:
+- process: race_diag_node
+  exit_code: 1
+recorder_killed: false
+bag_bytes: 22627649
+activity:
+  first_odom_speed_mps: 2.24
+  max_speed_mps: 2.33
+  moved: true
+  started_late: true
+  lb_held_fraction: 0.046
