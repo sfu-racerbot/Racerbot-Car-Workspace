@@ -162,6 +162,8 @@ class CarCalibration:
     speed_loop_brake_gain: float | None = None
     speed_loop_brake_max: float | None = None
     speed_loop_brake_deadband: float | None = None
+    # Optional gain (1/s) measured while rolling forward under a zero speed command.
+    stop_brake_gain: float | None = None
     # Above this speed the acceleration ceiling falls linearly to zero at speed_loop_accel_no_load, as a
     # motor's force falls with speed (actuation.speed_loop_accel_ceiling). inf = no fall-off.
     speed_loop_accel_fade_from: float = math.inf
@@ -225,6 +227,8 @@ class CarCalibration:
         if not (math.isfinite(self.speed_loop_brake_deadband) and self.speed_loop_brake_deadband >= 0.0):
             raise ValueError('speed_loop_brake_deadband must be finite and >= 0 m/s, '
                              f'got {self.speed_loop_brake_deadband!r}')
+        if self.stop_brake_gain is not None and not (math.isfinite(self.stop_brake_gain) and self.stop_brake_gain > 0):
+            raise ValueError('stop_brake_gain must be finite and positive')
 
     # ------------------------------------------------------------------
     # Quantities the simulator needs that follow from the above
@@ -390,6 +394,7 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     "speed_loop_accel_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_gain": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_loop_brake_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
+    "stop_brake_gain": (Provenance.ESTIMATED, "off unless measured for the floor; stops use speed_loop_brake_gain"),
     "speed_loop_brake_deadband": (Provenance.MEASURED, "0: the shared 2026-10-19 fit has no deadband (run 20261019-200703). A car whose profile has sim/speed_loop.yaml uses its own (car_speed_loop)"),
     "speed_loop_accel_fade_from": (Provenance.ESTIMATED, "inf by default (no fall-off); a floor profile sets it where the measured, traction-limited speed range ends"),
     "accel_by_speed": (Provenance.ESTIMATED, "empty: the loop's ceiling is speed_loop_accel_max with its fade-off. A floor may set a measured table (accel_by_speed.py). See FLOORS"),
@@ -824,6 +829,19 @@ FLOORS: dict[str, Floor] = {
         ),
     ),
 }
+
+
+# Preserve the original wall-distance calibration for comparisons. Only the stop
+# variant uses the wheel-speed decay measured after a forward-to-zero command.
+_oct30 = FLOORS["sfu_course_2026_10_30"]
+STOP_FLOOR = "sfu_course_2026_10_30_stops"
+FLOORS[STOP_FLOOR] = replace(
+    _oct30, name=STOP_FLOOR,
+    description="Car 2's October floor with its measured zero-command stop timing. See docs/sim-calibration.md.",
+    overrides=dict(_oct30.overrides, floor=STOP_FLOOR, stop_brake_gain=3.0),
+    sources=dict(_oct30.sources, stop_brake_gain="rb2 October fit stops: log(1.0/0.3) divided by time between "
+                 "those wheel speeds under zero command; median rounded to nearest 0.5/s (validate_stop_tail.py)"),
+)
 
 
 def with_floor(name: str | None, base: CarCalibration | None = None) -> CarCalibration:

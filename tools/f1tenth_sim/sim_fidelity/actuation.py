@@ -131,5 +131,7 @@ def speed_loop_accel(cal, command: float, measured: float) -> float:
             ceiling = speed_loop_accel_ceiling(cal.speed_loop_accel_max, cal.speed_loop_accel_fade_from,
                                                cal.speed_loop_accel_no_load, measured)
         return min(cal.speed_loop_accel_gain * diff, ceiling)
+    if command == 0.0 and cal.stop_brake_gain is not None:
+        return -min(cal.stop_brake_gain * measured, cal.speed_loop_brake_max)
     excess = max(0.0, -diff - cal.speed_loop_brake_deadband)
     return max(-cal.speed_loop_brake_gain * excess, -cal.speed_loop_brake_max)
