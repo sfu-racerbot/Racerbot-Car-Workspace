@@ -1,0 +1,20 @@
+/usb_cam_stream_node:
+  ros__parameters:
+    capture_fps: 30
+    device: /dev/video0
+    frame_timeout_sec: 2.0
+    full_quality: 90
+    full_width: 0
+    height: 720
+    host: 0.0.0.0
+    image_topic: /camera/camera/color/image_raw
+    jpeg_quality: 0
+    passthrough: false
+    port: 9090
+    preview_quality: 65
+    preview_width: 480
+    start_type_description_service: true
+    status_log_period_sec: 5.0
+    stream_fps: 30.0
+    use_sim_time: false
+    width: 1280
