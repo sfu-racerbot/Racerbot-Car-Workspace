@@ -2,7 +2,7 @@
 import csv
 import json
 import math
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 import numpy as np
@@ -40,7 +40,8 @@ def messages(bag, info):
 
 def aligned_ticks(events, counts, seen):
     """Inputs are frozen on scan receipt. Never use the target as its own input."""
-    joy = odom = pending = None
+    joy = odom = None
+    pending = deque()
     prev_scan = None
     last_header = {}
     last_log = -1
@@ -50,6 +51,10 @@ def aligned_ticks(events, counts, seen):
         if t < last_log:
             raise ValueError('MCAP log time went backwards across chunks')
         last_log = t
+        while pending and t - pending[0][0] > LABEL_NS:
+            pending.popleft()
+            counts['unmatched'] += 1
+            reset = True
         stamp = msg.header.stamp
         h = stamp.sec * 1_000_000_000 + stamp.nanosec
         ordered = h > last_header.get(topic, -1)
@@ -62,19 +67,15 @@ def aligned_ticks(events, counts, seen):
             held = valid_clock and age < JOY_NS and len(msg.buttons) > 4 and msg.buttons[4] == 1
             joy = min(t, h) if held else None
             if not held:
-                if pending is not None:
-                    counts['released_before_label'] += 1
-                pending = None
+                if pending:
+                    counts['released_before_label'] += len(pending)
+                    pending.clear()
                 reset = True
         elif topic == '/odom':
             speed = msg.twist.twist.linear.x
             odom = (min(t, h), speed) if valid_clock and age < ODOM_NS and math.isfinite(speed) else None
         elif topic == '/scan':
             counts['scans'] += 1
-            if pending is not None:
-                counts['unmatched'] += 1
-                pending = None
-                reset = True
             if prev_scan is not None and t - prev_scan > SCAN_NS:
                 reset = True
             prev_scan = t
@@ -94,22 +95,30 @@ def aligned_ticks(events, counts, seen):
                 reason = 'scan_geometry'
             if reason:
                 counts[reason] += 1
+                if pending:
+                    counts['unmatched'] += len(pending)
+                    pending.clear()
                 reset = True
             else:
-                pending = (t, h, odom[1], msg)
-        elif topic == '/ackermann_cmd' and pending is not None:
-            ts, hs, speed, scan = pending
+                pending.append((t, h, odom[1], msg))
+        elif topic == '/ackermann_cmd' and pending:
             action = (msg.drive.steering_angle, msg.drive.speed)
-            if (not valid_clock or h < hs or t - ts > LABEL_NS or age > LABEL_NS
+            if (not valid_clock or h < pending[0][1] or age > LABEL_NS
                     or joy is None or t - joy >= JOY_NS or not all(map(math.isfinite, action))):
                 continue
+            # The newest scan can already be logged but have a header *after*
+            # this command. Leave it queued for its own label.
+            while len(pending) > 1 and pending[1][1] <= h:
+                pending.popleft()
+                counts['unmatched'] += 1
+                reset = True
+            ts, _, speed, scan = pending.popleft()
             geometry = (scan.angle_min, scan.angle_increment, scan.range_min, scan.range_max)
             yield ts, t - ts, speed, np.asarray(scan.ranges, np.float32), geometry, action, reset
             counts['accepted'] += 1
-            pending = None
             reset = False
-    if pending is not None:
-        counts['unmatched'] += 1
+    if pending:
+        counts['unmatched'] += len(pending)
 
 
 def extract(data, out, context_file):

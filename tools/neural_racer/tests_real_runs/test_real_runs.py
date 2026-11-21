@@ -142,6 +142,18 @@ def test_backward_chunk_clock_refused():
         align([event('/joy', 2), event('/scan', 1)])
 
 
+def test_overlapping_scans_match_once_in_chronological_order():
+    ticks, counts = align([
+        event('/joy', 10), event('/odom', 11), event('/scan', 20), event('/scan', 40),
+        event('/ackermann_cmd', 41, stamp=38), event('/ackermann_cmd', 42),
+        event('/scan', 60), event('/scan', 80), event('/ackermann_cmd', 81)])
+    # The first label predates scan 40. The last label fits both scans:
+    # use the newest one, discard scan 60, and reset history across it.
+    assert [t[0] for t in ticks] == [20 * MS, 40 * MS, 80 * MS]
+    assert [t[-1] for t in ticks] == [True, False, True]
+    assert counts['unmatched'] == 1
+
+
 def test_error_sign_and_speed_bucket_oracle():
     metric = rr.Metrics()
     for target, pred in [((.12, 2), (.07, 1)), ((-.08, 1), (.02, 3)), ((0., 0), (.03, 0))]:
