@@ -49,7 +49,7 @@ h1 {font-size: clamp(32px,4vw,50px); line-height: 1.05; letter-spacing: -.055em;
 .run-select {max-width: 100%; display: block; background-color: white; color: var(--ink); font: 700 clamp(16px,2vw,22px)/1.3 system-ui,sans-serif; letter-spacing: -.035em; padding: 0 5px 0 0; margin: 5px 0; border: 0}
 .meta, .legend, .map-key, .map-label>span:last-child {font: 11px var(--mono)}
 .meta {color: var(--muted); overflow-wrap: anywhere}
-.trajectory {background: #142e29; color: #e1eee5; padding: 12px 16px 9px}
+.trajectory {background: #142e29; color: #e1eee5; padding: 12px 16px 9px; container-type: inline-size}
 .map-label, .signal-head {justify-content: space-between}
 .map-label>span:last-child {font-size: 9px; color: #a3b9ad}
 .map-note {font-size: 11px; margin: 3px 0 5px; color: #c9dad0}
@@ -71,6 +71,7 @@ h1 {font-size: clamp(32px,4vw,50px); line-height: 1.05; letter-spacing: -.055em;
 .chart {width: 100%; display: block; height: 94px; margin: 0 0 8px; cursor: crosshair}
 .chart:last-child {margin: 0}
 svg text {font: 10px var(--mono)}
+.map text {font-size: clamp(11px, calc(31px - 3cqw), 23px)}
 footer {font-size: 12px; color: var(--muted); padding: 18px 0 28px; max-width: 100ch}
 [hidden] {display: none !important}
 .sr-only {position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%)}

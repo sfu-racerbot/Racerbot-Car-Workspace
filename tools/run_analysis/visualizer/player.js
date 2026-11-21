@@ -142,19 +142,22 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
   q(".speed").setAttribute("aria-label", "Speed (m/s) over elapsed time");
   const speed = chart(q(".speed"), [[run.cmd, 1, "target"], [run.odom, 3, "odom"]], speedRange);
   const steer = chart(q(".steer"), [[run.cmd, 2, "angle"]], steerRange);
-  const speedVal = q(".live-speed"), steerVal = q(".live-steer"), state = q(".state");
+  const speedVal = q(".live-speed"), steerVal = q(".live-steer"), state = q(".state"), poseState = q(".pose-state");
   panels.append(root);
   return t => {
     const ended = t > run.duration;
-    const odom = sample(run.odom, t), cmd = sample(run.cmd, t), joy = sample(run.joy, t);
+    const prev = sample(run.odom, t), odom = prev && t - prev[0] <= 0.5 ? prev : null;
+    const cmd = sample(run.cmd, t), joy = sample(run.joy, t);
     map(odom); speed(t); steer(t);
+    poseState.textContent = odom ? "● Cursor" : t < run.odom[0][0] ? "Waiting for odometry" :
+      t > run.odom.at(-1)[0] ? "Odometry ended" : "Odometry gap";
     speedVal.textContent = (odom ? odom[3].toFixed(2) : "—") + " m/s";
     steerVal.textContent = steeringLabel(cmd, t);
     state.textContent = ended ? "Run ended" : joy ? "LB " + (joy[1] ? "held" : "released") : "LB not sampled";
   };
 }
 
-function refresh() {
+function refresh(at = 0) {
   pause();
   const active = selected.slice(0, compare ? 2 : 1).map(n => runs[n]);
   duration = Math.max(...active.map(r => r.duration));
@@ -175,7 +178,7 @@ function refresh() {
   $("compare").setAttribute("aria-pressed", String(compare));
   $("end").textContent = "/ " + clock(duration);
   scrub.max = duration; scrub.disabled = !duration; $("play").disabled = !duration;
-  seek(0);
+  seek(at);
 }
 
 function seek(t) {
@@ -202,6 +205,6 @@ $("play").onclick = () => {
   $("play").textContent = "Ⅱ Pause"; lastTick = performance.now(); frame = requestAnimationFrame(tick);
 };
 scrub.oninput = () => seek(Number(scrub.value));
-$("single").onclick = () => { compare = false; refresh(); };
-$("compare").onclick = () => { compare = true; refresh(); };
+$("single").onclick = () => { compare = false; refresh(time); };
+$("compare").onclick = () => { compare = true; refresh(time); };
 refresh();
