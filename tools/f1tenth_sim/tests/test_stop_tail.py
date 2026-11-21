@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from run_analysis import validate_stop_tail as replay
+from run_analysis.fit_sim import type_of
 from sim_fidelity.actuation import speed_loop_accel
 from sim_fidelity.calibration import STOP_FLOOR, calibration_for_car, with_floor
 
@@ -28,6 +29,12 @@ def test_only_a_forward_stop_uses_the_new_gain():
 def test_invalid_stop_gain_is_refused(bad):
     with pytest.raises(ValueError, match='stop_brake_gain'):
         replace(calibration_for_car('rb2'), stop_brake_gain=bad)
+
+
+def test_disabled_stop_gain_accepts_fractional_grid_candidates():
+    base = calibration_for_car('rb2')
+    convert = type_of('stop_brake_gain', base)
+    assert convert(2.75) == 2.75  # per second, not truncated to integer ticks
 
 
 def test_stop_measurement_interpolates_time_and_distance():

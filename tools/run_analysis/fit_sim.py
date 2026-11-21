@@ -17,10 +17,12 @@ ever in reach.
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import itertools
 import math
 import sys
 from pathlib import Path
+from typing import get_args
 
 import numpy as np
 
@@ -167,7 +169,16 @@ def main(argv=None) -> int:
 
 
 def type_of(name: str, calibration=None, car_id=None):
-    return type(getattr(calibration or calibration_for_car(car_id), name))
+    cal = calibration or calibration_for_car(car_id)
+    value = getattr(cal, name)
+    if value is None:
+        # Numeric knobs can be disabled on the base calibration.
+        annotation = inspect.get_annotations(type(cal), eval_str=True)[name]
+        for candidate in get_args(annotation) or (annotation,):
+            if candidate in (int, float):
+                return candidate
+        raise ValueError(f'{name} is not a numeric grid parameter')
+    return type(value)
 
 
 if __name__ == "__main__":
