@@ -52,6 +52,7 @@ h1 {font-size: clamp(32px,4vw,50px); line-height: 1.05; letter-spacing: -.055em;
 .trajectory {background: #142e29; color: #e1eee5; padding: 12px 16px 9px}
 .map-label, .signal-head {justify-content: space-between}
 .map-label>span:last-child {font-size: 9px; color: #a3b9ad}
+.map-note {font-size: 11px; margin: 3px 0 5px; color: #c9dad0}
 .map {width: 100%; height: clamp(160px,15vw,214px); display: block}
 .map-key {gap: 15px; color: #d6e3db; font-size: 10px}
 .map-key span:nth-child(2) {color: #fff}
