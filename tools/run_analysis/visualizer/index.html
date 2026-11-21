@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run comparison · SFU Racerbot</title>
+  <style>/* STYLES */</style>
+</head>
+<body>
+<header class="mast"><div class="mast-inner">
+  <span class="brand"><svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><path d="M0 17 10 3h6L6 17zm10 0L20 3h6L16 17z" fill="currentColor"/></svg> SFU RACERBOT</span>
+  <span class="division">Telemetry lab</span><span class="offline"><i></i> OFFLINE REPLAY</span>
+</div></header>
+<main>
+  <div class="intro">
+    <div><div class="eyebrow"><span class="rule"></span> POST-RUN ANALYSIS</div>
+    <h1>Run comparison</h1>
+    <p>Replay recorded motion and commands on a shared clock.</p></div>
+    <div class="mode" aria-label="View mode" role="group">
+      <button id="single" aria-pressed="false">Single run</button><button id="compare" aria-pressed="true">Compare</button>
+    </div>
+  </div>
+  <section class="transport" aria-label="Playback">
+    <button class="play" id="play" type="button">▶ Play</button>
+    <div class="clock"><span class="label">ELAPSED</span><span><output id="elapsed">0:00.0</output> <small id="end"></small></span></div>
+    <input id="scrub" type="range" min="0" max="1" step="any" value="0" aria-label="Elapsed replay time">
+    <label class="rate"><span class="sr-only">Playback speed</span><select id="rate"><option>0.5×</option><option selected>1×</option><option>2×</option><option>4×</option></select></label>
+  </section>
+  <section id="panels" aria-label="Run analysis"></section>
+  <footer><b>Reading the traces</b> · XY is wheel odometry relative to each run’s first pose, not a surveyed track. Charts share axes and start at the first displayed topic. Dots show the latest recorded sample at the cursor; runs are not lap-aligned.</footer>
+</main>
+<template id="panel">
+  <article class="panel">
+    <header class="panel-head">
+      <div class="panel-tag"><span class="badge"></span><span class="label">RECORDING</span><span class="source"></span></div>
+      <select class="run-select"></select><div class="meta"></div>
+    </header>
+    <div class="trajectory">
+      <div class="map-label"><span class="label">ODOMETRY TRACE</span><span>XY / METERS</span></div>
+      <svg class="map" viewBox="0 0 500 188" role="img" aria-label="Wheel odometry trajectory"></svg>
+      <div class="map-key"><span>○ Start</span><span>● Cursor</span><span class="state"></span></div>
+    </div>
+    <div class="stats">
+      <div><span class="label">DURATION</span><strong class="duration"></strong></div>
+      <div><span class="label">DISTANCE</span><strong class="distance"></strong></div>
+      <div><span class="label">PEAK SPEED</span><strong class="peak"></strong></div>
+    </div>
+    <div class="signals">
+      <div class="signal-head"><h2>Speed</h2><span class="live-speed"></span></div>
+      <div class="legend"><span><i></i>Odometry</span><span class="cmd-key"><i></i>Command</span></div>
+      <svg class="speed chart" viewBox="0 0 500 100" role="img" aria-label="Odometry and command speed over elapsed time"></svg>
+      <div class="signal-head"><h2>Steering command</h2><span class="live-steer"></span></div>
+      <div class="legend topic"></div>
+      <svg class="steer chart" viewBox="0 0 500 100" role="img" aria-label="Commanded steering angle over elapsed time"></svg>
+    </div>
+  </article>
+</template>
+<script id="runs" type="application/json"><!-- RUN_DATA --></script>
+<script>/* PLAYER */</script>
+</body></html>
