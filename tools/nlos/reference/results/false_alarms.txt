@@ -1,0 +1,8 @@
+Empty approaches, defaults (footprint 12 mm/m, ghost path <= 6 m), 4 approaches, 316 scans. From fa2.py.
+base: learn x<-0.2, 3 lanes, dil 2; test x<0.9: scans 316, with cluster 35, 4-of-6 28
+test only x<-0.2: scans 272, with cluster 2, 4-of-6 0
+learn x<0.9, 3 lanes: scans 316, with cluster 1, 4-of-6 0
+learn x<0.9, 7 lanes: scans 316, with cluster 0, 4-of-6 0
+learn x<0.9, 7 lanes, dil 4: scans 316, with cluster 0, 4-of-6 0
+learn x<0.9, 7 lanes x2 reps, dil 4: scans 316, with cluster 0, 4-of-6 0
+Kalman filter (fa_kf.py), 300 seeds, after 1 s: |vel err| p50 0.066 p95 0.195 max 0.442 m/s; |pos err| p95 0.022 max 0.046 m
