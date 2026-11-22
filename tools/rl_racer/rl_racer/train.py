@@ -67,23 +67,51 @@ def env_state(env):
             ('state', 'steer_cmd', 'wheel_cmd', 'accel_prev', 'steps', 'parameters')}
 
 
+def retained_metrics(lines, iteration, decode):
+    lines = [line for line in lines if line.strip()]
+    rows = []
+    for index, line in enumerate(lines):
+        try:
+            if not line.endswith('\n'):
+                raise ValueError('incomplete metric record')
+            row = decode(line)
+            recorded_iteration = int(row['iteration'])
+        except (ValueError, TypeError, KeyError, StopIteration, csv.Error) as exc:
+            if index != len(lines) - 1:
+                raise ValueError('invalid metric record before end of log') from exc
+            break
+        if recorded_iteration <= iteration:
+            rows.append(row)
+    return rows
+
+
 def truncate_metrics(directory, iteration):
     csv_path = directory / 'metrics.csv'
     json_path = directory / 'metrics.jsonl'
     if csv_path.exists():
         with csv_path.open(newline='') as stream:
-            reader = csv.DictReader(stream)
-            fields = reader.fieldnames
-            rows = [row for row in reader if int(row['iteration']) <= iteration]
+            header = stream.readline()
+            fields = next(csv.reader([header]), [])
+
+            def decode_csv(line):
+                row = next(csv.DictReader([header, line], strict=True))
+                if None in row or any(value is None for value in row.values()):
+                    raise ValueError('incomplete CSV fields')
+                for value in row.values():
+                    float(value)
+                return row
+
+            rows = retained_metrics(stream.readlines(), iteration, decode_csv)
         with csv_path.open('w', newline='') as stream:
             if fields:
                 writer = csv.DictWriter(stream, fieldnames=fields)
                 writer.writeheader()
                 writer.writerows(rows)
+        if not fields:
+            csv_path.unlink()
     if json_path.exists():
-        rows = [line for line in json_path.read_text().splitlines()
-                if line.strip() and json.loads(line)['iteration'] <= iteration]
-        json_path.write_text(''.join(line + '\n' for line in rows))
+        rows = retained_metrics(json_path.read_text().splitlines(keepends=True), iteration, json.loads)
+        json_path.write_text(''.join(json.dumps(row, allow_nan=False) + '\n' for row in rows))
 
 
 def train(config_path=DEFAULT_CONFIG, *, smoke=False, signoff=None, run_dir=None,

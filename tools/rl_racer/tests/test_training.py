@@ -14,7 +14,7 @@ from rl_racer.evaluate import LapMetrics, evaluate, map_fidelity_state
 from rl_racer.export import export
 from rl_racer.policy_numpy import PolicyNumpy
 from rl_racer.ppo import ActorCritic, advantages
-from rl_racer.train import DEFAULT_CONFIG, SCRATCH, load_config, make_env, train, validate_signoff
+from rl_racer.train import DEFAULT_CONFIG, SCRATCH, load_config, make_env, train, truncate_metrics, validate_signoff
 
 
 @pytest.fixture(scope='module')
@@ -106,7 +106,8 @@ def test_smoke_checkpoint_resume(smoke_run):
         train(DEFAULT_CONFIG, smoke=True, run_dir=Path('/approved_models/no'))
 
 
-def test_resume_discards_metrics_after_checkpoint():
+@pytest.mark.parametrize('partial_tail', [False, True])
+def test_resume_discards_metrics_after_checkpoint(partial_tail):
     before_threads = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
@@ -114,6 +115,11 @@ def test_resume_discards_metrics_after_checkpoint():
         checkpoint = directory / 'iteration-one.pt'
         checkpoint.write_bytes((directory / 'latest.pt').read_bytes())
         train(DEFAULT_CONFIG, smoke=True, resume=directory / 'latest.pt')
+        if partial_tail:
+            with (directory / 'metrics.csv').open('a') as stream:
+                stream.write('0.123,0.456')
+            with (directory / 'metrics.jsonl').open('a') as stream:
+                stream.write('{"iteration":')
         train(DEFAULT_CONFIG, smoke=True, resume=checkpoint)
         with (directory / 'metrics.csv').open() as stream:
             csv_rows = list(csv.DictReader(stream))
@@ -124,6 +130,23 @@ def test_resume_discards_metrics_after_checkpoint():
         assert [row['steps'] for row in json_rows] == [64, 128, 192, 256]
     finally:
         torch.set_num_threads(before_threads)
+
+
+@pytest.mark.parametrize('filename,header,valid,broken', [
+    ('metrics.csv', 'loss,iteration\n', '0.1,1\n', '0.2,broken\n'),
+    ('metrics.jsonl', '', '{"iteration": 1}\n', '{"iteration": broken}\n'),
+])
+def test_truncate_metrics_malformed_tail(tmp_path, filename, header, valid, broken):
+    path = tmp_path / filename
+    path.write_text(header + valid + broken)
+    truncate_metrics(tmp_path, 1)
+    assert path.read_text() == header + valid
+    path.write_text(header + broken + valid)
+    with pytest.raises(ValueError, match='before end of log'):
+        truncate_metrics(tmp_path, 1)
+    path.write_text('')
+    truncate_metrics(tmp_path, 1)
+    assert not path.exists() or path.read_text() == ''
 
 
 def test_export_parity_and_integrator(untrained_export):
