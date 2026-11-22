@@ -122,10 +122,138 @@ It refuses changed configurations or changed track/vehicle contents.
 
 The sign-off binds the training YAML bytes; reviewers must also review the referenced assets, whose hashes are recorded separately.
 
-`slurm/train_paper.sbatch` is an optional cluster job template; it has **not been submitted**.
-It requires sign-off and run-directory arguments and resumes `latest.pt` when present.
-Set `RL_RACER_PYTHON` to a prepared cluster interpreter; install a CUDA-compatible PyTorch 2.5.1 build there to use its requested GPU.
-The local pinned CPU wheel does not use a GPU.
+`slurm/train_paper.sbatch` is a Fir cluster job template; it has **not been submitted**.
+It requires sign-off and a run name and resumes `latest.pt` when present.
+The Fir setup below replaces the local CPU wheel with the Alliance's CUDA build.
+
+## Train on Fir
+
+Fir is SFU's Alliance supercomputer. These steps are for the owner to run later, not authorization to train now.
+Use a separate checkout and run directories from Neural Racer. No job has been submitted or tested on Fir.
+
+**Resource estimate:** one H100 GPU, 12 CPU cores and 64 GiB RAM for 400 environments and the 120M-step budget.
+The 12-hour wall limit is an **unmeasured per-job estimate**, not a promise that the entire budget fits.
+Simulation stays on the CPU, so GPU utilization may be low. Measure throughput before allocating additional segments.
+
+**Before starting:** confirm your `def-...` account, the `python/3.11` and `cuda/12.6` modules, and the `h100:1` GPU request with Fir support.
+Override module names using `RL_RACER_PYTHON_MODULE` and `RL_RACER_CUDA_MODULE` if required; use the same values for setup and jobs.
+
+1. **Clone — terminal on a Fir login node.** Login nodes prepare files; Slurm (the cluster scheduler) allocates compute nodes.
+
+   ```bash
+   cd "$PROJECT"
+   git clone --branch rl-racer/paper-policy-setup https://github.com/sfu-racerbot/Racerbot-Car-Workspace.git rl-paper
+   cd rl-paper
+   export RL_RACER_REPO="$PWD"
+   ```
+
+   **Working when:** `git branch --show-current` prints `rl-racer/paper-policy-setup`.
+
+2. **Set up once — same login terminal, with internet access.** The persistent environment is separate from Neural Racer's.
+
+   ```bash
+   bash tools/rl_racer/slurm/fir_setup.sh
+   source tools/rl_racer/slurm/fir_env.sh
+   ```
+
+   **Working when:** setup prints `READY`, a CUDA version, passing tests and `Setup complete`.
+   It installs `requirements.txt`, then replaces CPU-only Torch with the Alliance wheelhouse's CUDA-enabled Torch 2.5.1.
+   The optional FidelityPlant test skips without the pinned Gym checkout; native evaluation needs no Gym.
+
+   **If it fails:** stop if the wheelhouse lacks a compatible Torch build. Do not submit a CPU-only build to a GPU allocation.
+   Compute jobs activate `$PROJECT/rl_racer/venv` without downloading anything. Override its path with `RL_RACER_VENV` before setup and submission.
+
+3. **Smoke check — same login terminal.** This is the only training permitted before review.
+
+   ```bash
+   OMP_NUM_THREADS=1 python -m rl_racer.train --smoke
+   ```
+
+   **Working when:** the final JSON reports 256 steps under `~/.cache/rl_racer/smoke/`. It does not create an approved model.
+
+4. **Obtain reviewer sign-off — same login terminal.** Review the training YAML and referenced vehicle/track files with the owner.
+
+   ```bash
+   sha256sum tools/rl_racer/config/train_paper.yaml
+   ```
+
+   The genuine reviewer creates `$PROJECT/rl-paper-signoff.yaml`, outside Git, using the printed hash:
+
+   ```yaml
+   approved_by: "Actual reviewer name"
+   date: "YYYY-MM-DD"
+   sha256: "Exact 64-character training-config hash"
+   ```
+
+   **Working when:** every field is filled by the reviewer; changing the training config invalidates approval.
+   Never manufacture an approval just to submit a job.
+
+5. **Submit after approval — same login terminal, from the checkout root.** Replace the allocation placeholder.
+
+   ```bash
+   export SIGNOFF="$PROJECT/rl-paper-signoff.yaml"
+   export RUN_NAME=paper-seed42-v1
+   export RUN="$SCRATCH/rl_racer/runs/$RUN_NAME"
+   sbatch --account=def-REPLACE_WITH_ALLOCATION tools/rl_racer/slurm/train_paper.sbatch "$SIGNOFF" "$RUN_NAME"
+   ```
+
+   **Working when:** Slurm prints a job ID. The job revalidates sign-off and requires visible CUDA before training.
+   `RL_RACER_RUNS_ROOT` can replace `$SCRATCH/rl_racer/runs`; `RL_RACER_CONFIG` selects another reviewed config.
+
+6. **Monitor — same login terminal.** Replace `JOB_ID` with the scheduler's number.
+
+   ```bash
+   squeue -u "$USER"
+   tail -f "$RUN/slurm-JOB_ID.log"
+   ```
+
+   **Working when:** `metrics.csv` and `metrics.jsonl` grow and `latest.pt` appears after checkpointing.
+   The scheduler's initial output is `rl-paper-JOB_ID.out` in the submission directory.
+   Press Ctrl-C to stop `tail`, not the job. After completion, use `seff JOB_ID` to inspect resource use.
+
+7. **Resume — same login terminal.** Reuse exactly the same config, sign-off and run name.
+
+   ```bash
+   sbatch --account=def-REPLACE_WITH_ALLOCATION tools/rl_racer/slurm/train_paper.sbatch "$SIGNOFF" "$RUN_NAME"
+   ```
+
+   **Working when:** logged iteration numbers continue from `latest.pt`; newer uncheckpointed log rows are removed.
+   Submit only after the previous job has stopped: two writers must never share a run directory.
+
+   Slurm requeue also reruns the script and resumes automatically when a checkpoint exists.
+   `--requeue` permits scheduler requeue; it does not guarantee automatic continuation after a time limit.
+   Abrupt termination can lose up to ten updates. Before the first checkpoint it restarts from zero.
+
+8. **Export — same login terminal after the job stops.** Load only your trusted checkpoint.
+
+   ```bash
+   source tools/rl_racer/slurm/fir_env.sh
+   python -m rl_racer.export "$RUN/latest.pt" "$RUN/actor.npz"
+   ```
+
+   **Working when:** export prints `$RUN/actor.npz`. Keep the referenced track and vehicle files unchanged.
+
+9. **Evaluate offline — same login terminal.** This does not communicate with a car.
+
+   ```bash
+   python -m rl_racer.evaluate "$RUN/actor.npz" --max-steps 2000 --laps 3 --output "$RUN/evaluation.json"
+   ```
+
+   **Working when:** JSON includes lap times, off-track integral and completed laps; zero laps is a valid failure to race.
+   See the next section for the optional second-simulator check.
+
+10. **Archive and hand to Vera — same login terminal.** Scratch is not permanent storage; copy results into project storage.
+
+    ```bash
+    mkdir -p "$PROJECT/rl_racer/results/$RUN_NAME"
+    cp -a "$RUN/." "$PROJECT/rl_racer/results/$RUN_NAME/"
+    cp "$SIGNOFF" "$PROJECT/rl_racer/results/$RUN_NAME/reviewer-signoff.yaml"
+    git rev-parse HEAD > "$PROJECT/rl_racer/results/$RUN_NAME/source-commit.txt"
+    ```
+
+    **Working when:** the archive has the checkpoint, NumPy actor, evaluation JSON, `run.json`, both metrics logs and job logs.
+    Hand Vera that directory, the reviewed config and referenced vehicle/track files, source commit and reviewer approval.
+    Include measured throughput and any failed-lap results. This handoff is for review, not approval to drive.
 
 ## Evaluate in the second simulator
 
