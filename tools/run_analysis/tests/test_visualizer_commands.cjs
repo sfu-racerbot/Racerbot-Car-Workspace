@@ -1,6 +1,17 @@
 const {test} = require("node:test");
 const assert = require("node:assert/strict");
-const {commandPath, commandLabel, odometryPath, completeDistance} = require("../visualizer/commands.js");
+const {commandPath, commandLabel, odometryPath, completeDistance, joystickLabel} = require("../visualizer/commands.js");
+
+test("joystick dropouts are unknown rather than a current LB reading", () => {
+  // RB1 20261026-174337: equal released readings bracket 0.51124..1.28025 s.
+  assert.equal(joystickLabel([0.51124, 0], 1.1), "LB not sampled");
+  assert.equal(joystickLabel([0.51124, 1], 1.1), "LB not sampled");
+  assert.equal(joystickLabel([1, 0], 1.5), "LB released");
+  assert.equal(joystickLabel([1, 1], 1.5), "LB held");
+  assert.equal(joystickLabel([1, 1], 1.50001), "LB not sampled");
+  assert.equal(joystickLabel([1.28025, 0], 1.28025), "LB released");
+  assert.equal(joystickLabel(null, 0), "LB not sampled");
+});
 
 test("command steps retain the prior level, break across gaps, and resume at the next sample", () => {
   // Identity axes expose the actual times and angles in the SVG path.

@@ -156,7 +156,7 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
     speedVal.textContent = (odom ? odom[3].toFixed(2) : "—") + " m/s";
     cmdSpeedVal.textContent = commandLabel(cmd, t, 1, " m/s");
     steerVal.textContent = commandLabel(cmd, t, 2, "°");
-    state.textContent = ended ? "Run ended" : joy ? "LB " + (joy[1] ? "held" : "released") : "LB not sampled";
+    state.textContent = ended ? "Run ended" : joystickLabel(joy, t);
   };
 }
 

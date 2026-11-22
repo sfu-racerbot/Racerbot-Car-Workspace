@@ -23,7 +23,7 @@ def test_independent_receive_times_and_full_resolution_metrics():
     assert r["odom"] == [[1, 0, 0, 5], [4, 3, 4, -2], [6, 0, 4, -6]]
     assert r["cmdTopic"] == "/drive"
     assert r["cmd"] == [[0, -1, -45], [2, 2, 30]]
-    assert r["joy"] == [[2, 1], [5, 0], [7, 0]]
+    assert r["joy"] == [[2, 1], [3, 1], [5, 0], [7, 0]]
 
 
 def test_single_pose_optional_topics_and_manual_fallback():

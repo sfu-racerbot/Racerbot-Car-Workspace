@@ -93,9 +93,6 @@ def prepare(streams):
     duration = max(a[-1, 0] for a in used)
     odom[:, 1:3] -= odom[0, 1:3].copy()  # origins differ between recordings
     cmd[:, 2] = np.degrees(cmd[:, 2])
-    if len(joy):
-        changed = np.flatnonzero(np.diff(joy[:, 1])) + 1
-        joy = joy[np.unique(np.r_[0, changed, len(joy) - 1])]
     return dict(duration=round(duration, 5), distance=np.linalg.norm(
         np.diff(odom[:, 1:3], axis=0), axis=1).sum(), peak=np.abs(odom[:, 3]).max(),
         odom=odom.round(5).tolist(), cmd=cmd.round(5).tolist(),

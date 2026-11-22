@@ -1,6 +1,7 @@
 // A display limit, not an estimate of how long the actuator held a command.
 const COMMAND_MAX_AGE = 0.5;
 const ODOM_MAX_AGE = 0.5;
+const JOY_MAX_AGE = 0.5;
 
 function startsAfterOdometryGap(row, i, rows) {
   return i > 0 && row[0] - rows[i - 1][0] > ODOM_MAX_AGE;
@@ -39,4 +40,8 @@ function commandLabel(cmd, time, column, unit) {
   return age > COMMAND_MAX_AGE ? "Gap · last " + value + " (" + age.toFixed(1) + " s ago)" : value;
 }
 
-if (typeof module !== "undefined") module.exports = {commandPath, commandLabel, odometryPath, completeDistance};
+function joystickLabel(joy, time) {
+  return joy && time - joy[0] <= JOY_MAX_AGE ? "LB " + (joy[1] ? "held" : "released") : "LB not sampled";
+}
+
+if (typeof module !== "undefined") module.exports = {commandPath, commandLabel, odometryPath, completeDistance, joystickLabel};
