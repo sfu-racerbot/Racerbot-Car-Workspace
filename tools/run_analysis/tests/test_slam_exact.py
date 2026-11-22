@@ -101,12 +101,14 @@ def test_missing_extra():
 
 
 def test_map_bytes_and_yaml(tmp_path):
-    # oracle: spec nav2_map_server/src/map_io.cpp saveMapToFile trinary, y flipped.
+    # oracle: spec nav2_map_server/src/map_io.cpp saveMapToFile trinary, y flipped;
+    # thresholds as the car's own map saver writes them (recorded:
+    # data/rb2/racerbot_auto/20261111-151125/map.yaml, occupied 0.65, free 0.196).
     pgm, meta = replay.map_from_bag_files([[0, 100, -1], [-1, 0, 100]], .05, (-2, 3), tmp_path)
     assert pgm.read_bytes() == b'P5\n3 2\n255\n' + bytes([205, 254, 0, 254, 0, 205])
     assert yaml.safe_load(meta.read_text()) == {
         'image': 'map.pgm', 'mode': 'trinary', 'resolution': .05,
-        'origin': [-2, 3, 0], 'negate': 0, 'occupied_thresh': .65, 'free_thresh': .25}
+        'origin': [-2, 3, 0], 'negate': 0, 'occupied_thresh': .65, 'free_thresh': .196}
 
 
 def test_exact_rate_refused(capsys):
