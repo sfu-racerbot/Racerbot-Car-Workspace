@@ -1,0 +1,428 @@
+- run: data/rb1/racerbot_runs/20261111-153409
+  first_scan_epoch: 1794440052.6
+  seconds: 5.5
+  stretches: []
+  stalled_with_lb: []
+  handled: []
+  spinning: []
+- run: data/rb1/racerbot_runs/20261111-153436
+  first_scan_epoch: 1794440078.359
+  seconds: 30.5
+  stretches:
+  - kind: race
+    start_s: 0.5
+    end_s: 25.0
+    metres: 57.3
+    clock: 15:34:38 to 15:35:03
+  stalled_with_lb: []
+  handled: []
+  spinning:
+  - - 0.0
+    - 0.5
+- run: data/rb1/racerbot_runs/20261111-153721
+  first_scan_epoch: 1794440244.914
+  seconds: 271.0
+  stretches:
+  - kind: race
+    start_s: 77.0
+    end_s: 110.5
+    metres: 89.5
+    clock: 15:38:41 to 15:39:15
+  - kind: race
+    start_s: 115.5
+    end_s: 129.0
+    metres: 36.1
+    clock: 15:39:20 to 15:39:33
+  - kind: race
+    start_s: 173.5
+    end_s: 224.5
+    metres: 137.5
+    clock: 15:40:18 to 15:41:09
+  - kind: race
+    start_s: 226.5
+    end_s: 247.0
+    metres: 53.9
+    clock: 15:41:11 to 15:41:31
+  stalled_with_lb: []
+  handled:
+  - - 145.5
+    - 147.5
+  - - 151.0
+    - 153.5
+  - - 156.5
+    - 159.5
+  - - 173.0
+    - 173.5
+  - - 224.5
+    - 225.0
+  - - 255.0
+    - 263.5
+  spinning: []
+- run: data/rb1/racerbot_runs/20261111-155542
+  first_scan_epoch: 1794441346.253
+  seconds: 433.0
+  stretches:
+  - kind: short
+    start_s: 9.5
+    end_s: 11.0
+    metres: 4.1
+    clock: 15:55:55 to 15:55:57
+  - kind: race
+    start_s: 16.5
+    end_s: 72.0
+    metres: 143.4
+    clock: 15:56:02 to 15:56:58
+  - kind: race
+    start_s: 75.0
+    end_s: 86.5
+    metres: 28.4
+    clock: 15:57:01 to 15:57:12
+  - kind: race
+    start_s: 94.5
+    end_s: 158.0
+    metres: 157.7
+    clock: 15:57:20 to 15:58:24
+  - kind: short
+    start_s: 160.5
+    end_s: 162.0
+    metres: 2.9
+    clock: 15:58:26 to 15:58:28
+  stalled_with_lb:
+  - - 86.5
+    - 94.0
+  handled:
+  - - 13.5
+    - 15.5
+  - - 74.5
+    - 75.0
+  - - 94.0
+    - 94.5
+  - - 160.0
+    - 160.5
+  - - 346.5
+    - 397.0
+  - - 400.0
+    - 432.0
+  spinning:
+  - - 11.0
+    - 11.5
+- run: data/rb2/racerbot_runs/20261111-135453
+  first_scan_epoch: 1794434094.564
+  seconds: 255.0
+  stretches:
+  - kind: race
+    start_s: 136.0
+    end_s: 218.5
+    metres: 210.5
+    clock: 13:57:10 to 13:58:33
+  - kind: short
+    start_s: 219.0
+    end_s: 221.5
+    metres: 4.5
+    clock: 13:58:33 to 13:58:36
+  stalled_with_lb: []
+  handled:
+  - - 222.0
+    - 225.5
+  spinning:
+  - - 218.5
+    - 219.0
+- run: data/rb2/racerbot_runs/20261111-135934
+  first_scan_epoch: 1794434376.025
+  seconds: 189.0
+  stretches:
+  - kind: race
+    start_s: 24.0
+    end_s: 134.0
+    metres: 298.4
+    clock: 14:00:00 to 14:01:50
+  stalled_with_lb: []
+  handled: []
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-140322
+  first_scan_epoch: 1794434604.089
+  seconds: 162.5
+  stretches:
+  - kind: race
+    start_s: 23.0
+    end_s: 129.5
+    metres: 273.9
+    clock: 14:03:47 to 14:05:33
+  stalled_with_lb: []
+  handled: []
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-141227
+  first_scan_epoch: 1794435149.377
+  seconds: 471.5
+  stretches:
+  - kind: race
+    start_s: 90.5
+    end_s: 103.5
+    metres: 33.0
+    clock: 14:13:59 to 14:14:12
+  - kind: short
+    start_s: 178.5
+    end_s: 181.0
+    metres: 6.9
+    clock: 14:15:27 to 14:15:30
+  - kind: short
+    start_s: 227.5
+    end_s: 229.0
+    metres: 2.1
+    clock: 14:16:16 to 14:16:18
+  - kind: short
+    start_s: 275.5
+    end_s: 276.5
+    metres: 1.3
+    clock: 14:17:04 to 14:17:05
+  - kind: race
+    start_s: 365.0
+    end_s: 386.5
+    metres: 55.3
+    clock: 14:18:34 to 14:18:55
+  - kind: race
+    start_s: 422.0
+    end_s: 433.5
+    metres: 28.7
+    clock: 14:19:31 to 14:19:42
+  stalled_with_lb: []
+  handled:
+  - - 90.0
+    - 90.5
+  - - 117.0
+    - 121.5
+  - - 174.5
+    - 178.5
+  - - 191.0
+    - 201.0
+  - - 236.0
+    - 240.0
+  - - 249.5
+    - 250.0
+  - - 258.5
+    - 262.0
+  - - 311.0
+    - 315.0
+  - - 318.5
+    - 319.0
+  - - 332.5
+    - 342.5
+  - - 410.0
+    - 417.5
+  - - 421.5
+    - 422.0
+  - - 433.5
+    - 434.0
+  - - 441.5
+    - 442.5
+  - - 452.0
+    - 457.0
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-142036
+  first_scan_epoch: 1794435639.364
+  seconds: 87.0
+  stretches:
+  - kind: race
+    start_s: 3.0
+    end_s: 68.0
+    metres: 181.4
+    clock: 14:20:42 to 14:21:47
+  stalled_with_lb:
+  - - 68.0
+    - 80.0
+  handled: []
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-142254
+  first_scan_epoch: 1794435776.51
+  seconds: 175.5
+  stretches:
+  - kind: race
+    start_s: 9.5
+    end_s: 104.5
+    metres: 261.8
+    clock: 14:23:06 to 14:24:41
+  - kind: short
+    start_s: 143.0
+    end_s: 147.0
+    metres: 8.3
+    clock: 14:25:19 to 14:25:23
+  stalled_with_lb:
+  - - 104.5
+    - 118.0
+  handled:
+  - - 1.0
+    - 2.0
+  - - 136.0
+    - 136.5
+  - - 139.0
+    - 140.0
+  - - 142.5
+    - 143.0
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-142604
+  first_scan_epoch: 1794435969.86
+  seconds: 366.5
+  stretches:
+  - kind: race
+    start_s: 16.5
+    end_s: 240.0
+    metres: 568.3
+    clock: 14:26:26 to 14:30:09
+  stalled_with_lb: []
+  handled:
+  - - 4.5
+    - 8.5
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-143337
+  first_scan_epoch: 1794436422.007
+  seconds: 62.0
+  stretches:
+  - kind: race
+    start_s: 14.0
+    end_s: 48.5
+    metres: 91.3
+    clock: 14:33:56 to 14:34:30
+  stalled_with_lb:
+  - - 49.0
+    - 52.0
+  handled:
+  - - 13.5
+    - 14.0
+  - - 48.5
+    - 49.0
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-151026
+  first_scan_epoch: 1794438630.806
+  seconds: 63.5
+  stretches:
+  - kind: race
+    start_s: 21.5
+    end_s: 57.0
+    metres: 92.7
+    clock: 15:10:52 to 15:11:27
+  stalled_with_lb: []
+  handled:
+  - - 21.0
+    - 21.5
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-152132
+  first_scan_epoch: 1794439298.762
+  seconds: 220.0
+  stretches:
+  - kind: short
+    start_s: 1.0
+    end_s: 6.0
+    metres: 16.7
+    clock: 15:21:39 to 15:21:44
+  - kind: race
+    start_s: 57.5
+    end_s: 195.5
+    metres: 406.2
+    clock: 15:22:36 to 15:24:54
+  stalled_with_lb:
+  - - 16.0
+    - 46.5
+  handled:
+  - - 0.5
+    - 1.0
+  - - 6.0
+    - 6.5
+  - - 12.0
+    - 15.5
+  - - 51.5
+    - 52.5
+  - - 57.0
+    - 57.5
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-152844
+  first_scan_epoch: 1794439727.419
+  seconds: 244.0
+  stretches:
+  - kind: race
+    start_s: 51.5
+    end_s: 63.5
+    metres: 32.6
+    clock: 15:29:38 to 15:29:50
+  stalled_with_lb: []
+  handled:
+  - - 42.5
+    - 51.5
+  - - 68.5
+    - 84.5
+  - - 88.5
+    - 90.5
+  - - 98.0
+    - 110.5
+  spinning: []
+- run: data/rb2/racerbot_runs/20261111-154204
+  first_scan_epoch: 1794440526.234
+  seconds: 1246.0
+  stretches:
+  - kind: race
+    start_s: 171.0
+    end_s: 230.5
+    metres: 150.3
+    clock: 15:44:57 to 15:45:56
+  - kind: race
+    start_s: 627.5
+    end_s: 720.5
+    metres: 230.5
+    clock: 15:52:33 to 15:54:06
+  - kind: short
+    start_s: 829.5
+    end_s: 833.5
+    metres: 7.9
+    clock: 15:55:55 to 15:55:59
+  - kind: short
+    start_s: 842.5
+    end_s: 844.5
+    metres: 2.6
+    clock: 15:56:08 to 15:56:10
+  - kind: race
+    start_s: 847.0
+    end_s: 907.5
+    metres: 148.5
+    clock: 15:56:13 to 15:57:13
+  - kind: race
+    start_s: 910.0
+    end_s: 972.5
+    metres: 155.1
+    clock: 15:57:16 to 15:58:18
+  - kind: short
+    start_s: 979.0
+    end_s: 984.0
+    metres: 10.9
+    clock: 15:58:25 to 15:58:30
+  stalled_with_lb:
+  - - 972.5
+    - 976.0
+  handled:
+  - - 1.0
+    - 4.5
+  - - 9.0
+    - 10.0
+  - - 113.5
+    - 124.5
+  - - 170.5
+    - 171.0
+  - - 246.5
+    - 258.5
+  - - 557.5
+    - 569.0
+  - - 748.0
+    - 760.0
+  - - 789.5
+    - 790.5
+  - - 841.0
+    - 842.5
+  - - 846.0
+    - 846.5
+  - - 909.0
+    - 910.0
+  - - 977.5
+    - 979.0
+  - - 1166.0
+    - 1205.0
+  - - 1220.0
+    - 1246.0
+  spinning: []
