@@ -1,12 +1,8 @@
 """Vehicle and sensor parameters, batched per environment, with randomization
 keyed to how well each number is known (plan A7).
 
-Values come from tools/f1tenth_sim/sim_fidelity/calibration.py -- the same
-numbers the CPU referee uses -- with car 1's own measurements applied on top
-(CAR1_OVERRIDES), because that calibration still describes car 2 in places
-(docs/car1-vs-car2.md: "Simulator vehicle model: not car 1's"). Overriding
-here, rather than editing calibration.py, keeps this branch from touching
-existing code; Phase 1 of the plan moves the overrides into calibration.py.
+The nominal vehicle uses the selected car's base calibration from the CPU
+referee. CarParams() provides standalone fixtures for component tests.
 """
 import math
 from dataclasses import dataclass, fields, replace
@@ -17,7 +13,7 @@ G = 9.81                   # gym's and calibration.py's gravity
 CONTROL_DT = 0.025         # 40 Hz, run_validation.CONTROL_DT
 INTEGRATOR_DT = 0.005      # run_validation.INTEGRATOR_DT, RK4
 
-# Car 1 measurements that differ from calibration.py (car 2's numbers).
+# Car 1 fixture values for component tests that construct CarParams directly.
 CAR1_OVERRIDES = {
     'speed_max': 23250.0 / 4600.0,     # vesc.yaml speed_max / car 1's command gain (4600 since 2026-11-02) = 5.05 m/s
     'speed_min': -23250.0 / 4600.0,
@@ -52,6 +48,7 @@ class CarParams:
     speed_loop_accel_gain: float = 5.0
     speed_loop_accel_max: float = 4.5
     speed_loop_brake_gain: float = 4.0
+    speed_loop_brake_deadband: float = 0.0
     speed_loop_brake_max: float = 4.0
     longitudinal_grip_coupling: float = 1.0
     # bodies
@@ -84,23 +81,22 @@ class CarParams:
         return self.mu * G                       # calibration: friction_accel_limit
 
 
-def from_calibration() -> CarParams:
-    """CarParams built from sim_fidelity's CALIBRATION plus car 1's overrides.
-    Falls back to the defaults above when the simulator checkout is absent."""
-    try:
-        from neural_racer_train.fidelity import calibration_module
-        cal = calibration_module().CALIBRATION
-    except Exception:  # noqa: BLE001 -- no checkout: the defaults mirror it
-        return CarParams()
+def from_calibration(car_id: str | None = None) -> CarParams:
+    """Resolve the same base car as the CPU referee; never guess a profile."""
+    from neural_racer_train.fidelity import calibration_module
+    cal = calibration_module().calibration_for_car(car_id)
     return CarParams(
         mu=cal.surface_friction, C_Sf=cal.cornering_stiffness_front,
         C_Sr=cal.cornering_stiffness_rear, wheelbase=cal.wheelbase,
         cog_front_fraction=cal.cog_front_fraction, h=cal.cog_height, m=cal.mass,
         I=cal.yaw_inertia, steering_rate_max=cal.steering_rate_max,
+        steering_max_left=cal.steering_max_left, steering_max_right=cal.steering_max_right,
+        speed_min=cal.speed_min, speed_max=cal.speed_max,
         servo_gain=cal.steering_servo_gain, steer_delay_ticks=cal.steering_delay_ticks,
         speed_delay_ticks=cal.speed_delay_ticks,
         speed_loop_accel_gain=cal.speed_loop_accel_gain, speed_loop_accel_max=cal.speed_loop_accel_max,
         speed_loop_brake_gain=cal.speed_loop_brake_gain, speed_loop_brake_max=cal.speed_loop_brake_max,
+        speed_loop_brake_deadband=cal.speed_loop_brake_deadband,
         longitudinal_grip_coupling=cal.longitudinal_grip_coupling,
         body_width=cal.body_width, body_length=cal.body_length,
         envelope_width=cal.width, envelope_length=cal.length, lidar_offset_x=cal.lidar_offset_x,
@@ -110,7 +106,8 @@ def from_calibration() -> CarParams:
 
 
 # Randomization by provenance (plan A7): (kind, spread). 'rel' = +/- fraction,
-# 'abs' = +/- absolute, 'ticks' = integer range [lo, hi], 'range' = [lo, hi].
+# 'abs' = +/- absolute, 'ticks' = integer range, 'tick_jitter' = +/- nominal ticks.
+SPEED_DELAY_JITTER = 1
 RANDOMIZATION = {
     'speed_loop_accel_gain': ('rel', 0.05), 'speed_loop_accel_max': ('rel', 0.05),
     'speed_loop_brake_gain': ('rel', 0.05), 'speed_loop_brake_max': ('rel', 0.05),
@@ -118,7 +115,7 @@ RANDOMIZATION = {
     'mu': ('range', (0.40, 1.10)),             # STOCK-grade knowledge of the floor
     'C_Sf': ('rel', 0.30), 'C_Sr': ('rel', 0.30), 'h': ('rel', 0.30), 'I': ('rel', 0.30),
     'servo_gain': ('rel', 0.30),
-    'steer_delay_ticks': ('ticks', (2, 4)), 'speed_delay_ticks': ('ticks', (1, 3)),
+    'steer_delay_ticks': ('ticks', (2, 4)), 'speed_delay_ticks': ('tick_jitter', SPEED_DELAY_JITTER),
     'lidar_offset_x': ('abs', 0.02), 'imu_offset_x': ('abs', 0.02),
     'imu_gyro_noise': ('rel', 0.30), 'imu_accel_noise': ('rel', 0.30),
     'imu_delay_ticks': ('ticks', (0, 2)),
@@ -157,7 +154,11 @@ class BatchParams:
             elif kind == 'range':
                 val = spread[0] + (spread[1] - spread[0]) * u
             else:
-                lo, hi = spread
+                if kind == 'tick_jitter':
+                    nominal = getattr(p, name)
+                    lo, hi = max(0, nominal - spread), nominal + spread
+                else:
+                    lo, hi = spread
                 val = torch.floor(lo + (hi - lo + 1) * u).clamp(lo, hi)
             setattr(out, name, val)
         out.steer_gain = 1.0 + STEER_GAIN_ERROR * (2 * torch.rand(n, generator=gen, device=gen.device).to(device) - 1)
