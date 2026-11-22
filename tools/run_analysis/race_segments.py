@@ -216,8 +216,11 @@ def main(argv=None):
     parser.add_argument('--course-m', type=float, default=COURSE_M,
                         help='course length in metres; a race stretch covers at least this (default %(default)s)')
     parser.add_argument('--yaml', type=Path, help='also write the stretches and events to this YAML file')
-    parser.add_argument('--utc-offset-hours', type=float, default=-8.0,
-                        help="offset of the clock times in --yaml; the cars' own clocks used -8 in November 2026")
+    # British Columbia stayed on UTC-7 when daylight time ended on 2026-11-01 (tz database 2026e).
+    # The cars' older time zone data moved to UTC-8, so their clocks and run folder names read an
+    # hour behind the real local time from then on. Clock times here are real local time.
+    parser.add_argument('--utc-offset-hours', type=float, default=-7.0,
+                        help='offset of the clock times in --yaml (default %(default)s: BC local time, November 2026)')
     args = parser.parse_args(argv)
     results = []
     for run in args.runs:
