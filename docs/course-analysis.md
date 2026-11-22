@@ -21,7 +21,7 @@ The wheels over-read true speed by about 4%, and more when they slip. `/odom`'s 
 
 ## The tools
 
-All of them need ROS sourced, because they read the bag (the recording of a run's ROS topics).
+The bag reader uses ROS when available. Without ROS, it falls back to `rosbags.highlevel.AnyReader` on the bag directory; use the analysis environment with `rosbags==0.10.11` installed. A bag is the recording of a run's messages. Tools that only read cached poses (the car's map positions) do not need ROS either.
 
 | Tool | Answers |
 |---|---|

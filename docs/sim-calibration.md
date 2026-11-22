@@ -36,7 +36,7 @@ python3 tools/f1tenth_sim/eval_gap.py --track course_2026_10_30_scans --floor sf
 
 **Working when:** each seed prints a line with a lap time near 20 s and no contact.
 
-`--floor` works on `eval_gap.py`, `eval_gap_multi.py`, `sweep_gap.py`, `sweep2.py` and `trace_gap.py`. Without it you get the plain calibration, exactly as before.
+`--floor` works on `eval_gap.py`, `eval_gap_multi.py`, `sweep_gap.py`, `sweep2.py` and `trace_gap.py`. Without it you get the selected car's default calibration. Since the November measurement check below, rb2's default includes measured speed scales; rb1's remains unchanged.
 
 Use the floor profile with the track it was measured on, `course_2026_10_30_scans`. Its grip belongs to that floor. On another track it describes a car on the wrong floor.
 
@@ -113,7 +113,7 @@ python3 tools/f1tenth_sim/validate_calibration.py table real=/tmp/real.json befo
 
 ## What changed in the simulator
 
-All of it lives in the floor profile `sfu_course_2026_10_30` in `tools/f1tenth_sim/sim_fidelity/calibration.py`, with a source for every number. The plain calibration is unchanged, and a test pins that.
+The October changes live in the floor profile `sfu_course_2026_10_30` in `tools/f1tenth_sim/sim_fidelity/calibration.py`, with a source for every number. They do not change the default tyres. The later November speed-scale change is described below.
 
 ### Grip
 
@@ -175,12 +175,119 @@ The plant judges contact on the second layer when a track has one.
 |---|---|
 | Wheelbase 0.36 m, track width 0.30 m, LiDAR 0.26 m ahead of the rear axle | measured with a tape, 2026-08-24 |
 | Steering limits, trim, full stick | measured: circles 2026-10-16, yaw on 2026-10-30 |
-| Grip curve, steering delay, speed loop, braking, odometry, LiDAR | measured, this page |
+| Grip curve, steering delay, speed loop, braking, LiDAR | measured for the named floors, not universal car properties |
+| Wheel/ground speed ratio | measured from November [SLAM](glossary.md#slam) tracks: rb1 1.074658, rb2 1.026149; only rb2's derived speed scales passed the November rollout rule |
 | Overall length 0.535 m | Traxxas specification, not measured |
 | Mass 3.74 kg, yaw inertia, centre of gravity height and position | **assumed**: F1TENTH Gym defaults, never weighed |
-| Cornering stiffness | **assumed**: Gym defaults. The fitted grip curve absorbs their error on this floor, which is why the curve is a floor profile and not a fact about the tyres |
+| Cornering stiffness and tyre saturation | **assumed in defaults**: Gym stiffness remains unchanged. November per-car saturating tyre fits were rejected on held-out drives; the older grip curve is floor-specific |
 
-`python3 tools/f1tenth_sim/sim_fidelity/calibration.py` prints all 43 values with where each came from. Six are still Gym defaults.
+`python3 tools/f1tenth_sim/sim_fidelity/calibration.py --car rb2` prints the current values and their sources, including which are still Gym defaults.
+
+## Measuring the real car from SLAM localization (November 2026)
+
+**The short version:** match recorded laser scans to a saved map, measure how the car moved between those matches, then ask the simulator to replay the same commands. This is an offline check: it does not drive a physical car. A good match does not mean every derived speed or slip measurement is exact.
+
+### Run the three stages
+
+[SLAM localization](glossary.md#slam) estimates where the car was on the map. Here `loc.py` saves poses, `slam_motion.py` turns them into motion measurements, and `slam_rollout.py` compares short simulated drives with those measurements.
+
+**One analysis terminal, from the workspace root; no drivers needed.** Use the analysis Python environment with `rosbags==0.10.11` installed and the Gym setup from [simulator.md](simulator.md).
+
+`bagread.py` uses ROS readers when available. Otherwise it reads the bag directory with `rosbags.highlevel.AnyReader`, so the analysis can run without loading ROS into the terminal.
+
+```bash
+PY="$HOME/.local/racerbot-analysis-venv/bin/python"
+OUT="$HOME/.cache/racerbot"
+mkdir -p "$OUT/loc" "$OUT/slam_motion" "$OUT/slam_rollout"
+RUN=data/rb2/racerbot_runs/20261111-152132
+MAP=data/rb2/racerbot_auto/20261111-151026-rebuilt
+"$PY" tools/run_analysis/loc.py "$RUN" --map "$MAP" --workers 1 --out "$OUT/loc"
+"$PY" tools/run_analysis/slam_motion.py "$OUT/loc/20261111-152132.npz" \
+  --car rb2 --json "$OUT/slam_motion/example.json" --samples
+export PYTHONPATH=.sim/python:.sim/f1tenth_gym:src/gap_follow:src/pure_pursuit:tools/f1tenth_sim:tools
+export NUMBA_CACHE_DIR=.sim/numba-cache
+"$PY" tools/f1tenth_sim/slam_rollout.py "$RUN" --car rb2 \
+  --loc "$OUT/loc" --json "$OUT/slam_rollout/example.json"
+```
+
+**Working when:** localization prints scans and beams within 10 cm; both later commands write JSON reports. A missing `rosbags` import means the analysis environment needs that pinned dependency. Missing Gym means the simulator setup is incomplete. Keep outputs in the cache, never in `data/`.
+
+The motion tool trusts scans with at least 75% of beams within 10 cm, removes pose jumps and nearby samples, and smooths only within uninterrupted trusted stretches.
+
+Rollouts start at least one second apart, at speeds of at least 1 m/s, and last 1, 2 or 4 seconds inside one trusted stretch. Each window gets a fresh seeded simulator and the recorded delayed commands.
+
+### Which drives were used?
+
+Development drives supply measurements and fitting; evaluation drives judge the frozen candidate afterward. Dates below are directory prefixes; append each listed time with a hyphen.
+
+| Car/date | Development | Evaluation |
+|---|---|---|
+| rb1 20261111 / 20261116 | 153436, 153721, 155542 (November 11) | 095242 (November 16) |
+| rb2 20261111 | 135934, 142254, 152132 | 135453, 140322, 141227, 142036, 142604, 152844, 154204 |
+| rb2 20261030 | Not used in these fits | 184826, 183134, 181003, 181819, 184316: independent floor check |
+
+November 11 uses the shared rb2 map in the command above. rb1 November 16 uses `data/rb2/racerbot_auto/20261116-105215-line`; October uses `data/rb2/racerbot_auto/20261030-185036-fixed`.
+
+rb1 `153409` has no moving samples; `095058` and `095652` have no eligible rollout windows. Earlier evaluation analyses already existed, so these are not historically untouched drives.
+
+### What did SLAM measure?
+
+Yaw rate is how quickly the car turns. Sideslip is the angle between its heading and its direction of travel. The table uses absolute sideslip at the centre of gravity (CG), in degrees. Lateral acceleration `a_y = speed × yaw rate` is a turning-force proxy, in m/s².
+
+| November split | Wheel/ground median | Gyro scale, bias rad/s | Gyro–SLAM RMS rad/s | CG slip at \|a_y\| 1–2 / 2–3 / 3–4 / ≥4 |
+|---|---:|---|---:|---|
+| rb1 dev | 1.075 | .994, +.013 | .181 | 2.1 / 2.8 / 3.1 / 3.4° |
+| rb1 eval | 1.066 | .968, +.026 | .162 | 2.9 / 3.8 / 4.3 / 6.7° |
+| rb2 dev | 1.026 | .983, +.007 | .156 | 1.6 / 3.2 / 2.8 / 2.1° |
+| rb2 eval | 1.026 | .963, +.020 | .201 | 2.6 / 5.0 / 5.3 / 3.7° |
+
+These are sample-weighted pooled results. Gyro agreement fits `gyro = scale × SLAM yaw rate + bias`; the RMS is the uncorrected difference. Motion summaries include sparse rb1 evaluation samples; rollout evaluation below uses only `095242`.
+
+### How far off was the simulator?
+
+An open-loop rollout follows recorded commands without correcting toward the measured path. RMS means root-mean-square error over a window; position error is the distance apart at its end.
+
+These are mean window errors of the **pre-speed-change defaults**, with default tyres.
+
+| Evaluation | Horizon | Windows | Speed m/s | Yaw rad/s | CG slip ° | Position m |
+|---|---:|---:|---:|---:|---:|---:|
+| rb1 November | 2 s | 44 | .361 | .335 | 7.969 | .613 |
+| rb1 November | 4 s | 24 | .373 | .349 | 7.862 | 1.323 |
+| rb2 November | 2 s | 450 | .314 | .315 | 4.997 | .445 |
+| rb2 November | 4 s | 307 | .311 | .322 | 5.104 | .950 |
+| rb2 October | 2 s | 126 | .245 | .252 | 3.194 | .449 |
+| rb2 October | 4 s | 113 | .242 | .244 | 3.165 | .962 |
+
+At high turning acceleration (\|a_y\| ≥3), the 4-second November defaults turn less than measured: yaw bias −.249 rad/s for rb1 and −.211 for rb2. Slip magnitude is lower by 4.77° and 3.72°. These gaps do not prove tyres alone caused the error.
+
+### Tyre fit: both rejected
+
+The existing saturating tyre model was fitted separately per car, inspired by [On-Track SysID](https://arxiv.org/abs/2411.17508). Its stiffness controls small-slip response; peak and shape control saturation. Mass, CG and inertia stayed fixed. The 2-second development objective equally weights yaw RMS/.30, CG slip RMS/.10 and position/.50 (radians, seconds and metres).
+
+| Car | Front/rear stiffness | Front/rear peak | Shape | Held-out result |
+|---|---|---|---:|---|
+| rb1 | 5.153505 / 4.713262 | .398151 / .689094 | 1.537130 | 4 s position mean improves 1.323→1.276 m, but median worsens .900→1.156 m: rejected |
+| rb2 | 4.333613 / 5.882537 | .529682 / .583683 | 1.672428 | November 4 s yaw .322→.325, slip 5.104→5.393°, position .950→1.228 m: rejected |
+
+Acceptance required improved yaw, slip and position means at both 2 and 4 seconds, no worse medians, and speed no more than .02 m/s worse. Adding the external grip clamp or ProgressiveGrip worsened development loss for both cars. Neither fitted tyre model became a default. Full results: [tyre report](../tools/f1tenth_sim/SLAM_TYRE_FIT.md).
+
+### Speed scale: rb2 accepted, rb1 rejected
+
+The frozen development wheel/ground ratios are **rb1 1.0746581411238885** and **rb2 1.0261486728316354**. Wheel odometry multiplies true speed by this ratio. Command scaling is separate: recorded command eRPM gain / absolute odometry gain / ratio. That gives **1.059513 rb1** (4600/4040) and **1.010890 rb2** (4614/4447.983786), not simply the inverse wheel ratio.
+
+Acceptance required both speed RMS mean and median to improve at 2 and 4 seconds, while yaw, slip and position means stayed within 2% of baseline.
+
+rb2 passed November: 4 s speed mean/median .311/.289→.306/.284 m/s; signed speed bias −.066→−.042 m/s. October speed slightly worsened (.242→.243 m/s mean); it was a reported check, not an acceptance gate.
+
+rb1 failed: 4 s speed mean/median .373/.361→.424/.415 m/s; bias +.098→+.247 m/s. Its default remains unchanged. rb2's two accepted speed scales are now its default; tyres stay unchanged. Select the old rb2 scales with `--floor pre_slam_speed_2026_11_rb2`. Full tables: [speed report](../tools/f1tenth_sim/SLAM_SPEED_FIT.md) and its linked fitting JSON.
+
+### Limits before trusting these numbers
+
+- `loc.py` predicts motion with wheel speed and gyro before correcting against scans. This is **not independent ground truth**.
+- rb1 rollout evaluation is one usable drive, not a broad floor survey.
+- Localization poses refer to the rear axle; the CG conversion assumes `l_r=.18 m`. The CG has not been measured.
+- No steering-rack sensor was recorded. Initial steering uses command, not observed wheel angle.
+- Derivatives amplify localization noise. Sparse steady windows cannot identify axle forces reliably. No result here has been validated by driving a physical car.
 
 ## What it cannot reproduce
 
