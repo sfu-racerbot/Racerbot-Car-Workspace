@@ -86,7 +86,7 @@ def _unexplored(coded: np.ndarray, free: np.ndarray, resolution: float) -> np.nd
     known_free = free & ~coded
     blocked = np.zeros_like(coded)
     rows, cols = coded.shape
-    limit = UNKNOWN_HOLE_AREA_M2 / resolution ** 2
+    limit = math.floor(UNKNOWN_HOLE_AREA_M2 / resolution ** 2 + 1e-9)
     for label in range(1, count):
         x, y, w, h, area = stats[label]
         mask = labels == label

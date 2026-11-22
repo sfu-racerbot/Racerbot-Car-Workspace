@@ -208,6 +208,27 @@ def test_saver_unknown_opens_only_enclosed_holes(tmp_path):
     assert load_map(write_map(tmp_path, image, .05, free_thresh=0.196, name='strict')).unexplored is None
 
 
+@pytest.mark.parametrize('negate', [0, 1])
+def test_saver_hole_area_limit_is_inclusive(tmp_path, negate):
+    """Oracle: at 5 cm, 0.05 square metres is exactly 20 cells, inclusively."""
+    for area in (19, 20, 21):
+        image = np.full((40, 40), 254, np.uint8)
+        image[10:14, 10:15] = 205
+        if area == 19:
+            image[10, 10] = 254
+        elif area == 21:
+            image[14, 10] = 205
+        hole = image == 205
+        pixels = 255 - image if negate else image
+        spec = load_map(write_map(tmp_path, pixels, .05, free_thresh=.25,
+                                  negate=negate, name=f'hole{area}'))
+        assert spec.free.all()
+        expected = np.ones(image.shape, bool)
+        if area > 20:
+            expected[hole] = False
+        np.testing.assert_array_equal(track_free(spec), expected)
+
+
 def test_course_2026_10_30_exterior_stays_wall(tmp_path):
     """Oracle: committed course PNG; the unexplored 205 exterior must not become floor."""
     root = Path(__file__).resolve().parents[3]
