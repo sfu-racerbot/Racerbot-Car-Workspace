@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fit_slam_tyres as ft  # noqa: E402
-from sim_fidelity.calibration import FLOORS, with_floor  # noqa: E402
+from sim_fidelity.calibration import FLOORS, calibration_for_car, with_floor  # noqa: E402
 from sim_fidelity.grip import ProgressiveGrip  # noqa: E402
 
 PINNED = {'rb1': [5.153504850577635, 4.71326245124088, .3981510161398307,
@@ -28,6 +28,22 @@ def metric_row(loss=1, horizon=2):
     return dict(horizon_s=horizon, start_t=0, yaw_rms_rad_s=.3 * loss,
                 slip_cg_rms_rad=.1 * loss, position_error_m=.5 * loss,
                 speed_rms_mps=.2 * loss, heading_error_rad=.2 * loss)
+
+
+@pytest.mark.parametrize('car', sorted(PINNED))
+def test_frozen_tyre_baseline_and_candidate_keep_pre_speed_scales(car):
+    # SLAM_TYRE_FIT.md and slam_tyres_2026_11_fit.json predate the speed fit.
+    current = calibration_for_car(car)
+    if car == 'rb2':
+        assert current.odom_speed_scale == 1.0261486728316354
+        assert current.speed_command_scale == 1.0108904807240708
+    base = ft.base_calibration(car)
+    assert base == replace(current, cornering_stiffness_front=4.718,
+                           cornering_stiffness_rear=5.4562, tyre_model=None, grip_curve=None,
+                           odom_speed_scale=1.0, speed_command_scale=1.0, floor='')
+    candidate = ft.candidate_calibration(car, PINNED[car])
+    assert base.odom_speed_scale == candidate.odom_speed_scale == 1.0
+    assert base.speed_command_scale == candidate.speed_command_scale == 1.0
 
 
 def test_objective_and_candidate_keep_fixed_physics_and_enforce_bounds():
@@ -190,6 +206,7 @@ def test_cli_dispatches_fit_ablation_and_frozen_evaluation(tmp_path, monkeypatch
 
 @pytest.mark.parametrize('car', sorted(PINNED))
 def test_candidate_profile_pins_values_sources_and_preserves_default(car):
+    default = calibration_for_car(car)
     name = f'slam_tyres_2026_11_{car}'
     floor = FLOORS[name]
     base = ft.base_calibration(car)
@@ -202,7 +219,7 @@ def test_candidate_profile_pins_values_sources_and_preserves_default(car):
     assert set(floor.held_out_runs) == {run for runs in ft.EVAL[car].values() for run in runs}
     assert not set(floor.fit_runs) & set(floor.held_out_runs)
     assert set(floor.overrides) - {'floor'} <= set(floor.sources)
-    assert ft.calibration_for_car(car) == base
+    assert calibration_for_car(car) == default
 
 
 @pytest.mark.parametrize('car', sorted(PINNED))

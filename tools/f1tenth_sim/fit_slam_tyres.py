@@ -37,7 +37,7 @@ import numpy as np
 
 import slam_rollout as sr
 from sim_fidelity import tyres
-from sim_fidelity.calibration import calibration_for_car
+from sim_fidelity.calibration import calibration_for_car, with_floor
 from sim_fidelity.tyres import TyreModel
 
 DEV = {'rb1': ('20261111-153436', '20261111-153721', '20261111-155542'),
@@ -57,8 +57,11 @@ _compile = lru_cache(maxsize=256)(tyres.make_dynamics)
 
 def base_calibration(car):
     """Preserve the pre-fit linear-tyre baseline even after an accepted default changes."""
-    return replace(calibration_for_car(car), cornering_stiffness_front=4.718,
-                   cornering_stiffness_rear=5.4562, tyre_model=None, grip_curve=None)
+    base = calibration_for_car(car)
+    if car == 'rb2':
+        base = with_floor('pre_slam_speed_2026_11_rb2', base)
+    return replace(base, cornering_stiffness_front=4.718,
+                   cornering_stiffness_rear=5.4562, tyre_model=None, grip_curve=None, floor='')
 
 
 def candidate_calibration(car, parameters):
