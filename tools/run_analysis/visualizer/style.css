@@ -1,0 +1,85 @@
+:root {
+  --ink: #172925; --muted: #516760; --line: #d6ded9; --paper: #f3f5f1;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font: 16px/1.4 system-ui, sans-serif; color: var(--ink); background: var(--paper);
+}
+* {box-sizing: border-box}
+body {margin: 0}
+button, select, input {font: inherit}
+button, select {cursor: pointer}
+button:focus-visible, select:focus-visible, input:focus-visible {outline: 3px solid #268cc2; outline-offset: 3px}
+.mast {background: #152b26; color: white}
+.mast-inner, main {max-width: 1280px; margin: auto; padding-inline: clamp(16px,4vw,56px)}
+.mast-inner, .brand, .offline, .eyebrow, .panel-tag, .map-label, .map-key, .legend, .signal-head {display: flex; align-items: center}
+.mast-inner {height: 54px; gap: 19px}
+.brand {gap: 10px; font-weight: 850; font-size: 15px; letter-spacing: .055em}
+.brand svg {color: #b9f58c}
+.division {border-left: 1px solid #51645a; padding-left: 19px; color: #c3d2ca; font-size: 13px}
+.offline {margin-left: auto; font: 10px var(--mono); letter-spacing: .09em; gap: 8px; color: #dfece5}
+.offline i {width: 6px; height: 6px; border-radius: 100%; background: #b9f58c}
+.intro {display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin: 26px 0 20px}
+.eyebrow, .label, .source {font: 600 10px/1.2 var(--mono); letter-spacing: .11em}
+.eyebrow {gap: 8px; color: var(--muted)}
+.rule {width: 20px; height: 2px; background: #498065}
+h1 {font-size: clamp(32px,4vw,50px); line-height: 1.05; letter-spacing: -.055em; margin: 8px 0 7px}
+.intro p {font-size: 14px; color: var(--muted); margin: 0}
+.mode {display: flex; padding: 3px; background: #e4eae4; border-radius: 7px; border: 1px solid var(--line)}
+.mode button {background: transparent; color: var(--muted); border: 0; border-radius: 4px; padding: 6px 11px; font-size: 12px; font-weight: 650; white-space: nowrap}
+.mode button[aria-pressed=true] {background: #fff; color: var(--ink); box-shadow: 0 1px 4px #1232}
+.mode button:disabled {opacity: .45; cursor: default}
+.transport, .panel {background: #fff; border: 1px solid var(--line); border-radius: 10px}
+.transport {display: flex; gap: 16px; align-items: center; padding: 12px 15px; margin-bottom: 15px}
+.play {background: #244c3c; color: white; border: 0; border-radius: 5px; min-width: 79px; height: 34px; font-size: 13px; font-weight: 650}
+.play:hover {background: #316449}
+.clock {display: grid; gap: 1px; font: 14px var(--mono); min-width: 142px}
+.clock .label, .panel-head .label, .stats .label, .source {color: var(--muted)}
+.clock small {font-size: 12px; color: var(--muted)}
+#scrub {flex: 1; min-width: 30px; accent-color: #356949; cursor: pointer}
+.rate select {background: white; border: 1px solid var(--line); border-radius: 4px; padding: 5px; color: var(--ink); font: 12px var(--mono)}
+#panels {display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; align-items: start}
+#panels.single {grid-template-columns: minmax(0,1fr)}
+.panel {--accent: #a4e9aa; --trace: #237958; overflow: hidden; min-width: 0}
+.panel.b {--accent: #ffb776; --trace: #ad5725}
+.panel-head, .signals {padding: 14px 18px}
+.panel-tag {gap: 8px}
+.badge {text-align: center; min-width: 22px; padding: 3px; border-radius: 4px; background: var(--accent); color: #152b26; font: bold 11px var(--mono)}
+.source {margin-left: auto; font-size: 9px; border: 1px solid var(--line); padding: 3px 5px; border-radius: 3px}
+.alignment {font-size: 12px; color: var(--muted); margin: -6px 1px 13px}
+.late {font: 600 10px/1.3 system-ui,sans-serif; color: #79460b; background: #fff1d6; padding: 2px 6px; border-radius: 3px}
+.run-select {max-width: 100%; display: block; background-color: white; color: var(--ink); font: 700 clamp(16px,2vw,22px)/1.3 system-ui,sans-serif; letter-spacing: -.035em; padding: 0 5px 0 0; margin: 5px 0; border: 0}
+.meta, .legend, .map-key, .map-label>span:last-child {font: 11px var(--mono)}
+.meta {color: var(--muted); overflow-wrap: anywhere}
+.trajectory {background: #142e29; color: #e1eee5; padding: 12px 16px 9px; container-type: inline-size}
+.map-label, .signal-head {justify-content: space-between}
+.map-label>span:last-child {font-size: 9px; color: #a3b9ad}
+.map-note {font-size: 11px; margin: 3px 0 5px; color: #c9dad0}
+.map {width: 100%; height: clamp(160px,15vw,214px); display: block}
+.map-key {gap: 15px; color: #d6e3db; font-size: 10px}
+.map-key span:nth-child(2) {color: #fff}
+.state {margin-left: auto}
+.stats {display: grid; grid-template-columns: repeat(3,1fr); padding: 13px 3px; border-bottom: 1px solid var(--line)}
+.stats div {padding: 0 12px; border-right: 1px solid var(--line); display: grid; gap: 3px}
+.stats div:last-child {border: 0}
+.stats strong {font: 650 clamp(17px,2vw,23px)/1.2 var(--mono); letter-spacing: -.06em}
+.stats small {font: 11px var(--mono); color: var(--muted); letter-spacing: 0}
+.signals h2 {font-size: 15px; margin: 0; letter-spacing: -.02em}
+.live-speed, .live-steer {font: 600 12px var(--mono); color: var(--trace)}
+.legend {gap: 13px; color: var(--muted); margin: 3px 0; font-size: 10px}
+.legend span {display: inline-flex; align-items: center; gap: 4px}
+.legend i {width: 14px; border-top: 2px solid var(--trace)}
+.legend .cmd-key i {border-top: 2px dashed #616c79}
+.measurements {flex-wrap: wrap; row-gap: 3px}
+.live-command {font: 600 12px var(--mono); color: #495966}
+.chart {width: 100%; display: block; height: 94px; margin: 0 0 8px; cursor: crosshair}
+.chart:last-child {margin: 0}
+svg text {font: 10px var(--mono)}
+.map text {font-size: clamp(11px, calc(31px - 3cqw), 23px)}
+footer {font-size: 12px; color: var(--muted); padding: 18px 0 28px; max-width: 100ch}
+[hidden] {display: none !important}
+.sr-only {position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%)}
+@media(max-width: 720px) {
+  #panels {grid-template-columns: 1fr} .intro {align-items: flex-start; flex-direction: column; margin-top: 18px}
+  .mast-inner {gap: 8px} .division {display: none}
+  .transport {display: grid; grid-template-columns: auto 1fr auto; gap: 9px}
+  .clock {grid-column: 2 / -1} #scrub {grid-column: 1 / 3} .map {height: 190px}
+}
