@@ -222,6 +222,53 @@ def test_cropped_corridor_survives_false_enclosed_loop(tmp_path):
         extract_track(spec, seed_xy=seed)
 
 
+@pytest.fixture
+def blocked_loop_maps(tmp_path):
+    """A large rectangular corridor cut by a barrier, with a smaller free exterior."""
+    image = np.full((100, 100), 255, np.uint8)
+    image[4:96, 4:96] = 0
+    image[7:93, 7:93] = 255
+    image[32:68, 32:68] = 0
+    line = load_map(write_map(tmp_path, image, .05, name='line'))
+    image[7:32, 48:52] = 0
+    driving = load_map(write_map(tmp_path, image, .05, name='driving'))
+    expected = np.zeros((100, 100), bool)
+    expected[7:93, 7:93] = True
+    expected[32:68, 32:68] = False
+    expected[7:32, 48:52] = False
+    return driving, line, expected
+
+
+def test_open_corridor_beats_smaller_border_loop(blocked_loop_maps):
+    """Oracle: the barrier opens the corridor, not permission to select the exterior."""
+    driving, _, expected = blocked_loop_maps
+    np.testing.assert_array_equal(driveable_region(driving.free), expected)
+
+
+def test_reference_centerline_selects_blocked_corridor(tmp_path, blocked_loop_maps):
+    """Oracle: export the rectangular corridor, retaining the real barrier as wall."""
+    driving, line, expected = blocked_loop_maps
+    track = extract_track(driving, centerline_from=line)
+    write_gym_track(track, tmp_path, 'blocked')
+    np.testing.assert_array_equal(track.region, expected)
+    exported = np.asarray(Image.open(tmp_path / 'blocked.png'))
+    np.testing.assert_array_equal(exported, np.where(expected, 255, 0))
+
+
+def test_reference_votes_and_explicit_seed():
+    """Oracle: three reference points in the small patch, one in the large patch."""
+    free = np.zeros((30, 30), bool)
+    free[1:20, 1:20] = True
+    free[22:28, 22:28] = True
+    reference = (np.array([24, 25, 26, 2]), np.array([24, 25, 26, 2]))
+    expected = np.zeros_like(free)
+    expected[22:28, 22:28] = True
+    np.testing.assert_array_equal(driveable_region(free, reference_rc=reference), expected)
+    np.testing.assert_array_equal(driveable_region(free, (2, 2), reference_rc=reference), free & ~expected)
+    with pytest.raises(ValueError, match='centreline does not intersect free space'):
+        driveable_region(free, reference_rc=(np.array([], int), np.array([], int)))
+
+
 @pytest.mark.parametrize('name', ['car1_course_2026_10_26', 'car2_course_2026_11_11',
                                  'circular_obs', 'course_2026_10_30',
                                  'levine_blocked', 'levine_obs', 'room_2026_07_27'])

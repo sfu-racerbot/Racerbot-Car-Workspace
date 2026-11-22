@@ -140,23 +140,40 @@ def _free_regions(free: np.ndarray, seed_rc=None):
         yield labels == label
 
 
-def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
-    """Prefer a free loop, falling back to the largest component for open maps.
+def driveable_region(free: np.ndarray, seed_rc=None, reference_rc=None) -> np.ndarray:
+    """Prefer a free loop, or the component containing most reference points.
 
-    An explicit seed selects its component even if it is not a loop.
+    Reference rows/columns must be inside the map. An explicit seed wins.
+    A border loop never displaces a larger enclosed component.
     """
     largest, largest_size = None, 0
+    enclosed, enclosed_size = None, 0
+    best_reference, best_score = None, 0
     for region in _free_regions(free, seed_rc):
         size = int(region.sum())
         if size > largest_size:
             largest, largest_size = region, size
         if seed_rc is not None:
             return region
+        if reference_rc is not None:
+            score = int(np.count_nonzero(region[reference_rc]))
+            if score > best_score:
+                best_reference, best_score = region, score
+            continue
+        border = region[0].any() or region[-1].any() or region[:, 0].any() or region[:, -1].any()
+        if not border and size > enclosed_size:
+            enclosed, enclosed_size = region, size
+        elif border and enclosed_size > size:
+            return enclosed
         try:
             find_island(region)
         except ValueError:
             continue
         return region
+    if reference_rc is not None:
+        if best_reference is None:
+            raise ValueError("reference centreline does not intersect free space")
+        return best_reference
     return largest
 
 
@@ -307,7 +324,6 @@ def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
     line_seed = None if seed_xy is None else tuple(int(v) for v in world_to_pixel(
         line_spec, seed_xy[0], seed_xy[1]))
     line_region, pix = _race_loop(line_spec, line_seed, car_half_width)
-    region = line_region if centerline_from is None else driveable_region(spec.free, seed_rc)
     x, y = pixel_to_world(line_spec, pix[:, 0], pix[:, 1])
     points = np.column_stack((x, y))
     points = resample_closed(points, line_spec.resolution)
@@ -320,9 +336,11 @@ def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
     points = np.roll(points, -start, axis=0)
 
     # Corridor width at each centreline point, from the map the car drives.
-    d_wall = cv2.distanceTransform(region.astype(np.uint8), cv2.DIST_L2, 5) * spec.resolution
     rows, cols = world_to_pixel(spec, points[:, 0], points[:, 1])
-    inside = (rows >= 0) & (rows < region.shape[0]) & (cols >= 0) & (cols < region.shape[1])
+    inside = (rows >= 0) & (rows < spec.free.shape[0]) & (cols >= 0) & (cols < spec.free.shape[1])
+    region = line_region if centerline_from is None else driveable_region(
+        spec.free, seed_rc, reference_rc=(rows[inside], cols[inside]))
+    d_wall = cv2.distanceTransform(region.astype(np.uint8), cv2.DIST_L2, 5) * spec.resolution
     widths = np.zeros(len(points))
     widths[inside] = 2.0 * d_wall[rows[inside], cols[inside]]
     return ImportedTrack(points, widths, spec, region)
