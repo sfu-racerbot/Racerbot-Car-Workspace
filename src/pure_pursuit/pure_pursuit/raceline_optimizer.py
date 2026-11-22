@@ -123,6 +123,45 @@ def resample_closed_path(xy: np.ndarray, spacing: float,
                             np.interp(targets, dense_arc, dense[:, 1])])
 
 
+def _resample_step(reference, line, spacing, trust_region):
+    """Interpolate a periodic C2 line without adding to the solver's step."""
+    from scipy.interpolate import CubicSpline
+
+    if trust_region is None:
+        return resample_closed_path(line, spacing)
+
+    base = np.vstack([reference, reference[:1]])
+    moved = np.vstack([line, line[:1]])
+    arc = np.r_[0.0, np.cumsum(np.hypot(*np.diff(base, axis=0).T))]
+    length = np.hypot(*np.diff(moved, axis=0).T).sum()
+    count = max(4, round(float(length) / spacing))
+    delta = moved - base
+    # A collapsed, infeasible corridor may already require a larger solver
+    # step. Preserve its knots; resampling must not introduce further travel.
+    radius = max(trust_region, float(np.hypot(*delta.T).max()))
+    base_curve = CubicSpline(arc, base, bc_type='periodic')
+
+    # Use stereographic coordinates for the correction, not for the base.
+    # Decoding u as 2u/(1+|u|²) stays in the unit disk for ANY spline value:
+    # 2|u| <= 1+|u|². The inverse below preserves the solved knots. Unlike
+    # clipping output points, both derivatives stay continuous at the bound.
+    q = delta / radius
+    height = np.sqrt(np.maximum(0.0, 1 - np.sum(q ** 2, axis=1, keepdims=True)))
+    offset_curve = CubicSpline(arc, q / (1 + height), bc_type='periodic')
+
+    def curve(t):
+        u = offset_curve(t)
+        correction = 2 * u / (1 + np.sum(u ** 2, axis=1, keepdims=True))
+        return base_curve(t) + radius * correction
+
+    # Invert the corrected curve's arc length, not the base's. Evaluate the
+    # curve at those parameters rather than cutting chords across it.
+    t = np.linspace(0.0, arc[-1], max(16, 10 * count) + 1)
+    dense_arc = np.r_[0.0, np.cumsum(np.hypot(*np.diff(curve(t), axis=0).T))]
+    targets = np.linspace(0.0, dense_arc[-1], count, endpoint=False)
+    return curve(np.interp(targets, dense_arc, t))
+
+
 def path_frames(xy: np.ndarray):
     """Unit tangents and left-pointing unit normals at every point.
 
@@ -427,7 +466,7 @@ def optimize_minimum_curvature(centerline: np.ndarray,
         # Re-parameterise to uniform arc length for the next pass. This is
         # what keeps the linearisation valid -- see
         # linearized_curvature_system.
-        reference = resample_closed_path(line, spacing)
+        reference = _resample_step(reference, line, spacing, trust_region)
 
     line = reference
     final_left, final_right = _remaining_width(
