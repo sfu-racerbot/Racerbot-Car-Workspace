@@ -173,6 +173,22 @@ def test_nov9_map_gray_free_cells(tmp_path):
         assert (exported[row-1:row+2, col-1:col+2] == 255).all()
 
 
+@pytest.mark.parametrize('negate', [0, 1])
+def test_gray_corridor_is_not_saver_unknown(tmp_path, negate):
+    """Oracle: gray 200 has p=55/255 < .25; only 205 is map_saver's code."""
+    image = np.full((100, 100), 205, np.uint8)
+    image[10:90, 10:90] = 200
+    image[30:70, 30:70] = 0
+    corridor = image == 200
+    pixels = 255 - image if negate else image
+    spec = load_map(write_map(tmp_path, pixels, .05, free_thresh=.25, negate=negate))
+    np.testing.assert_array_equal(track_free(spec), corridor)
+    track = extract_track(spec)
+    np.testing.assert_array_equal(track.region, corridor)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert corridor[rows, cols].all()
+
+
 def test_saver_unknown_opens_only_enclosed_holes(tmp_path):
     """Oracle: map_saver writes unknown as 205; free_thresh 0.25 decodes it free."""
     image = np.full((40, 60), 205, np.uint8)

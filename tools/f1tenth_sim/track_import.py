@@ -72,9 +72,8 @@ def track_free(spec: MapSpec) -> np.ndarray:
 
 # Enclosed wall blobs smaller than this are noise for centreline-finding.
 SPECK_AREA_M2 = 0.01
-# Nav2 map_saver's free threshold since it stopped decoding its own unknown
-# pixel (205, p = 0.19608) as free.
-SAVER_FREE_THRESH = 0.196
+# Nav2 map_saver's unknown pixel before applying negate.
+SAVER_UNKNOWN_PIXEL = 205
 # Unknown-coded holes up to this size, enclosed by free space, are free.
 UNKNOWN_HOLE_AREA_M2 = 0.05
 
@@ -108,9 +107,9 @@ def load_map(yaml_path: Path) -> MapSpec:
     Unknown stays blocked, as in pure_pursuit.occupancy_map.OccupancyMap.
     Jazzy includes threshold equality in the free/occupied classes.
     Scale/raw costs use that stack's live-grid occupied threshold (50).
-    ``free`` is the map_server decoding. ``unexplored`` marks trinary cells
-    free only through a free_thresh above SAVER_FREE_THRESH, except small
-    enclosed holes (see _unexplored); track extraction excludes them.
+    ``free`` is the map_server decoding. ``unexplored`` marks trinary
+    map_saver-unknown-coded cells decoded free, except small enclosed holes
+    (see _unexplored); track extraction excludes them.
     """
     from PIL import Image  # local: keeps the module importable without Pillow
 
@@ -149,7 +148,7 @@ def load_map(yaml_path: Path) -> MapSpec:
     resolution = float(spec["resolution"])
     unexplored = None
     if mode == "trinary":
-        coded = free & (p > SAVER_FREE_THRESH)
+        coded = free & (image == (255 - SAVER_UNKNOWN_PIXEL if negate else SAVER_UNKNOWN_PIXEL))
         if coded.any():
             unexplored = _unexplored(coded, free, resolution)
     origin = spec["origin"]
