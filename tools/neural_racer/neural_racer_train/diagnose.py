@@ -102,10 +102,12 @@ def dwell(run, L):
         return {}
     acc, laps = defaultdict(float), defaultdict(set)
     for t in run['ticks']:
+        if t['lap'] >= run['laps']:
+            continue    # the finish tick, past the last lap
         s = t['s'] % L
         b = int(s // SEGMENT_M)
         acc[b] += DT
-        laps[b].add(int(t['s'] // L))
+        laps[b].add(int(t['lap']))
     return {b: acc[b] / len(laps[b]) for b in acc}
 
 

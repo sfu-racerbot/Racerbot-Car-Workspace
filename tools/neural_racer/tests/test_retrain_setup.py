@@ -204,6 +204,15 @@ def test_diagnosis_finds_the_slow_segment():
     assert c['drivers']['neural']['mean_speed_cut_by_wrapper'] == pytest.approx(0.5)
 
 
+def test_the_finish_tick_does_not_count_as_another_lap():
+    L, laps, step = 10.0, 2, 2.0 * diagnose.DT
+    ticks = [{'s': round(k * step, 6), 'lap': float(round(k * step, 6) // L)}
+             for k in range(1, int(round(L * laps / step)) + 1)]
+    assert ticks[-1]['s'] == L * laps and ticks[-1]['lap'] == laps    # the referee logs the finish tick
+    d = diagnose.dwell({'laps': laps, 'ticks': ticks}, L)
+    assert d[0] == pytest.approx(d[5], abs=0.03)
+
+
 def test_diagnosis_reports_where_a_run_failed():
     runs = [_run('neural', lambda s: 2.0, finish=False), _run('gap_follow', lambda s: 2.0)]
     f = diagnose.summarize(runs)['c']['drivers']['neural']['failures']
