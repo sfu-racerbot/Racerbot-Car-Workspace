@@ -107,8 +107,23 @@ def dry_run(cfg: dict, num_envs: int = 4, ticks: int = 20) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--config', type=Path, required=True)
+    ap.add_argument('--car', help="refuse unless the setup's car is this one (fir.conf's NR_CAR)")
+    ap.add_argument('--require-signoff', action='store_true', help='exit 3 unless signed_off_by is set')
+    ap.add_argument('--check-only', action='store_true', help='validate without building the simulator')
     args = ap.parse_args(argv)
-    cfg = load(args.config)
+    try:
+        cfg = load(args.config)
+        if args.car and cfg['car'] != args.car:
+            raise SetupError(f"setup trains {cfg['car']}, but the jobs run as RACERBOT_CAR={args.car}")
+    except SetupError as e:
+        print(f'{args.config}: {e}', file=sys.stderr)
+        return 2
+    if args.require_signoff and not signed_off(cfg):
+        print(f'{args.config}: not signed off (signed_off_by is empty); refusing to train', file=sys.stderr)
+        return 3
+    if args.check_only:
+        print(f"{args.config}: ok, car {cfg['car']}, signed off by {cfg.get('signed_off_by')!r}")
+        return 0
     print(yaml.safe_dump(dry_run(cfg), sort_keys=False))
     if not signed_off(cfg):
         print('not signed off: training stages will refuse this setup')
