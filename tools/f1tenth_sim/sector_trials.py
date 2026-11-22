@@ -82,7 +82,7 @@ def assess(xy, pos, times, wall):
     arc, progress, error, length, closing = project(xy, pos)
     # Last station is a shared gate reached before the stock nearest-index stop.
     def crossing(g):
-        idx = np.flatnonzero(progress >= g)
+        idx = np.flatnonzero(progress >= g - 1e-10)
         if not len(idx):
             return None
         j = idx[0]
