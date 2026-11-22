@@ -32,8 +32,9 @@ only the car's own sensors:
 2. **Is what the LiDAR sees changing?** If the wheels turn but the view stays the same,
    the car is in someone's hand or pinned against something: *spinning*, not driving.
 3. **Is LB held?** Driving with LB held is the algorithm in charge.
-4. **If the wheels are still, is the car moving or tilting anyway?** A changing view,
-   or the IMU feeling the car tip, means a person is *handling* it.
+4. **If the wheels are still, is the car moving or tilting anyway?** A changing view
+   (the LiDAR ranges changing by 0.1 m/s or more), or the IMU feeling the car tip (8 degrees
+   a second or more), means a person is *handling* it. A parked car tips under 2 degrees a second.
 
 Driving half-seconds are joined into stretches. A pause of up to 3 s stays inside a
 stretch (traffic, a short stop). A longer pause, or any handling or spinning, ends it.

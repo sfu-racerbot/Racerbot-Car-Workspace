@@ -220,6 +220,8 @@ def test_segment_finds_one_race_and_a_carry_on_built_arrays():
 def test_documented_thresholds_hold_at_their_written_values():
     # Spec: data/race_days/2026-11-11-uvic/README.md, "How a stretch is judged" (0.5 m/s, 3 s, 10 s, 1.5 m/s).
     assert rs.step_labels([0.5, 0.49], [0.5, 0.5], [0, 0], [True, True]) == ['racing', 'parked']
+    assert rs.step_labels([0.0] * 4, [0.10, 0.09, 0.0, 0.0], [0.0, 0.0, 8.0, 7.9], [False] * 4) == [
+        'handled', 'parked', 'handled', 'parked']
     labels = labels_for('R' + '.' * 6 + 'R' + '.' * 7 + 'R')
     assert rs.stretches(grid(len(labels)), labels) == [(0, 7), (15, 15)]
 
