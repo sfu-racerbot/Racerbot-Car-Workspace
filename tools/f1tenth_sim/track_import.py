@@ -306,11 +306,15 @@ def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
                 survivors = np.argwhere(narrowed & region)
                 if not len(survivors):
                     raise ValueError("seed component has no free space after narrowing")
-                count, _ = cv2.connectedComponents((narrowed & region).astype(np.uint8), connectivity=4)
-                if count > 2:
+                distances = ((survivors - seed_rc) ** 2).sum(axis=1)
+                nearest = np.argmin(distances)
+                # Competing fronts within one opening radius make projection ambiguous.
+                reach = math.sqrt(float(distances[nearest])) + math.ceil(car_half_width / spec.resolution) + 1
+                nearby = survivors[distances <= reach ** 2]
+                _, labels = cv2.connectedComponents((narrowed & region).astype(np.uint8), connectivity=4)
+                if len(np.unique(labels[nearby[:, 0], nearby[:, 1]])) > 1:
                     raise ValueError("seed lies on a pinch between connected regions; "
                                      "move it into the intended loop")
-                nearest = np.argmin(((survivors - seed_rc) ** 2).sum(axis=1))
                 narrowed_seed = tuple(survivors[nearest])
             for candidate in _free_regions(narrowed, narrowed_seed):
                 try:

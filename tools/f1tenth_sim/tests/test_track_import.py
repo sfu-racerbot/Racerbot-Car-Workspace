@@ -324,6 +324,26 @@ def test_open_corridor_beats_smaller_border_loop(blocked_loop_maps):
     np.testing.assert_array_equal(driveable_region(driving.free), expected)
 
 
+def test_clipped_corner_seed_ignores_distant_detached_room(tmp_path):
+    """Oracle: a clipped loop corner is far from the room's detached surviving front."""
+    image = np.zeros((100, 200), np.uint8)
+    image[10:90, 10:90] = 255
+    image[30:70, 30:70] = 0
+    image[10:90, 110:190] = 255
+    image[49:52, 90:110] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert spec.free[10, 10] and not narrowed[10, 10]
+    assert not narrowed[:, 100].any()
+    assert narrowed[50, 20] and narrowed[50, 120]
+    seed = pixel_to_world(spec, 10, 10)
+    track = extract_track(spec, seed_xy=seed, centerline_from=spec)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert ((rows >= 10) & (rows < 90) & (cols >= 10) & (cols < 90)).all()
+    assert track.region[rows, cols].all()
+    np.testing.assert_array_equal(track.region, image == 255)
+
+
 def test_reference_centerline_selects_blocked_corridor(tmp_path, blocked_loop_maps):
     """Oracle: export the rectangular corridor, retaining the real barrier as wall."""
     driving, line, expected = blocked_loop_maps
