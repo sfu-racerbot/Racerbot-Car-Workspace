@@ -13,7 +13,11 @@ repo has the first two, in its own conventions, and never the third. This
 module writes all three: it decodes the image using its map_server YAML
 before making Gym's binary image, and it finds the loop's centreline itself.
 Unknown cells remain blocked; a gray pixel can be free under the map's own
-thresholds and must not automatically become a wall.
+thresholds and must not automatically become a wall. One exception keeps
+SLAM's unexplored space out of the track: map_saver writes unknown as 205
+(p = 0.196), which a YAML free_thresh above 0.196 (our rebuilt maps use 0.25)
+decodes as free. Such cells only become Gym floor in small holes enclosed by
+other free cells; larger or border-touching areas stay walls.
 
 How the centreline is found. A driveable loop is a ring of free space around
 an *island* -- the block of wall the car drives round. The centreline is the
@@ -57,10 +61,44 @@ class MapSpec:
     origin_y: float
     free: np.ndarray          # bool, row 0 = top of the image (largest y)
     occupancy: np.ndarray | None = None  # map_server values: -1 unknown, 0..100
+    unexplored: np.ndarray | None = None  # free only via map_saver's unknown code
+
+    @property
+    def track_free(self) -> np.ndarray:
+        """``free`` without unexplored space: the cells a Gym track may use."""
+        return self.free if self.unexplored is None else self.free & ~self.unexplored
 
 
 # Enclosed wall blobs smaller than this are noise for centreline-finding.
 SPECK_AREA_M2 = 0.01
+# Nav2 map_saver's free threshold since it stopped decoding its own unknown
+# pixel (205, p = 0.19608) as free.
+SAVER_FREE_THRESH = 0.196
+# Unknown-coded holes up to this size, enclosed by free space, are free.
+UNKNOWN_HOLE_AREA_M2 = 0.05
+
+
+def _unexplored(coded: np.ndarray, free: np.ndarray, resolution: float) -> np.ndarray:
+    """Cells of ``coded`` outside small holes enclosed by other free cells."""
+    import cv2
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(coded.astype(np.uint8), connectivity=8)
+    known_free = free & ~coded
+    blocked = np.zeros_like(coded)
+    rows, cols = coded.shape
+    limit = UNKNOWN_HOLE_AREA_M2 / resolution ** 2
+    for label in range(1, count):
+        x, y, w, h, area = stats[label]
+        mask = labels == label
+        if x == 0 or y == 0 or x + w == cols or y + h == rows or area > limit:
+            blocked |= mask
+            continue
+        window = np.s_[y - 1:y + h + 1, x - 1:x + w + 1]
+        local = mask[window].astype(np.uint8)
+        ring = cv2.dilate(local, np.ones((3, 3), np.uint8)).astype(bool) & ~local.astype(bool)
+        if not known_free[window][ring].all():
+            blocked |= mask
+    return blocked
 
 
 def load_map(yaml_path: Path) -> MapSpec:
@@ -69,6 +107,9 @@ def load_map(yaml_path: Path) -> MapSpec:
     Unknown stays blocked, as in pure_pursuit.occupancy_map.OccupancyMap.
     Jazzy includes threshold equality in the free/occupied classes.
     Scale/raw costs use that stack's live-grid occupied threshold (50).
+    ``free`` is the map_server decoding. ``unexplored`` marks trinary cells
+    free only through a free_thresh above SAVER_FREE_THRESH, except small
+    enclosed holes (see _unexplored); track extraction excludes them.
     """
     from PIL import Image  # local: keeps the module importable without Pillow
 
@@ -104,8 +145,14 @@ def load_map(yaml_path: Path) -> MapSpec:
             ).astype(np.int8)
         occupancy[alpha < 255] = -1
     free = (occupancy >= 0) & (occupancy < 50)
+    resolution = float(spec["resolution"])
+    unexplored = None
+    if mode == "trinary":
+        coded = free & (p > SAVER_FREE_THRESH)
+        if coded.any():
+            unexplored = _unexplored(coded, free, resolution)
     origin = spec["origin"]
-    return MapSpec(float(spec["resolution"]), float(origin[0]), float(origin[1]), free, occupancy)
+    return MapSpec(resolution, float(origin[0]), float(origin[1]), free, occupancy, unexplored)
 
 
 def pixel_to_world(spec: MapSpec, rows, cols):
@@ -331,7 +378,7 @@ def _project_seed(region, narrowed, seed_rc, radius):
 
 def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
     last_error = None
-    for region in _free_regions(spec.free, seed_rc):
+    for region in _free_regions(spec.track_free, seed_rc):
         try:
             narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
             narrowed_seed = seed_rc
@@ -389,7 +436,7 @@ def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
     rows, cols = world_to_pixel(spec, points[:, 0], points[:, 1])
     inside = (rows >= 0) & (rows < spec.free.shape[0]) & (cols >= 0) & (cols < spec.free.shape[1])
     region = line_region if centerline_from is None else driveable_region(
-        spec.free, seed_rc, reference_rc=(rows[inside], cols[inside]))
+        spec.track_free, seed_rc, reference_rc=(rows[inside], cols[inside]))
     d_wall = cv2.distanceTransform(region.astype(np.uint8), cv2.DIST_L2, 5) * spec.resolution
     widths = np.zeros(len(points))
     widths[inside] = 2.0 * d_wall[rows[inside], cols[inside]]

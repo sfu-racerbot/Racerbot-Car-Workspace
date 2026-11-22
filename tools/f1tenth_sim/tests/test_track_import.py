@@ -172,6 +172,41 @@ def test_nov9_map_gray_free_cells(tmp_path):
         assert (exported[row-1:row+2, col-1:col+2] == 255).all()
 
 
+def test_saver_unknown_opens_only_enclosed_holes(tmp_path):
+    """Oracle: map_saver writes unknown as 205; free_thresh 0.25 decodes it free."""
+    image = np.full((40, 60), 205, np.uint8)
+    image[5:35, 5:55] = 254
+    image[20, 20] = 205            # one-pixel hole inside observed free space
+    image[10:16, 30:36] = 205      # 0.09 m^2 unexplored blob, larger than a hole
+    image[25, 40] = 0
+    image[25, 41] = 205            # hole touching a wall
+    spec = load_map(write_map(tmp_path, image, .05, free_thresh=0.25))
+    assert spec.free.sum() == image.size - 1
+    track_free = spec.track_free
+    assert track_free[5:35, 5:55].sum() == 30 * 50 - 36 - 2
+    assert track_free[20, 20]
+    assert not track_free[10:16, 30:36].any()
+    assert not track_free[25, 40:42].any()
+    assert not track_free[:5].any() and not track_free[:, :5].any()
+    assert load_map(write_map(tmp_path, image, .05, free_thresh=0.196, name='strict')).unexplored is None
+
+
+def test_course_2026_10_30_exterior_stays_wall(tmp_path):
+    """Oracle: committed course PNG; the unexplored 205 exterior must not become floor."""
+    root = Path(__file__).resolve().parents[3]
+    maps = root / 'tools/f1tenth_sim/maps'
+    args = shlex.split(yaml.safe_load((maps / 'catalog.yaml').read_text())['course_2026_10_30']['import_command'])
+    other = load_map(root / args[args.index('--centerline-from') + 1]) if '--centerline-from' in args else None
+    source = load_map(root / 'data/rb2/racerbot_auto/20261030-185036-fixed/map.yaml')
+    write_gym_track(extract_track(source, centerline_from=other), tmp_path, 'course')
+    committed = np.asarray(Image.open(maps / 'course_2026_10_30.png')) == 255
+    exported = np.asarray(Image.open(tmp_path / 'course.png')) == 255
+    assert source.free[300, 50] and source.free[180, 240]
+    assert not exported[300, 50] and not exported[180, 240]
+    assert exported[committed].all()
+    assert (exported & ~committed).sum() < 100
+
+
 def test_driveable_region_prefers_enclosed_loop():
     """Oracle: a rectangular corridor, with larger free exterior and interior."""
     free = np.ones((60, 60), dtype=bool)
