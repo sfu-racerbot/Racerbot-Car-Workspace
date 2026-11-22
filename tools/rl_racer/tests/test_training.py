@@ -167,6 +167,50 @@ def test_fidelity_state_mapping():
     np.testing.assert_allclose(mapped, expected, atol=1e-12, rtol=0)
 
 
+def test_fidelity_metrics_use_truth(untrained_export, monkeypatch):
+    from rl_racer import evaluate as evaluation
+
+    track = make_env(load_config(DEFAULT_CONFIG, smoke=True)).track
+    observed = []
+    original_act = PolicyNumpy.act
+
+    def record_action(self, obs, **kwargs):
+        observed.append(obs.copy())
+        return original_act(self, obs, **kwargs)
+
+    class Plant:
+        def reset(self, poses, speeds):
+            self.step_number = 0
+            return self.observation(), {}
+
+        def truth(self):
+            xy, yaw, _, _ = track.sample(self.step_number * track.length / 4)
+            return np.array([*xy, 0., 1., yaw, 0., 0.])
+
+        def observation(self):
+            state = self.truth().copy()
+            xy, yaw, _, _ = track.sample(0.)
+            state[[0, 1]] = xy + 10 * np.array([-np.sin(yaw), np.cos(yaw)])
+            state[4] = yaw
+            return {'agent_0': {'std_state': state, 'collision': False}}
+
+        def step(self, commands):
+            self.step_number += 1
+            return self.observation(), 0., False, False, {}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(evaluation, 'make_fidelity_plant', lambda *args: Plant())
+    monkeypatch.setattr(PolicyNumpy, 'act', record_action)
+    result = evaluate(untrained_export[0], max_steps=4, laps=1, fidelity=True)
+    assert result['laps_completed'] == 1
+    assert result['resets'] == 0
+    assert result['offtrack_integral_m_s'] == 0.
+    assert result['lap_time_s'] == pytest.approx(.2)
+    assert all(abs(obs[0, 4]) > 1 for obs in observed)
+
+
 def test_fidelity_crosscheck(untrained_export):
     root = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(root / '.sim/f1tenth_gym'))

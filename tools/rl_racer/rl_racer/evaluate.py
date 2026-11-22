@@ -116,9 +116,10 @@ def evaluate(policy_path, *, track_path=None, max_steps=2000, laps=3, seed=42, f
             env.state = map_fidelity_state(observation)
             mapping = ('FidelityPlant car profile: estimated pose/speed, simulated steering and yaw/slip; '
                        'wheel speed estimated as vx (no longitudinal-slip measurement); '
-                       'previous commands tracked locally; no OptiTrack')
+                       'previous commands tracked locally; metrics use ground truth; no OptiTrack')
         for _ in range(max_steps):
-            before = track.project(env.state[:, :3])[0][0]
+            scoring_pose = env.state[:, :3] if plant is None else plant.truth()[[0, 1, 4]][None, :]
+            before = track.project(scoring_pose)[0][0]
             actions = policy.act(env.observe())
             if plant is None:
                 _, _, done, trunc, info = env.step(actions)
@@ -133,7 +134,7 @@ def evaluate(policy_path, *, track_path=None, max_steps=2000, laps=3, seed=42, f
                 env.steer_cmd = policy.steer_cmd.copy()
                 env.wheel_cmd = policy.wheel_cmd.copy()
                 env.accel_prev = policy.accel_prev.copy()
-                s_arr, n_arr, _ = track.project(env.state[:, :3])
+                s_arr, n_arr, _ = track.project(plant.truth()[[0, 1, 4]][None, :])
                 s, n = float(s_arr[0]), float(n_arr[0])
                 progress = (s - before + track.length / 2) % track.length - track.length / 2
                 widths = track.sample(s)[3]
