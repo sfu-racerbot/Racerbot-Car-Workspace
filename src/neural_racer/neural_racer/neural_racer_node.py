@@ -19,6 +19,8 @@ Design: docs/superpowers/specs/2026-10-23-neural-racer-plan.md (A4, A6, Phase 6)
 """
 import json
 import math
+import signal
+from contextlib import ExitStack
 from pathlib import Path
 
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -28,8 +30,10 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Odometry, Path as PathMsg
 import numpy as np
 import rclpy
+from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from sensor_msgs.msg import Imu, Joy, LaserScan
 from std_msgs.msg import String
@@ -362,17 +366,33 @@ class NeuralRacerNode(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
-    node = NeuralRacerNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node._publish(0.0, 0.0)
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    stopping = False
+
+    def request_stop(signum, frame):
+        nonlocal stopping
+        stopping = True
+
+    # rclpy's default signal handlers invalidate the publisher before our final stop.
+    with ExitStack() as cleanup:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            previous = signal.signal(sig, request_stop)
+            cleanup.callback(signal.signal, sig, previous)
+        rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+        cleanup.callback(rclpy.try_shutdown)
+        node = NeuralRacerNode()
+        cleanup.callback(node.destroy_node)
+        executor = rclpy.get_global_executor()
+        executor.add_node(node)
+        cleanup.callback(executor.remove_node, node)
+        try:
+            while not stopping and rclpy.ok():
+                executor.spin_once(timeout_sec=0.025)
+        finally:
+            node._publish(0.0, 0.0)
+            # Fast DDS can take a heartbeat to acknowledge. Never wait indefinitely.
+            if node.cmd_pub is not None and not node.cmd_pub.wait_for_all_acked(
+                    timeout=Duration(seconds=3.5)):
+                node.get_logger().warning('final stop not acknowledged before shutdown')
 
 
 if __name__ == '__main__':
