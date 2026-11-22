@@ -101,11 +101,13 @@ def test_progressive_grip_falling_still_refuses_asked_that_does_not_ascend():
 # --- the floor profile -----------------------------------------------------------------
 
 def test_plain_calibration_keeps_every_floor_model_off():
-    # Pins the behaviour every other test and the checked-in results were made with.
-    # (The selected car's calibration is resolved per call; conftest selects each car in turn.)
+    # November dev SLAM ratios and recorded gains: slam_speed_2026_11_fit.json.
     c = calibration_for_car()
     assert c.grip_curve is None and c.steering_linkage is None
-    assert c.speed_command_scale == 1.0 and c.odom_speed_scale == 1.0
+    ratio = 1.0261486728316354 if c.car_id == 'rb2' else 1.0
+    command = 4614.0 / 4447.983786 / ratio if c.car_id == 'rb2' else 1.0
+    assert c.speed_command_scale == pytest.approx(command, abs=1e-15)
+    assert c.odom_speed_scale == ratio
     assert c.lidar_noise_per_metre == 0.0 and c.lidar_self_hits == () and c.floor == ""
 
 

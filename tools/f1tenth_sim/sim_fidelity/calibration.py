@@ -539,7 +539,7 @@ def calibration_for_car(car_id: str | None = None) -> CarCalibration:
     throttle = effective_config('vesc.yaml', 'throttle_interpolator', car_id)
     profile = load_profile(car_id)
     speed_max = vesc['speed_max'] / abs(vesc['speed_to_erpm_gain'])
-    return CarCalibration(
+    calibration = CarCalibration(
         car_id=car_id, steering_max_left=profile.full_lock_left_rad,
         steering_max_right=profile.full_lock_right_rad,
         **{key: vesc[key] for key in ('speed_to_erpm_gain',
@@ -548,6 +548,11 @@ def calibration_for_car(car_id: str | None = None) -> CarCalibration:
         speed_max=speed_max, speed_min=-speed_max,
         steering_rate_max=throttle['max_servo_speed'],
         **car_speed_loop(car_id)[0])
+    if car_id == 'rb2':
+        speed = FLOORS['slam_speed_2026_11_rb2'].overrides
+        calibration = replace(calibration, **{key: speed[key] for key in
+                              ('odom_speed_scale', 'speed_command_scale')})
+    return calibration
 
 
 def __getattr__(name):
@@ -620,6 +625,58 @@ class Floor:
 
 
 FLOORS: dict[str, Floor] = {
+    "pre_slam_speed_2026_11_rb2": Floor(
+        name="pre_slam_speed_2026_11_rb2",
+        description="Car 2 default speed scales before the November SLAM speed-scale acceptance; "
+                    "preserved baseline, with default tyres. See slam_speed_2026_11_fit.json.",
+        fit_runs=(), held_out_runs=(),
+        overrides=dict(floor="pre_slam_speed_2026_11_rb2", odom_speed_scale=1.0, speed_command_scale=1.0),
+        sources=dict(odom_speed_scale="pre-speed-fit default: odometry taken as true speed",
+                     speed_command_scale="pre-speed-fit default: command taken as true speed"),
+    ),
+    "slam_speed_2026_11_rb2": Floor(
+        name="slam_speed_2026_11_rb2",
+        description="ACCEPTED Car 2 November development-only wheel/SLAM speed-scale candidate; "
+                    "these two scales are the car's default; default tyres unchanged. "
+                    "Passes November H=2 and H=4 speed and 2-percent guard rules. "
+                    "October independent check slightly worsens speed; not an acceptance gate. "
+                    "See slam_speed_2026_11_fit.json and fit_slam_speed.py.",
+        track="car2_course_2026_11_11",
+        fit_runs=("20261111-135934", "20261111-142254", "20261111-152132"),
+        held_out_runs=("20261111-135453", "20261111-140322", "20261111-141227", "20261111-142036",
+                       "20261111-142604", "20261111-152844", "20261111-154204", "20261030-184826",
+                       "20261030-183134", "20261030-181003", "20261030-181819", "20261030-184316"),
+        overrides=dict(floor="slam_speed_2026_11_rb2", odom_speed_scale=1.0261486728316354,
+                       speed_command_scale=4614.0 / 4447.983786 / 1.0261486728316354),
+        sources=dict(
+            odom_speed_scale="slam_motion pooled trusted forward-moving median abs(wheel_v)/ground_speed, "
+                             "November development runs only; frozen SHA256 "
+                             "20e738a75703fe84b7740b0f544d85e854261a25a16f0e8c27f309645c7a0393",
+            speed_command_scale="recorded metadata/params ackermann_to_vesc_node gain 4614 / "
+                                "abs(vesc_to_odom_node gain -4447.983786) / measured wheel over-read; "
+                                "same derivation as existing floor profiles",
+        ),
+    ),
+    "slam_speed_2026_11_rb1": Floor(
+        name="slam_speed_2026_11_rb1",
+        description="REJECTED Car 1 November development-only wheel/SLAM speed-scale candidate. "
+                    "Default tyres unchanged; not the default calibration. Speed RMS worsens at H=2 and H=4. "
+                    "Only rb1 evaluation run 20261116-095242 has usable rollout windows. "
+                    "See slam_speed_2026_11_fit.json and fit_slam_speed.py.",
+        track="car2_course_2026_11_11",
+        fit_runs=("20261111-153436", "20261111-153721", "20261111-155542"),
+        held_out_runs=("20261116-095242",),
+        overrides=dict(floor="slam_speed_2026_11_rb1", odom_speed_scale=1.0746581411238885,
+                       speed_command_scale=4600.0 / 4040.0 / 1.0746581411238885),
+        sources=dict(
+            odom_speed_scale="slam_motion pooled trusted forward-moving median abs(wheel_v)/ground_speed, "
+                             "November development runs only; frozen SHA256 "
+                             "32aeb3f90721675d6e91813f17b3a34f706721f643fbf5fb3445266c3aa0c08d",
+            speed_command_scale="recorded metadata/params ackermann_to_vesc_node gain 4600 / "
+                                "abs(vesc_to_odom_node gain -4040) / measured wheel over-read; "
+                                "same derivation as existing floor profiles",
+        ),
+    ),
     "slam_tyres_2026_11_rb1": Floor(
         name="slam_tyres_2026_11_rb1",
         description="REJECTED Car 1 November development-only effective Pacejka candidate, not a measured axle-force model. "
@@ -926,6 +983,10 @@ def describe(calibration: CarCalibration | None = None) -> list[tuple]:
             loop, loop_source, named = car_speed_loop(calibration.car_id)
             if field.name in named and getattr(calibration, field.name) == loop[field.name]:
                 provenance, source = Provenance.MEASURED, loop_source
+        if calibration.car_id == 'rb2' and field.name in ('odom_speed_scale', 'speed_command_scale'):
+            floor = FLOORS['slam_speed_2026_11_rb2']
+            if getattr(calibration, field.name) == floor.overrides[field.name]:
+                provenance, source = Provenance.DERIVED, floor.sources[field.name]
         rows.append(
             (provenance, field.name, getattr(calibration, field.name), source)
         )

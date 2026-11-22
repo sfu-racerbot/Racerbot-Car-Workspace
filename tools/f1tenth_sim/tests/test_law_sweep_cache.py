@@ -16,8 +16,13 @@ def _plan(cache, car):
 
 
 @pytest.mark.parametrize('change', ['car', 'calibration', 'legacy'])
-def test_incompatible_cache_schedules_a_new_baseline(car_profiles, tmp_path, change):
+def test_incompatible_cache_schedules_a_new_baseline(car_profiles, tmp_path, change, monkeypatch):
     import law_sweep
+    from dataclasses import replace
+
+    calibration = law_sweep.calibration_for_car
+    monkeypatch.setattr(law_sweep, 'calibration_for_car', lambda car: replace(
+        calibration(car), odom_speed_scale=1.0, speed_command_scale=1.0))
 
     path = tmp_path / 'baseline.json'
     _, jobs, key = _plan(path, 'rb1')
