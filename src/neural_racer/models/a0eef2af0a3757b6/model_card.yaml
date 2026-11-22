@@ -1,0 +1,20 @@
+obs_spec_version: 1
+scan_channels:
+- 32
+- 64
+- 64
+- 64
+scan_fc: 256
+recurrent: true
+modalities:
+- scan
+- ego
+- imu
+- preview
+- race
+parameters: 646274
+run_name: league-v1-smoke/main0
+snapshot_id: '00001200'
+training_commit: 50c916e
+exported: '2026-11-11T15:15:33'
+a_lat_folded: 2.0

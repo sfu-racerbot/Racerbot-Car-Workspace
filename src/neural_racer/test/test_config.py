@@ -57,7 +57,11 @@ def test_wrapper_values_match_gap_follow(car):
              'braking_latency_sec': 'braking_latency_sec',
              'max_steering_rate': 'max_steering_rate', 'command_slew_max_dt': 'command_slew_max_dt',
              'reserve_distance': 'forward_stop_clearance', 'wheelbase': 'wheelbase',
-             'laser_offset_x': 'laser_offset_x'}
+             'laser_offset_x': 'laser_offset_x', 'forward_fov_deg': 'forward_fov_deg',
+             'swept_clearance_margin': 'swept_clearance_margin',
+             'swept_clearance_max_length': 'swept_clearance_max_length',
+             'flank_creep_length': 'flank_creep_length', 'flank_creep_margin': 'flank_creep_margin',
+             'escape_creep_speed': 'escape_creep_speed'}
     pinned = {k: DELIBERATE[k](car) for k in DELIBERATE if DELIBERATE[k](car) is not None}
     mismatched = {k: (p[k], g[v]) for k, v in pairs.items() if k not in pinned and p[k] != g[v]}
     assert mismatched == {}
@@ -70,6 +74,8 @@ DELIBERATE = {
     # gap_follow's forward_stop_clearance went 0.20 -> 0.12 (58ced23, 2026-11-07). The policies were
     # trained with 0.20, and a sim what-if (2026-11-08: two policies, 0.20 vs 0.12) changed nothing.
     'reserve_distance': lambda car: 0.20,
+    # gap_follow reads 5.0 m of swept path; the training sim's wrapper reads 3.0.
+    'swept_clearance_max_length': lambda car: 3.0,
     # Car 2's gap_follow went to 0.42 rad (cf26bfc, 2026-11-07); its neural_racer overlay keeps 0.349
     # (CLAUDE.md), since the policy never asks for more than observation.STEER_LIMIT (0.33).
     'max_steering_angle': lambda car: 0.349 if car == 'rb2' else None,

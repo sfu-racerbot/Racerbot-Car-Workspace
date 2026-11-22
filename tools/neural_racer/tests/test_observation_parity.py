@@ -85,6 +85,46 @@ def test_reset_only_resets_masked_cars():
     assert hist.scans[1].abs().sum() > 0
 
 
+def test_swept_clearance_matches_gap_logic():
+    """The batched swept-path clearance against gap_logic's own, over corridors
+    of several widths with a box ahead, at every steering from hard right to
+    hard left (both arc directions, and straight)."""
+    from gap_follow import gap_logic
+    cfg = WrapperConfig(max_speed=4.0)
+    angles = nominal_angles()
+    st = SafetyTorch(cfg, angles)
+    rng = np.random.default_rng(3)
+    n = 300
+    half = rng.uniform(0.25, 1.2, n)
+    with np.errstate(divide='ignore'):
+        r = np.minimum(half[:, None] / np.abs(np.sin(angles))[None], 10.0)
+    box = rng.random(n) < 0.5                       # half the scans: a box somewhere ahead
+    for i in np.flatnonzero(box):
+        c0 = int(rng.integers(300, 760))
+        r[i, c0:c0 + 40] = np.minimum(r[i, c0:c0 + 40], rng.uniform(0.3, 3.5))
+    r[rng.random(r.shape) < 0.03] = math.nan
+    steer = rng.uniform(-0.33, 0.33, n)
+    steer[:20] = 0.0
+    valid = np.isfinite(r) & (r > 0.02) & (r < 30.0)
+    got = st.swept_clearance(torch.tensor(r, dtype=torch.float32).view(n, 1, -1),
+                             torch.tensor(valid).view(n, 1, -1), torch.tensor(steer, dtype=torch.float32).view(n, 1))
+    ahead = np.abs(angles) <= math.radians(cfg.forward_fov_deg) / 2.0 + 1e-9
+    finite = 0
+    for i in range(n):
+        ref = gap_logic.swept_path_clearance(
+            r[i, ahead], valid[i, ahead], angles[ahead], math.tan(steer[i]) / cfg.wheelbase,
+            cfg.car_width / 2.0 + cfg.swept_clearance_margin, cfg.car_length, cfg.wheelbase, cfg.laser_offset_x,
+            0.0, cfg.swept_clearance_max_length)
+        g = float(got[i, 0])
+        if math.isinf(ref):
+            assert math.isinf(g), (i, steer[i], half[i], g)
+        else:
+            finite += 1
+            assert g == pytest.approx(ref, abs=2e-3), (i, steer[i], half[i])     # m, float32 vs float64
+    assert 50 < finite < n                          # both blocked and clear arcs were compared
+
+
+
 def test_safety_matches_numpy_wrapper():
     cfg = WrapperConfig(max_speed=4.0)
     angles = nominal_angles()
@@ -114,3 +154,74 @@ def test_safety_matches_numpy_wrapper():
         assert float(s_t[i, 0]) == pytest.approx(ref.steering, abs=1e-6)     # rad
     # every cap was actually exercised, so none of them can be wrong unnoticed
     assert {'curvature', 'braking', 'network'} <= set(binding), set(binding)
+
+
+def test_body_arc_free_matches_gap_logic():
+    """The batched body-arc test against gap_logic.body_arc_free_distance, at every steering
+    from hard right to hard left, over two kinds of scene: small obstacles scattered round the
+    front half of the body (beside it, ahead, at the corners), and one post ahead on a curved
+    arc, which the body reaches late in its 0.5 m (where the body's heading has turned most)."""
+    from gap_follow import gap_logic
+    cfg = WrapperConfig(max_speed=4.0)
+    angles = nominal_angles()
+    st = SafetyTorch(cfg, angles)
+    rng = np.random.default_rng(5)
+    n = 400
+    r = np.full((2 * n, obs.N_BEAMS), 8.0)
+    for i in range(n):
+        for _ in range(int(rng.integers(1, 4))):
+            c0 = int(rng.integers(180, 880))                 # -90 .. +90 deg
+            r[i, c0:c0 + int(rng.integers(2, 20))] = rng.uniform(0.17, 0.9)
+        c0 = int(rng.integers(380, 700))                     # -40 .. +40 deg
+        r[n + i, c0:c0 + 3] = rng.uniform(0.5, 1.0)
+    r[:n][rng.random((n, obs.N_BEAMS)) < 0.02] = math.nan
+    steer = np.concatenate([rng.uniform(-0.33, 0.33, n), rng.choice([-1.0, 1.0], n) * rng.uniform(0.15, 0.33, n)])
+    steer[:20] = 0.0
+    valid = np.isfinite(r) & (r > 0.02) & (r < 30.0)
+    m = 2 * n
+    got = st.body_arc_free(torch.tensor(r, dtype=torch.float32).view(m, 1, -1), torch.tensor(valid).view(m, 1, -1),
+                           torch.tensor(steer, dtype=torch.float32).view(m, 1), torch.ones((m, 1), dtype=torch.bool))
+    ahead = np.abs(angles) <= math.radians(cfg.forward_fov_deg) / 2.0 + 1e-9
+    ref = np.array([gap_logic.body_arc_free_distance(
+        r[i, ahead], valid[i, ahead], angles[ahead], math.tan(steer[i]) / cfg.wheelbase,
+        cfg.car_width / 2.0 + cfg.flank_creep_margin, cfg.car_length, cfg.wheelbase, cfg.laser_offset_x, 0.0,
+        max_length=cfg.flank_creep_length) == math.inf for i in range(m)])
+    mismatch = np.flatnonzero(got[:, 0].numpy() != ref)
+    assert mismatch.size <= 1, mismatch                  # of 800: float32 against float64 at an exact edge
+    for part in (ref[:n], ref[n:]):
+        assert 50 < part.sum() < n - 50                   # both free and blocked arcs were compared
+
+
+def test_flank_creep_matches_numpy_wrapper():
+    """The batched flank creep against the car's wrapper (itself held to
+    gap_logic.body_arc_free_distance): walls alongside either flank at 1-6 cm off the
+    body, some with a box ahead, at random steering, slew and speed."""
+    cfg = WrapperConfig(max_speed=4.0)
+    angles = nominal_angles()
+    st = SafetyTorch(cfg, angles)
+    sw = SafetyWrapper(cfg)
+    rng = np.random.default_rng(11)
+    n = 300
+    r = np.full((n, obs.N_BEAMS), 8.0)
+    side = rng.choice([-1.0, 1.0], n)
+    for i in range(n):
+        flank = (side[i] * angles > math.radians(70)) & (side[i] * angles < math.radians(110))
+        r[i, flank] = rng.uniform(0.165, 0.215)
+        if rng.random() < 0.25:                      # a box somewhere ahead
+            c0 = int(rng.integers(500, 560))
+            r[i, c0:c0 + 20] = rng.uniform(0.3, 1.0)
+    steer = rng.uniform(-0.33, 0.33, n)
+    prev = np.where(rng.random(n) < 0.5, steer, rng.uniform(-0.33, 0.33, n))
+    speed = rng.uniform(0.1, 3.0, n)
+    s_t, v_t, stop_t, _ = st.apply(
+        torch.tensor(steer, dtype=torch.float32).view(n, 1), torch.tensor(speed, dtype=torch.float32).view(n, 1),
+        torch.tensor(r, dtype=torch.float32).view(n, 1, -1), 0.02, 30.0,
+        torch.tensor(prev, dtype=torch.float32).view(n, 1), 0.025, torch.full((n, 1), 4.0))
+    binding = []
+    for i in range(n):
+        ref = sw.apply(steer[i], speed[i], np.zeros((6, 2)), r[i], angles, 0.02, 30.0, prev[i], 0.025)
+        binding.append(ref.binding)
+        assert bool(stop_t[i, 0]) == ref.stopped
+        assert float(v_t[i, 0]) == pytest.approx(ref.speed, abs=1e-4), (i, ref.binding)   # m/s
+    counts = {b: binding.count(b) for b in set(binding)}
+    assert counts.get('flank_creep', 0) >= 20 and counts.get('braking', 0) >= 20, counts
