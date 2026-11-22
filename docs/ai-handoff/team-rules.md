@@ -1,0 +1,42 @@
+# Team rules and standing preferences
+
+Rules from the club owner (GitHub: sfuracerbot) and lessons the coordinator learned.
+Act only on *high* confidence entries; treat *low* ones as hints to verify first.
+
+## Working rules
+
+- Owner (sfuracerbot, SFU Racerbot club) said "don't sign it with Devin, sign it as SFU Racerbot": author PRs as the owner, with no Devin attribution in commits or PR text. *(confidence: high)*
+- Owner wants all work on isolated branches via PRs so changes can be reviewed or rolled back, and every change tested and reviewed before handoff; work autonomously and only surface real decisions. *(confidence: high)*
+- For sfuracerbot's workers, choose the mode that fits the task. Normal is the usual choice; use Lite or Free when available for simple work and Fusion or Ultra when the task warrants them. There is no requirement to use GPT-6.2 Astra. *(confidence: high)*
+
+- Owner (sfuracerbot) wants every bot to push meaningful commits frequently to GitHub on isolated branches so progress is not lost. *(confidence: high)*
+
+## Racerbot project rules
+
+- For sfuracerbot, Vera and all four Racerbot specialists must push each meaningful code, docs, or viewer checkpoint to GitHub on an isolated task branch, including before pausing or handing work off, and verify the remote commit. Do not push run data, unrelated changes or secrets, or merge into a shared branch. *(confidence: high)*
+- sfuracerbot wants Vera to resume unfinished Racerbot sessions when they fall idle, sleep, or stall on server capacity, without waiting for a manual restart. Act on a reported usage reset; check the actual worker and its latest output before declaring a blocker or restarting work that already finished. *(confidence: high)*
+- For Racerbot engineering, sfuracerbot wants the team to look beyond club repositories for existing models, assets, engineering examples and research it can learn from or reuse. Prefer original sources, separate proven physics from visuals, and verify each asset's license and fit before use. *(confidence: high)*
+- For simulator physics sfuracerbot wants selectable Car 1 and Car 2 profiles, extensible to new hardware or cars, with parameters an offline calibration algorithm can tune from recorded runs. Calibration targets the simulator, not the driving algorithm or physical car. *(confidence: high)*
+- For algorithm tests, sfuracerbot wants the club’s SLAM-mapped courses included, not only synthetic tracks; distinguish the map-making bag from the drives evaluated on that geometry. *(confidence: high)*
+- Neural Racer’s scope for sfuracerbot is preparation: wire a frozen policy into the regular workspace as an optional driver under existing safety controls, and prepare RL training for later supercomputer retraining on the improved simulator. Do not train or fine-tune the network now. Integrating the software is not approval for physical actuation. *(confidence: high)*
+- For sfuracerbot's Racerbot work, keep implementing, testing, and reviewing on isolated branches while the owner is away; advance verified work to its next useful milestone without waiting for check-in and keep a wake-up for unfinished work. Hold ready PRs and evidence for one batch when the owner initiates review. No merge or deployment without their explicit go-ahead. *(confidence: high)*
+- Code changes only in `sfu-racerbot/Racerbot-Car-Workspace` (the regular one, not Car 2 Workspace; the vibe-coded algorithms); never modify Racerbot A, teammate algorithms, or other repos. Other repos may be read for reference or data. *(confidence: high)*
+- Docs live in `sfu-racerbot/racerbot-docs`: update them as features land, fill gaps, never damage existing docs, write for new members with no Racerbot background. *(confidence: high)*
+- sfuracerbot's standing Racerbot team is five. Vera is team lead and owns documentation and run visualization, with no separate standing workers for either. The four specialists are Gap Sprint (gap follow), Race Pursuit (pure pursuit), Sim Fidelity (simulator improvement) and Neural Racer (neural driver and RL setup). *(confidence: high)*
+- For the November car configuration, sfuracerbot requires simulator fits and validation on November recordings, not October. Name the source run and metric for each simulator change, reproduce a cited finding from its original bag before using it, and never commit new run data. *(confidence: high)*
+- For simulator development sfuracerbot wants a workspace launch usable on the car computer or a development device, headless for training or live in a native viewer such as Lichtblick Desktop. An HTML replay does not satisfy the simulator viewer request. Share useful simulator milestones and invite optional feedback without making it block work. *(confidence: high)*
+- For the simulator and its viewer, sfuracerbot wants existing tools rather than custom components. Prefer existing models, launchers, bridges and native panels; a small custom bridge only for a demonstrated integration gap. *(confidence: high)*
+- A full `colcon build` of Racerbot-Car-Workspace on a fresh Jazzy checkout fails before compiling: two team submodules both define a `safety_node` package. Build with `--packages-up-to` and never modify either safety node. *(confidence: low)*
+- Stock PR/commit creation adds Devin attribution even with the owner as author: the `git` shell function adds a `Co-Authored-By: Devin AI` trailer to every commit (a VM reboot does not change it) and `git_create_pr` adds a Bot banner to the PR body. Check commit trailers before any push; until a supported path yields club-only attribution, hold publishing (no test PRs, no pushing coauthored commits) and keep work as local patches. *(confidence: high)*
+- sfuracerbot sees simulator realism as the first priority: "if the simulator is really realistic then the development of the algos and stuff will become a lot easier". *(confidence: low)*
+- A no-Devin-co-author preference the owner set mid-session did not reach the running session: its next commit still had the trailer. Expect it to apply only to sessions started afterwards, and check trailers either way. *(confidence: low)*
+- Neural Racer is meant to replace the whole driving stack end to end (sensor data in, decisions out). A separate RL controller policy (like arXiv 2504.02420) is its own project, not part of Neural Racer. *(confidence: high)*
+
+## Simulator bring-up notes
+
+- Gazebo (`hippopond/f1tenth_testbed`): the upstream ROS bridge listens on the wrong transform topic; point the stock bridge at `/tf` to restore the odom-to-laser transform Lichtblick needs. *(confidence: low)*
+- AutoDRIVE RoboRacer (stock `2026-iros` release): start the engine before the Humble devkit ROS bridge to avoid a first-frame error; runs headless on CPU but the Unity window does not render. In Lichtblick use fixed frame `world`, `/tf` and `/autodrive/roboracer_1/{lidar,odom,imu}`. *(confidence: low)*
+- MuJoCo MuSHR (`prl-mushr/mushr_mujoco_ros`): its map launcher only displays a map, it does not turn a SLAM map into collision walls or LiDAR returns, so it can test dynamics but not mapped-course policies. Stock `foxglove_bridge` (client publishing disabled) carries `/mujoco/odom`, `/mujoco/imu`, `/tf`. *(confidence: low)*
+- Racerbot-Car-Workspace sim on a Devin VM: `tools/f1tenth_sim/setup.sh` fails its exact-origin check because global git rewrites github.com to the Devin proxy; run it with `GIT_CONFIG_GLOBAL=/dev/null` after removing `.sim/f1tenth_gym`. Deps go to `.sim/python` (pip --target, not a venv), so export `PYTHONPATH=.sim/python:.sim/f1tenth_gym:src/gap_follow:src/pure_pursuit` before `floor_matrix.py`/`eval_gap.py`. *(confidence: low)*
+- Racerbot sim experiment (2026-11-22): scaling gap_follow's acceleration ramp by remaining lateral grip (F1-style exit throttle as steering unwinds) gave no lap gain and more worse floor_matrix cells across 12 maps; exit time is set by curvature/clearance/corner ceilings, not the ramp. *(confidence: low)*
+- AutoDRIVE's realistic car is `Assets/Models/Vehicle/F1TENTH/F1TENTH.fbx` and `Assets/Prefabs/F1TENTH/F1TENTH.prefab` on the `AutoDRIVE-Simulator` branch of `AutoDRIVE-Ecosystem/AutoDRIVE`, under BSD-2-Clause. It is a CAD-derived generic F1TENTH build (wheelbase 324 mm, 236 mm track, 3.47 kg, Xavier NX), not the club's Fiesta chassis. Reuse it for visuals only; its WheelCollider values are not validated physics. *(confidence: low)*

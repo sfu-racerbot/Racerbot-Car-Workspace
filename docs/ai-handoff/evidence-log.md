@@ -1,0 +1,63 @@
+# Evidence log
+
+Dated decisions, newest first, then the November evidence index. Each line says what was
+measured and its limits. Attached evidence files lived in the coordinator's private
+workspace and are not reproduced here; raw run data was left out on purpose.
+
+## Decisions and starts
+
+- 2026-11-22 | started | Club-only checkpoint recovery | Fresh hosted session pushed [native Gym viewer](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/commit/329a93338fe6a888fd0ea1b5c367a0cf8d57130d); GitHub API confirms author/committer sfuracerbot and no coauthor. Reported and resumed verified pushes with all four leads and the three engine patch owners, without rewriting existing commits.
+- 2026-11-22 | decided | Owner accepted the existing commit attribution and changed Preferences to SFU Racerbot only. No rewrites; existing PRs remain held for batch review. A fresh local commit in the older viewer session still carried the trailer, with no push. A fresh viewer session owns one supported-path verification with the tested native launch patch.
+- 2026-11-22 | decided | Checkpoint exception | Two docs PRs (54 and 55 above) and the [odometry branch checkpoint](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/commit/3cf4936d2e7e347b3b0969600f6fab5bac8c3d30) were pushed with unwanted coauthor. Reported all to owner, stopped further noncompliant pushes, no deletion/merge/rewrite. Both docs patches backed up; the native viewer remains a separate task.
+- 2026-11-22 | started | Live/headless parity | After per-car bridge parity patch passed nine software checks, Sim Fidelity put the native Car 2 SLAM-map check on the existing Gym worker with a refreshed stock launch archive. Calibrated opt-in, not a claim of reality or hardware support.
+- 2026-11-22 | decided | Attribution blocks GitHub checkpoints | Fresh local simulator commit 2b100ad4a6f7af5b8bb2d13dd8b0813e802bc72b added Devin coauthor despite club author and committer. Held affected pushes, surfaced the Git commit author question. Car 1 validation code backup; AutoDRIVE patch. Resume verification upon setting change, without rewriting any published commit.
+- 2026-11-22 | started | GitHub checkpoints | Owner requested frequent pushes across the team. Four standing specialists and Vera’s five benchmark/research sessions received it. Temporary guides checkpoint and viewer checkpoint cover retained work without reviving archived Bots. Require remote SHAs, permitted paths, no run data, no force push or merge.
+- 2026-11-22 | started | Shared benchmark recovery | Original worker failed its shell retry even on pwd before producing files. Reassigned the frozen recipe and source protocols to the sole replacement, independent-measurements worker, and notified Sim Fidelity not to duplicate extraction. On delivery route commands, initial states, references and per-metric masks to MuJoCo and Gazebo and expected counts to AutoDRIVE before Gym completes.
+- 2026-11-22 | decided | Gap follow | 61-pair evidence and verdict confirm the already-rejected braking candidate, not a new finding or mapped-course win. The existing worker is now attributing time loss by sector on 151026-rebuilt using saved traces without retuning braking.
+- 2026-11-22 | started | November simulation and controller work | Owner asked to resume all unfinished work without waiting on stale idle/quota labels. Resumed existing Gap Sprint, Race Pursuit, Neural Racer, Sim Fidelity, three simulator comparison workers and the two pending research workers. The three engines share the same recipe; no engine score without comparable coverage. The recurring coordination check is enabled, in addition to completion notices. Stayed clear of archived bots, hardware and training.
+- 2026-11-22 | decided | Neural Racer | Delivered frozen parity correction and evidence; Car 1's two simulator paths first differed at 0.100 s; correct gain and delay cut peak position difference from 0.59705 m to 0.000036 m on the 10 s replay, 25 checks passed. Continued saved-policy mapped simulation; no real-world validity claimed.
+ 
+- 2026-11-22 | decided | Retired Racerbot roles | Owner confirmed archiving Racerbot Docs and Run Visualizer after the handoff; archive ask closed. Vera owns both roles and the retained evidence. Owner's batch review remains on hold.
+- 2026-11-22 | started | Neural Racer | Resumed only the existing Neural Racer owner for the independent 0.597 m batched vs CPU Gym drift; fixed 0.020 m gate, no training and no repeat of mux tests. The shared benchmark and pure pursuit already had active workers. No new standing Bots. Website [3-commit ref change](https://github.com/sfu-racerbot/racerbot-website/compare/4e57e08ce0a8fbe5c772b337970bacd8b479b320...caf7bca9c104ec26ae4c449a75e79fc2f275d70e) modified only site content, code, tests and two hiring PDFs. No releases or new recordings; didn't wake intake.
+- 2026-11-22 | decided | Racerbot docs and visualization | Verified latest outputs against both outgoing bot histories; all 12 child sessions were suspended or exited. Keep onboarding v2, November run-data v2, PR 92's local correction, and the native Gym launch bundle and recording with Vera. Only a creator or holder of Manage Bots can archive a Bot in its settings; session archive is not equivalent. Offered the owner Racerbot Docs and Run Visualizer for reversible archival. Neither Bot nor their sessions were archived or deleted by Vera.
+- 2026-11-22 | started | Simulator | After the owner corrected the stale quota assumption, Sim Fidelity accepted the shared November replay/scoring assignment and separately read as running. no admin step. One specialist resumed, no batch relaunch and no inference about account balance or live runtime model.
+- 2026-11-22 | decided | Racerbot staffing | Owner replaced the seven-person roster and mandatory Astra rule. Vera owns docs and run visualization; leave both former Bots dormant, preserving their review artifacts. Four specialist owners remain: Sim Fidelity first for shared November scoring, Gap Sprint, Race Pursuit, Neural Racer. All four existing chats still report suspended/out_of_quota and selected Astra; do not assume a mode switch or wake the old roster. Use the new task-based worker policy. The existing coordination reminder reaches Vera only; editing its action could not be validated (404 despite readable configuration), so apply this roster to its wakes without duplicating the reminder. For the inherited work, retain the live Lichtblick recording and the verified November run guide v2 plus its validation with the existing handoff.
+- 2026-11-22 | decided | Racerbot | Six workstreams and the three engine benchmarks, asset search and F1 research suspended for quota. Resume existing owners only when capacity is available; no duplicates or implied spend. Usage & Limits. Next useful dependency: shared replay windows and scoring rules from Sim Fidelity, not additional trials. On recovery, have the F1 research owner hand a transferable technique to the controller owner for a mapped simulation A/B; no network training, deployment, hardware or merges. All 15 GitHub repos' push times at or before last check, and two new workspace benchmark refs compared with ingested main contain only benchmark tools, no new bags. Intake stays complete.
+- 2026-11-21 | started | External research | Upstream AutoDRIVE assets and Formula One transferable techniques, distinct from engine benchmarking and controller ownership.
+- 2026-11-21 | decided | Neural Racer | November bag evaluation, reproduction. Primary equal-drive imitation MAE on reserved Car 1 Nov 16: 0.0619 vs learned 0.1008 rad. Pooled score reverses because 095242 has 93% of samples. Keep offline; not independent evidence of driving performance. Held for review.
+- 2026-11-21 | started | Simulator comparison | F1TENTH Gym, Gazebo, AutoDRIVE, MuJoCo trial using the November manifest; prefer stock components and native Lichtblick Desktop plus headless, not bespoke replayers. User wants measured milestones but optional feedback does not block. Car 1 telemetry check: existing speed loop predicts wheels better; optical ground reference insufficient. Informed owner in scope recap.
+- 2026-11-21 | decided | Neural Racer | October 26 development diagnosis: all three simulated replays went wide at the last left turn and entered 0.20 m reserve at 29.42 m; demanded forward speed but the brake held without contact. Diagnosis of the upstream wide line continues; no loosening braking and no claim this is independent validation.
+- 2026-11-21 | decided | Racerbot run intake | Read-only inventory covers 15 repos, 36 October bags/71 chunks and 10 November excerpts. Sent findings to Gap Sprint, Sim Fidelity and Neural Racer. No new independent full run; task paused until changed ref. The November car 2 race lap already informed floor selection and is not validation.
+- 2026-11-21 | decided | Gap Sprint | Four fixed-pose, left/right, two-car synthetic trials rejected the deepest false opening during scan processing; both cars selected the real turn. 40 tests passed including four new cases. Not evidence about surviving false returns, closed-loop contact, or real sensor behavior. Local test patch, [research PR](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/96).
+- 2026-11-21 | decided | Neural Racer | Reserved confirmation, reproduction. 45 valid solo starts on 15 geometries: fixed candidate finished 12 vs each frozen control 9 and gap follow 40. Three extra finishes on one course only; zero candidate contacts but 18 stalls, 15 other timeouts, 24 reserve entries; gap follow four contacts. Three invalid starts separate. Kept candidate offline, sent development-only diagnosis to its owner; no tuning on confirmation set. Held for review.
+- 2026-11-21 | started | Race Pursuit | 32-race pure-pursuit verdict, raw traces and verifier. Following finished behind the moving blocker 8/8 and stopped without contact for a stalled car 8/8. Legacy passing: 104 attempts in 16 races, zero lead changes, one repeatable stopped-car collision after an abort. Zero fresh detections in 2,149 occluded ticks (reflector not tested); keep passing disabled. Assigned verified offline diagnosis of post-abort contact without changing hardware or weakening safety margins.
+- 2026-11-21 | started | Racerbot | Matched the [blind-corner study](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/96) to simulator fidelity, pursuit and gap-follow false-opening checks. A separate [unified-model study](https://github.com/sfu-racerbot/unified-multimodal-model/pull/1) concerns generative text/image/audio rather than driving. Started one read-only recording intake and extended the coordination reminder to detect future uploads, check original telemetry and reserve independent runs before tuning.
+- 2026-11-21 | started | Racerbot | Owner requested work continue without a check-in. Sent follow-ups to the six existing owners and enabled an internal two-hour wake-up through Nov 28, to renew only for concrete remaining work. Prioritize tight-course reliability before speed; no merge, deployment, or physical test.
+
+## November evidence index
+
+### `shared_benchmark_mushr_command_coverage`
+
+- evidence: Fresh-command replay windows before canonical reference masks. Car 1: 67 development, 23 evaluation. Car 2: 54 development, 271 evaluation. Car 1 run 153409 has no full window. Upper bounds only, not measured engine accuracy.
+### `main`
+
+- 76db7abecd8c66ca14bbc56d77e82331a08e3cb6
+### `rb2_20261111_152132_map`
+
+- rebuilt_from: 20261111-151026
+- classification: Known map and profiled line, development/context, not independent validation
+- occupancy_cells_compared: 141696
+- mismatches: 0
+### `four_engine_canonical_v1`
+
+- sha256: c99cb8c70ff55848e26d958343f12b3de2fa11ed0b6a6468b11f1fe1b3f61350
+- rb1_yaw_evaluation_caveat: The equal-run mean is based on 095058 (42 eligible turning ticks) and 095242 (1303); 095652 has none. Keep the frozen score and show coverage alongside it.
+- scope: Frozen ticks, block keys, starting speeds, per-run counts, source checks and common scorer; 415/428 blocks across 17 November runs, 199200 replay steps. Distributed to Gazebo and MuJoCo for predictions and AutoDRIVE for expected counts. Inputs alone do not establish any engine's accuracy.
+### `car2_november_simulator`
+
+- limits: Seven reserved drives on one course/date, used for evaluation now. Grip scale 1.25 for cornering sensitivity only. Retain 1.15 as floor default and original speed loop.
+### `rb1_20261111_155542`
+
+- classification: Previously studied race; development and demonstration only
+- recorder_origin_ns: 1794441343710573007
+- player_origin_after_recorder_s: 0.44357279
