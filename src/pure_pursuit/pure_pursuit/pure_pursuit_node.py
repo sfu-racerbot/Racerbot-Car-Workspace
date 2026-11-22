@@ -105,9 +105,18 @@ class OpponentTracker:
         self.last_update_time = None
         self.prev_nearest_index = None
         self.history = []
+        self.awaiting_reconfirmation = False
+
+    def require_reconfirmation(self):
+        """Retain the last measured surface for braking, not for speed credit."""
+        self.history.clear()
+        self.awaiting_reconfirmation = True
 
     def update(self, arc_length: float, now_sec: float, total_length: float = 0.0):
-        if self.arc_length is not None and self.last_update_time is not None:
+        if self.awaiting_reconfirmation:
+            self.progress_rate = 0.0
+            self.awaiting_reconfirmation = False
+        elif self.arc_length is not None and self.last_update_time is not None:
             dt = now_sec - self.last_update_time
             if dt > 1e-3:
                 delta = arc_length - self.arc_length
@@ -1918,7 +1927,7 @@ class PurePursuitNode(Node):
             # steering_angle here is this tick's steering before the override:
             # Tier 1's arc check needs it as the arc the car is being steered onto.
             steering_override, speed_override, reactive_state, reactive_detail = self._reactive_override(
-                allow_avoidance=not self.overtake_active and self.follow_speed_cap is None,
+                allow_avoidance=self._allow_gap_avoidance(),
                 desired_steering=steering_angle)
             if steering_override is not None:
                 steering_angle = steering_override
@@ -2427,6 +2436,12 @@ class PurePursuitNode(Node):
             f"{self.emergency_escape_speed:.2f}m/s rather than latching stopped",
         )
 
+    def _allow_gap_avoidance(self):
+        # A remembered surface after abort is a speed limit, not a reason
+        # to suppress obstacle avoidance while waiting for a fresh fix.
+        return not self.overtake_active and (
+            self.follow_speed_cap is None or self.opponent.awaiting_reconfirmation)
+
     def _reactive_override(self, allow_avoidance: bool = True, *,
                            desired_steering: float):
         """The reactive LIDAR safety net -- independent of the racing
@@ -2664,6 +2679,7 @@ class PurePursuitNode(Node):
             trigger_distance = self.avoidance_trigger_distance
             distance_source = 'map-unexplained object'
         if (self.enable_opponent_following and self.opponent.arc_length is not None
+                and not self.opponent.awaiting_reconfirmation
                 and dynamic_closest is not None and math.isfinite(closest)):
             # A car can weave onto a different path station or temporarily
             # fail confirmation. Do not hand steering to gap avoidance in
@@ -2929,6 +2945,8 @@ class PurePursuitNode(Node):
                         speed_uncertainty=self.following_speed_uncertainty, stop_speed=self.following_stop_speed,
                         speed_credit=credit, opponent_brake=self.following_brake)
                     self.follow_speed_cap = min(self.follow_speed_cap, cap)
+            if self.opponent.awaiting_reconfirmation:
+                self.follow_speed_cap = min(self.follow_speed_cap, self.following_reacquire_speed)
             self.last_opponent_status += f'; following cap={self.follow_speed_cap:.2f}m/s'
         if self.enable_local_pass_planner:
             self._local_pass_update(nearest_idx, now_sec, confirmed_point)
@@ -3465,7 +3483,12 @@ class PurePursuitNode(Node):
         overtake_retry_sec from now."""
         self.overtake_active = False
         self.opponent_gate.reset()
-        self.opponent = OpponentTracker(self.opponent_velocity_smoothing, self.opponent_lost_timeout_sec)
+        if self.enable_opponent_following:
+            self.opponent.require_reconfirmation()
+            if self.follow_speed_cap is not None:
+                self.follow_speed_cap = min(self.follow_speed_cap, self.following_reacquire_speed)
+        else:
+            self.opponent = OpponentTracker(self.opponent_velocity_smoothing, self.opponent_lost_timeout_sec)
         self._overtake_retry_after_sec = now_sec + self.overtake_retry_sec
         self.last_opponent_status = f"overtake abandoned: {why}"
         self.get_logger().warn(f"overtake: {why} -- abandoning the pass.", throttle_duration_sec=1.0)

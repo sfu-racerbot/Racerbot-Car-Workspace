@@ -106,6 +106,65 @@ def test_node_stalled_pass_gives_up_resets_gate_and_obeys_retry():
     assert 'no new pass' in d.last_opponent_status
 
 
+def test_aborted_legacy_pass_keeps_braking_until_a_new_confirmation():
+    d, scan = decisions()
+    state = [0, 0, 0, 1, 0]
+    for now in np.arange(0, .4, .025):
+        d.observe(state, scan, float(now), 0)
+        d._update_opponent_and_overtake(0)
+    assert d.overtake_active
+    surface, seen = d.opponent.arc_length, d.opponent.last_update_time
+    assert d.follow_speed_cap > d.following_reacquire_speed
+    d._abandon_overtake(.4, 'no gain')
+    assert d.follow_speed_cap == d.following_reacquire_speed
+    assert d._allow_gap_avoidance()
+
+    # The previously confirmed car was ahead. Open beams allow a crawl,
+    # not the unbounded profile; missing beams cannot prove clear road.
+    nearby = np.where(scan < 10, 1.0, scan)
+    for now, ranges, ceiling in ((.425, np.full_like(scan, 10.), d.following_reacquire_speed),
+                                 (.45, nearby, 0.),
+                                 (4., np.full_like(scan, np.inf), 0.)):
+        d.observe(state, ranges, now, 0)
+        assert d._update_opponent_and_overtake(0) is None
+        assert d.follow_speed_cap == ceiling
+        assert (d.opponent.arc_length, d.opponent.last_update_time) == (surface, seen)
+        if ranges is nearby:
+            turn, _, mode, _ = d._reactive_override(
+                allow_avoidance=d._allow_gap_avoidance(), desired_steering=0.)
+            assert mode == 'lidar_avoidance' and turn != 0.
+
+    # Retry time has elapsed. Five real returns are still not a new
+    # confirmation. Only after the gate's full span may normal following resume.
+    for i in range(5):
+        d.observe(state, scan, 4.125 + i / 32, 0)
+        assert d._update_opponent_and_overtake(0) is None
+        assert d.follow_speed_cap <= d.following_reacquire_speed
+        assert d.opponent.last_update_time == seen
+    d.observe(state, scan, 4.125 + 5 / 32, 0)
+    assert d._update_opponent_and_overtake(0) is not None
+    assert d.opponent.last_update_time == d.now
+    assert d.follow_speed_cap > d.following_reacquire_speed
+    assert not d._allow_gap_avoidance()
+
+
+def test_reconfirmed_motion_cannot_borrow_pre_abort_speed():
+    d, _ = decisions()
+    for now in np.arange(0, .351, .025):
+        d.opponent.update(2 + 4 * now, float(now), 40)
+
+    def credit(now):
+        return d.opponent.speed_lower_bound(now, 40, d.following_speed_uncertainty, d.following_brake)
+
+    assert credit(.35) > 0
+    d._abandon_overtake(.35, 'no gain')
+    assert d.opponent.arc_length == pytest.approx(3.4, abs=1e-9)  # last measured surface, metres
+    assert credit(.35) == 0
+    # Even a fresh fix farther along the line is one point, not velocity.
+    d.opponent.update(4.2, .55, 40)
+    assert d.opponent.progress_rate == 0 and credit(.55) == 0
+
+
 def test_off_line_recovery_aims_at_line_times_out_and_can_reset():
     d, scan = decisions()
     follower = race.rv.PathFollower(rectangle(), law_name='delay_lqr', car_id='rb2')

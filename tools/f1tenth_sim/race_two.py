@@ -31,7 +31,7 @@ from sim_fidelity import with_floor  # noqa: E402
 NODE = rv.ROOT / 'src/pure_pursuit/pure_pursuit/pure_pursuit_node.py'
 METHODS = {
     '_update_opponent_and_overtake', '_detect_opponent', '_abandon_overtake',
-    '_reactive_override', '_fov_indices', '_closest_in_cone',
+    '_reactive_override', '_allow_gap_avoidance', '_fov_indices', '_closest_in_cone',
     '_footprint_clearance', '_forward_body_clearance', '_arc_clearance',
     '_dynamic_closest_in_cone', '_static_closest_in_cone',
     '_sanitized_window', '_emergency_escape',
@@ -348,7 +348,7 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                         follower, state, shape.previous_steering)
                     desired.append(steering)
                     so, vo, safety, detail = d._reactive_override(
-                        allow_avoidance=not d.overtake_active and d.follow_speed_cap is None, desired_steering=steering)
+                        allow_avoidance=d._allow_gap_avoidance(), desired_steering=steering)
                     cap = shape.max_speed
                     if so is not None:
                         steering = so
