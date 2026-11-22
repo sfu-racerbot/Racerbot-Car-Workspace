@@ -34,7 +34,12 @@ The 2026-11-22 retraining setup: the simulator built on one car's own calibratio
 
 It runs the same pipeline as the quick path. Only steps 0, 4, 5 and 6 change. Nothing trains until someone signs the setup off.
 
-**Before you start:** do the quick path's steps 0-3 (account, setup, shakedown, benchmark) once.
+**If you are an AI agent following this:** never set `signed_off_by` yourself and never submit `teacher`, `distill` or `league` while it is `null`. Stop and ask the person who gave you the task for the approver's name. Steps 1, 2, 4 and 5 and every `NR_DRY_RUN=1` command are safe to run without it.
+
+**Before you start:**
+
+- **Get the code.** On a Fir login node, run `git clone https://github.com/sfu-racerbot/Racerbot-Car-Workspace.git && cd Racerbot-Car-Workspace`. Check out the branch that has the setup: `main`, or the retraining PR's branch until that merges. **Working when:** `ls tools/neural_racer/retrain_calibrated.yaml` finds the file. Run every command below from this directory.
+- **Do the quick path's steps 0-3 once:** set `NR_ACCOUNT`, then run `setup`, `shakedown` and `benchmark`, and copy the benchmark's `chosen.num_envs` into `NR_NUM_ENVS`.
 
 1. **Pick the car.** In `tools/neural_racer/slurm/fir.conf`, set `NR_CAR` to the car you are training for (`rb2` is car 2, which raced on 2026-11-11). Every job exports it as `RACERBOT_CAR`.
 2. **Edit the setup.** In `tools/neural_racer/retrain_calibrated.yaml`, set `car:` to the same id. Train one car per run: each car's randomization is centred on its own fit.
@@ -59,13 +64,18 @@ It runs the same pipeline as the quick path. Only steps 0, 4, 5 and 6 change. No
    ```
 
    `teacher`, `distill` and `league` check the sign-off again before submitting anything.
-7. **Select and export** with the quick path's steps 7 and 8.
+7. **Select and export.** Run `tools/neural_racer/slurm/fir_run.sh select`, then read `winner` in the `selection_report.json` it names. That entry looks like `main0/00001200`. Then run `tools/neural_racer/slurm/fir_run.sh export <winner>`. **Working when:** export prints `selection pass: True`.
 8. **Re-run the club-map diagnosis** on the export, from the workspace root on a login node. It uses the CPU referee, so it needs no GPU:
 
    ```bash
-   RACERBOT_CAR=rb2 PYTHONPATH=tools/neural_racer ~/.venvs/neural_racer/bin/python \
-       -m neural_racer_train.diagnose --model <export dir> --out "$SCRATCH/neural_racer/diag-<name>" --workers 8
+   R=$PWD   # the workspace root
+   RACERBOT_CAR=rb2 \
+   PYTHONPATH=$R/.sim/python:$R/.sim/f1tenth_gym:$R/tools/neural_racer:$R/src/racerbot_car:$R/src/pure_pursuit \
+   ~/.venvs/neural_racer/bin/python -m neural_racer_train.diagnose \
+       --model "$SCRATCH/neural_racer/exports/<exported folder>" --out "$SCRATCH/neural_racer/diag-<name>" --workers 8
    ```
+
+   `<exported folder>` is the directory that step 7's `export` prints after `exported ... ->`. `.sim/` comes from the quick path's `setup`. The run takes a few minutes on 8 workers. Each course runs with the car that mapped it, whatever `RACERBOT_CAR` you set. The command writes `report.md`, `summary.json` and `runs.json`.
 
    **Working when:** `report.md` shows 3/3 on every course, including the held-out `car2_course_2026_11_11`, and lap times at or under `gap_follow`'s.
 
