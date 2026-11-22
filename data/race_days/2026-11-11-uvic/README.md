@@ -73,16 +73,27 @@ From 4:56 p.m. both of our cars were on the track at the same time.
 Everything else in those two recordings is not racing: car 2 sat parked or was carried
 for about 16 of its 21 minutes, and car 1 was parked or carried for its last four and a half.
 
-## Before the races
+## Before the races: probable timed laps
 
 The other recordings, 2:54 to 4:41 p.m., are testing and practice with several
 algorithms (our gap follow and pure pursuit, team A's ftg and disparity extender).
 Their race stretches in `segments.yaml` are real driving at race speed and are good
-data for the simulator. The recordings cannot tell whether any of them were the
-official timed laps, so don't call them races. The closest to 4:30 are car 2 at
-4:29 p.m. (`20261111-152844`, one 12 s stretch, then carried) and car 1 from 4:34 to
-4:41 p.m. (`20261111-153436` and `-153721`, four stretches of one to five laps, alone on
-the track).
+data for the simulator.
+
+The drives from 4:29 to 4:41 p.m. were **probably the timed laps**: each car drove
+alone on the track, close to the 4:30 start the team remembers. The recordings
+cannot prove it, so call them probable timed laps, not races.
+
+| Car | Recording | Clock | Recording time | Wheel distance | About |
+|---|---|---|---|---|---|
+| car 2 | `rb2/racerbot_runs/20261111-152844` | 16:29:38 to 16:29:50 | 51.5 to 63.5 s | 33 m | 1.2 laps, then carried |
+| car 1 | `rb1/racerbot_runs/20261111-153436` | 16:34:38 to 16:35:03 | 0.5 to 25.0 s | 57 m | 2.0 laps |
+| car 1 | `rb1/racerbot_runs/20261111-153721` | 16:38:41 to 16:39:15 | 77.0 to 110.5 s | 90 m | 3.2 laps |
+| car 1 | `rb1/racerbot_runs/20261111-153721` | 16:39:20 to 16:39:33 | 115.5 to 129.0 s | 36 m | 1.3 laps |
+| car 1 | `rb1/racerbot_runs/20261111-153721` | 16:40:18 to 16:41:09 | 173.5 to 224.5 s | 138 m | 4.9 laps |
+| car 1 | `rb1/racerbot_runs/20261111-153721` | 16:41:11 to 16:41:31 | 226.5 to 247.0 s | 54 m | 1.9 laps |
+
+The website's race page shows these as "probable timed laps" clips, after the race clips.
 
 ## Using it
 
