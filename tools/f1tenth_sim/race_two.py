@@ -273,7 +273,7 @@ DEFAULT_FLOOR = 'sfu_course_2026_11_06'
 
 def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0,
         pass_lookahead=None, cap_only=False, pass_planner_enabled=False, car='rb2', floor=DEFAULT_FLOOR,
-        online_lateral=None, overrides=None):
+        online_lateral=None, overrides=None, *, ego_steering=None, observe_step=None):
     """One race. ``car``: both cars are this car (its profile, overlays, steering law parameters). ``floor``: a
     FLOORS name, or 'car' for the car's own calibration. ``online_lateral``: the shaper's online cornering cap,
     None = the car's shipped max_lateral_accel (until 2026-11-15 this was fixed at 2.7, below car 2's 3.1).
@@ -346,6 +346,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                 else:
                     steering, speed, nearest, target, base_state = d.base_command(
                         follower, state, shape.previous_steering)
+                    if i == 0 and ego_steering is not None and base_state is None and target is None:
+                        steering = ego_steering(steering, state[3])
                     desired.append(steering)
                     so, vo, safety, detail = d._reactive_override(
                         allow_avoidance=not d.overtake_active and d.follow_speed_cap is None, desired_steering=steering)
@@ -380,6 +382,8 @@ def run(track, line, opponent, seed=12345, head_start=3.0, laps=4, timeout=100.0
                 safety_details.append(detail)
                 targets.append(None if target is None else list(map(float, target)))
             obs, _, done, _, info = plant.step(commands)
+            if observe_step is not None:
+                observe_step(plant)
             p = [progress[i].update(plant.truth(i)[:2]) for i in range(count)]
             car_contact, wall_contact = sorted(plant._chassis_contact()), sorted(plant._wall_contact())
             rows.append(dict(time=(step + 1) * rv.CONTROL_DT, ego_progress=p[0], opp_progress=p[1] if count == 2 else 0,
