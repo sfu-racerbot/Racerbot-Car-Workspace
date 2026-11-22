@@ -151,11 +151,13 @@ def driveable_region(free: np.ndarray, seed_rc=None, reference_rc=None) -> np.nd
     largest, largest_size = None, 0
     enclosed, enclosed_size = None, 0
     best_reference, best_score = None, 0
-    for region in _free_regions(free, seed_rc):
+    for region in _free_regions(free, seed_rc, reference_rc):
         size = int(region.sum())
         if size > largest_size:
             largest, largest_size = region, size
         if seed_rc is not None:
+            if reference_rc is not None and not region[reference_rc].any():
+                raise ValueError("seed component does not intersect the reference centreline")
             return region
         if reference_rc is not None:
             score = int(np.count_nonzero(region[reference_rc]))
@@ -294,11 +296,10 @@ class ImportedTrack:
 
 def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
     last_error = None
-    reference = None if seed_rc is None else (np.array([seed_rc[0]]), np.array([seed_rc[1]]))
     for region in _free_regions(spec.free, seed_rc):
         try:
             narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
-            for candidate in _free_regions(narrowed, reference_rc=reference):
+            for candidate in _free_regions(narrowed, seed_rc):
                 try:
                     island = find_island(candidate)
                     pixels = centerline_pixels(candidate, island)
@@ -308,7 +309,8 @@ def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
                 return region, pixels
         except ValueError as exc:
             last_error = exc
-    raise ValueError("free space is not a loop: no usable race loop after narrowing") from last_error
+    source = "free space" if seed_rc is None else f"seed component at {seed_rc}"
+    raise ValueError(f"{source} is not a loop: no usable race loop after narrowing") from last_error
 
 
 def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,

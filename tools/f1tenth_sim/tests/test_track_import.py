@@ -239,7 +239,7 @@ def blocked_loop_maps(tmp_path):
     return driving, line, expected
 
 
-@pytest.mark.parametrize('seed_rc', [None, (60, 5), (60, 100)])
+@pytest.mark.parametrize('seed_rc', [None, (60, 5)])
 def test_narrowing_tries_cropped_loop_after_larger_side_room(tmp_path, seed_rc):
     """Oracle: a cropped ring and larger filled room joined by a 15 cm neck."""
     image = np.zeros((120, 180), np.uint8)
@@ -256,6 +256,28 @@ def test_narrowing_tries_cropped_loop_after_larger_side_room(tmp_path, seed_rc):
     narrowed = drop_narrow_gaps(spec.free, .05, .155)
     assert narrowed[60, 5] and narrowed[60, 100]
     assert not narrowed[59, 70]
+
+
+def test_seeded_room_cannot_switch_to_reference_loop(tmp_path):
+    """Oracle: a seeded room has no loop once its narrow connection is closed."""
+    image = np.zeros((120, 180), np.uint8)
+    image[10:110, :60] = 255
+    image[25:95, 15:45] = 0
+    image[10:110, 80:170] = 255
+    image[58:61, 60:80] = 255
+    line = load_map(write_map(tmp_path, image, .05, name='line'))
+    image[58:61, 60:80] = 0
+    driving = load_map(write_map(tmp_path, image, .05, name='driving'))
+    seed = pixel_to_world(driving, 60, 100)
+    with pytest.raises(ValueError, match='seed.*no usable race loop'):
+        extract_track(driving, seed_xy=seed, centerline_from=line)
+    with pytest.raises(ValueError, match='seed.*no usable race loop'):
+        extract_track(line, seed_xy=seed)
+    loop_seed = pixel_to_world(driving, 60, 5)
+    track = extract_track(driving, seed_xy=loop_seed, centerline_from=line)
+    rows, cols = world_to_pixel(driving, *track.centerline.T)
+    assert track.region[rows, cols].all()
+    assert not track.region[60, 100]
 
 
 def test_open_corridor_beats_smaller_border_loop(blocked_loop_maps):
@@ -286,6 +308,8 @@ def test_reference_votes_and_explicit_seed():
     np.testing.assert_array_equal(driveable_region(free, (2, 2), reference_rc=reference), free & ~expected)
     with pytest.raises(ValueError, match='centreline does not intersect free space'):
         driveable_region(free, reference_rc=(np.array([], int), np.array([], int)))
+    with pytest.raises(ValueError, match='seed component does not intersect'):
+        driveable_region(free, (2, 2), reference_rc=(np.array([24]), np.array([24])))
 
 
 @pytest.mark.parametrize('name', ['car1_course_2026_10_26', 'car2_course_2026_11_11',
