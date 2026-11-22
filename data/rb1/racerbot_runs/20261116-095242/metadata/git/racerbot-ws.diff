@@ -1,0 +1,55 @@
+diff --git a/data/rb1/racerbot_runs/auto_record.log b/data/rb1/racerbot_runs/auto_record.log
+index 9251601..04f758d 100644
+--- a/data/rb1/racerbot_runs/auto_record.log
++++ b/data/rb1/racerbot_runs/auto_record.log
+@@ -2,3 +2,50 @@
+ 2026-10-31T17:42:50-07:00 WARN 20261030-180746 started late: the car was already at 1.83 m/s at its first /odom
+ 2026-10-31T17:42:51-07:00 WARN 20261030-190408 started late: the car was already at 2.21 m/s at its first /odom
+ 2026-10-31T17:42:52-07:00 WARN 20261030-190519 started late: the car was already at 2.9 m/s at its first /odom
++2026-11-02T18:44:24-08:00 INFO auto_record ready: records a run while any node publishes /drive, /auto_map/drive, /auto_race/drive, /neural_racer/shadow_drive, /ackermann_cmd, /commands/motor/speed, /commands/servo/position (manual /teleop is not recorded), into /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/<time>/; never beside another recorder (race_diag_node, rosbag2_recorder*). Turn off with bringup record:=false.
++2026-11-02T18:46:06-08:00 INFO auto_record ready: records a run while any node publishes /drive, /auto_map/drive, /auto_race/drive, /neural_racer/shadow_drive, /ackermann_cmd, /commands/motor/speed, /commands/servo/position (manual /teleop is not recorded), into /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/<time>/; never beside another recorder (race_diag_node, rosbag2_recorder*). Turn off with bringup record:=false.
++2026-11-02T18:46:43-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-184643
++2026-11-02T18:46:48-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 5.8 s after the algorithm appeared
++2026-11-02T18:48:51-08:00 INFO stopping the recording: no algorithm publishing for 3.0 s
++2026-11-02T18:48:52-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-184643 (128 s, bag 88 MB): no algorithm publishing for 3.0 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-184643
++2026-11-02T18:48:54-08:00 WARN 20261102-184643 started late: the car was already at 2.28 m/s at its first /odom
++2026-11-02T18:53:44-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185344
++2026-11-02T18:53:49-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 6.3 s after the algorithm appeared
++2026-11-02T18:56:03-08:00 INFO stopping the recording: no algorithm publishing for 3.2 s
++2026-11-02T18:56:04-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185344 (139 s, bag 96 MB): no algorithm publishing for 3.2 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185344
++2026-11-02T18:57:38-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185738
++2026-11-02T18:57:42-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 5.8 s after the algorithm appeared
++2026-11-02T18:58:28-08:00 INFO stopping the recording: no algorithm publishing for 3.0 s
++2026-11-02T18:58:28-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185738 (50 s, bag 32 MB): no algorithm publishing for 3.0 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185738
++2026-11-02T18:58:32-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185832
++2026-11-02T18:58:36-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 5.3 s after the algorithm appeared
++2026-11-02T19:00:32-08:00 INFO stopping the recording: no algorithm publishing for 3.2 s
++2026-11-02T19:00:33-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185832 (121 s, bag 83 MB): no algorithm publishing for 3.2 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261102-185832
++2026-11-11T15:31:40-08:00 INFO auto_record ready: records a run while any node publishes /drive, /auto_map/drive, /auto_race/drive, /neural_racer/shadow_drive, /ackermann_cmd, /commands/motor/speed, /commands/servo/position (manual /teleop is not recorded), into /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/<time>/; never beside another recorder (race_diag_node, rosbag2_recorder*). Turn off with bringup record:=false.
++2026-11-11T15:32:30-08:00 INFO auto_record ready: records a run while any node publishes /drive, /auto_map/drive, /auto_race/drive, /neural_racer/shadow_drive, /ackermann_cmd, /commands/motor/speed, /commands/servo/position (manual /teleop is not recorded), into /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/<time>/; never beside another recorder (race_diag_node, rosbag2_recorder*). Turn off with bringup record:=false.
++2026-11-11T15:34:09-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153409
++2026-11-11T15:34:13-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 6.0 s after the algorithm appeared
++2026-11-11T15:34:18-08:00 INFO stopping the recording: no algorithm publishing for 3.2 s
++2026-11-11T15:34:18-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153409 (10 s, bag 3 MB): no algorithm publishing for 3.2 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153409
++2026-11-11T15:34:36-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153436
++2026-11-11T15:34:38-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 4.0 s after the algorithm appeared
++2026-11-11T15:35:08-08:00 INFO stopping the recording: no algorithm publishing for 3.3 s
++2026-11-11T15:35:09-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153436 (33 s, bag 21 MB): no algorithm publishing for 3.3 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153436
++2026-11-11T15:35:10-08:00 WARN 20261111-153436 started late: the car was already at 2.7 m/s at its first /odom
++2026-11-11T15:37:21-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153721
++2026-11-11T15:37:25-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 6.0 s after the algorithm appeared
++2026-11-11T15:41:55-08:00 INFO stopping the recording: no algorithm publishing for 3.2 s
++2026-11-11T15:41:56-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153721 (275 s, bag 192 MB): no algorithm publishing for 3.2 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153721
++2026-11-11T15:55:34-08:00 INFO auto_record ready: records a run while any node publishes /drive, /auto_map/drive, /auto_race/drive, /neural_racer/shadow_drive, /ackermann_cmd, /commands/motor/speed, /commands/servo/position (manual /teleop is not recorded), into /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/<time>/; never beside another recorder (race_diag_node, rosbag2_recorder*). Turn off with bringup record:=false.
++2026-11-11T15:55:42-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-155542
++2026-11-11T15:55:47-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 6.3 s after the algorithm appeared
++2026-11-11T16:02:58-08:00 INFO stopping the recording: no algorithm publishing for 3.0 s
++2026-11-11T16:02:59-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-155542 (437 s, bag 307 MB): no algorithm publishing for 3.0 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-155542
++2026-11-16T09:50:57-08:00 INFO auto_record ready: records a run while any node publishes /drive, /auto_map/drive, /auto_race/drive, /neural_racer/shadow_drive, /ackermann_cmd, /commands/motor/speed, /commands/servo/position (manual /teleop is not recorded), into /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/<time>/; never beside another recorder (race_diag_node, rosbag2_recorder*). Turn off with bringup record:=false.
++2026-11-16T09:50:58-08:00 INFO paused standby prepared -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261116-095058
++2026-11-16T09:51:55-08:00 INFO recording /gap_follow_node on /drive -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261116-095058
++2026-11-16T09:51:55-08:00 INFO recording live: /drive /joy /odom /scan are in the bag, 2.0 s after the algorithm appeared
++2026-11-16T09:51:56-08:00 INFO /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261116-095058: params_snapshot: started
++2026-11-16T09:52:41-08:00 INFO stopping the recording: no algorithm publishing for 3.0 s
++2026-11-16T09:52:42-08:00 INFO saved run /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261116-095058 (47 s, bag 32 MB): no algorithm publishing for 3.0 s. Analyse with: python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261116-095058
++2026-11-16T09:52:42-08:00 INFO paused standby prepared -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261116-095242

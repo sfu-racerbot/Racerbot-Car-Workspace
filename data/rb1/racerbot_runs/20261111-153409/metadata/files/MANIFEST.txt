@@ -1,0 +1,4 @@
+/home/racerbotcar-1/racerbot-ws/src/racerbot_car/cars/rb1/imu/car.yaml -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153409/metadata/files/car.yaml
+/home/racerbotcar-1/racerbot-ws/src/racerbot_car/cars/rb1/imu/calib/bno_calib.json -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153409/metadata/files/bno_calib.json
+/home/racerbotcar-1/racerbot-ws/src/racerbot_car/cars/rb1/imu/calib/bno_calib_run1_dyncal_on.json -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153409/metadata/files/bno_calib_run1_dyncal_on.json
+/home/racerbotcar-1/racerbot-ws/src/racerbot_car/cars/rb1/imu/calib/vesc_calib.json -> /home/racerbotcar-1/racerbot-ws/data/rb1/racerbot_runs/20261111-153409/metadata/files/vesc_calib.json

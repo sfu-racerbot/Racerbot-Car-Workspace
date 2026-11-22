@@ -1,0 +1,5 @@
+# Where the car stopped at the end of mapping (map frame, base_link).
+# race_launch.py start:=start_pose seeds the particle filter here.
+x: -13.3365
+y: 6.3964
+yaw: -0.3511

@@ -1,0 +1,8 @@
+repository: /home/racerbotcar-1/racerbot-ws/src/racerbot_a
+HEAD: 8ef1d8c3b0152259adce70cd8a6164625acc3916
+branch: main
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+?? src/pure_pursuit/
+
+# git submodule status

@@ -1,0 +1,7 @@
+diff --git a/src/racerbot_a b/src/racerbot_a
+index 8ef1d8c..d4a8346 160000
+--- a/src/racerbot_a
++++ b/src/racerbot_a
+@@ -1 +1 @@
+-Subproject commit 8ef1d8c3b0152259adce70cd8a6164625acc3916
++Subproject commit d4a83466930e09caedd4658a1e7c1fa059c0ab30
