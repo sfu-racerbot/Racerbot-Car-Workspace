@@ -12,6 +12,7 @@ notes on 2026-11-22.
    checkpoint commits.
 3. [evidence-log.md](evidence-log.md) — dated decisions and what each experiment did
    and did not show.
+4. [Turn-response handoff](turn-response.md) — Car 2's turning rate improved, but its lap time got worse. Keep both defaults.
 
 Then read the repository's own [CLAUDE.md](../../CLAUDE.md), [AGENTS.md](../../AGENTS.md)
 and [docs/architecture.md](../architecture.md) before touching driving code.

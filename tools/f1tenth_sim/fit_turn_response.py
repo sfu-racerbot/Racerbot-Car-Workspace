@@ -1,6 +1,6 @@
 """Fit a reduced-order Gym turn model on the frozen November development drives.
 
-See TURN_RESPONSE.md. Fit reads only development examples. Replay uses only
+See docs/ai-handoff/turn-response.md. Fit uses only development examples. Replay uses only
 commands and initial speed, not gyro or wheel observations.
 """
 import argparse
@@ -10,6 +10,7 @@ import hashlib
 import itertools
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from sim_fidelity.bootstrap import bootstrap
 
@@ -31,11 +32,28 @@ INPUT_HASH = {
 INITIAL = TurnResponse(1., 0., 4., .08)
 
 
+def flat_map(directory):
+    """Canonical clear floor: origin is 192 m from the boundary."""
+    from PIL import Image
+    directory = Path(directory)
+    image = np.full((768, 768), 255, dtype=np.uint8)
+    image[[0, -1], :] = image[:, [0, -1]] = 0
+    Image.fromarray(image).save(directory / 'flat.png')
+    (directory / 'flat_map.yaml').write_text(
+        'image: flat.png\nresolution: 0.5\norigin: [-192.0, -192.0, 0.0]\n'
+        'negate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n')
+    angles = np.linspace(0, 2*np.pi, 128, endpoint=False)
+    np.savetxt(directory / 'flat_centerline.csv', 100*np.c_[np.cos(angles), np.sin(angles)],
+               delimiter=',', header='x_m,y_m', comments='')
+    return str(directory.resolve() / 'flat')
+
+
 def blocks(directory, car, fit):
     for name, expected in INPUT_HASH.items():
         if hashlib.sha256((directory / name).read_bytes()).hexdigest() != expected:
             raise ValueError(f'unexpected canonical input: {name}')
-    key = lambda row: (row['car'], row['run'], row['b_ns'])
+    def key(row):
+        return row['car'], row['run'], row['b_ns']
     with (directory / 'blocks.csv').open() as f:
         starts = {key(r): float(r['initial_mps']) for r in csv.DictReader(f)
                   if r['car'] == car and r['status'] == 'accepted'
@@ -49,13 +67,30 @@ def blocks(directory, car, fit):
         raise ValueError('missing accepted block')
 
 
+def apply_response(plant, model):
+    """Study-only replacement for both stock yaw dynamics and external grip."""
+    if model is not None:
+        plant.profile = replace(plant.profile, grip_envelope=False)
+        plant.env.unwrapped.sim.dynamics_fn = make_dynamics(model)
+    return plant
+
+
+def study_calibration(car):
+    cal = calibration_for_car(car)
+    return with_floor('sfu_course_2026_11_11_rb2', cal) if car == 'rb2' else cal
+
+
+def frozen_model(path, car):
+    record = json.loads(path.read_text())
+    if record['car'] != car or record['development'] != sorted(DEV[car]):
+        raise ValueError('fit manifest does not match requested car')
+    return TurnResponse(**record['model'])
+
+
 def replay(track, cal, model, initial, rows):
     plant = make_plant(track, 0, calibration=cal, car_id=cal.car_id, max_laps=1000)
     try:
-        if model is not None:
-            # The response supplies its own saturation. Do not clamp steering twice.
-            plant.profile = replace(plant.profile, grip_envelope=False)
-            plant.env.unwrapped.sim.dynamics_fn = make_dynamics(model)
+        apply_response(plant, model)
         plant.reset(np.zeros((1, 3)), speeds=[initial])
         states = [plant.truth(0).copy()]
         if len(rows) != 480:
@@ -87,10 +122,12 @@ def fit_response(examples, wheelbase):
         weights.append(run)
     speed, steer, observed = map(np.asarray, (speed, steer, observed))
     valid = np.isfinite(observed)
+    if not valid.any():
+        raise ValueError('no eligible development gyro observations')
     ids = np.broadcast_to(np.array(weights)[:, None], valid.shape)[valid]
     # Equal run mass rather than weighting the longest drive most.
-    weight = np.array([1/np.sqrt(np.count_nonzero(ids == r)) for r in np.unique(ids)])
-    weight = weight[np.searchsorted(np.unique(ids), ids)]
+    _, inverse, counts = np.unique(ids, return_inverse=True, return_counts=True)
+    weight = 1 / np.sqrt(counts[inverse])
 
     def residual(p):
         gain, trim, limit, lag = p
@@ -112,34 +149,31 @@ def main():
     ap.add_argument('mode', choices=['fit', 'replay'])
     ap.add_argument('car', choices=DEV)
     ap.add_argument('frozen', type=Path, help='directory containing canonical v1 tables')
-    ap.add_argument('track', help='canonical empty-floor map path, without _map.yaml')
     ap.add_argument('output', type=Path)
     ap.add_argument('--model', type=Path, help='frozen fit JSON (omit for reference Gym)')
     args = ap.parse_args()
-    cal = calibration_for_car(args.car)
-    if args.car == 'rb2':
-        cal = with_floor('sfu_course_2026_11_11_rb2', cal)
+    if args.mode == 'fit' and args.model:
+        ap.error('fit does not accept a model')
+    with TemporaryDirectory() as directory:
+        run(args, flat_map(directory))
+
+
+def run(args, track):
+    cal = study_calibration(args.car)
     if args.mode == 'fit':
-        if args.model:
-            ap.error('fit does not accept a model')
-        examples = [(b[1], replay(args.track, cal, INITIAL, v, rows), rows)
+        examples = [(b[1], replay(track, cal, INITIAL, v, rows), rows)
                     for b, v, rows in blocks(args.frozen, args.car, True)]
         model = fit_response(examples, cal.wheelbase)
         with args.output.open('x') as f:
             json.dump(dict(car=args.car, development=sorted(DEV[args.car]), model=asdict(model)), f, indent=2)
             f.write('\n')
         return
-    model = None
-    if args.model:
-        record = json.loads(args.model.read_text())
-        if record['car'] != args.car or record['development'] != sorted(DEV[args.car]):
-            raise ValueError('fit manifest does not match requested car')
-        model = TurnResponse(**record['model'])
+    model = frozen_model(args.model, args.car) if args.model else None
     with args.output.open('x', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(('car', 'run', 'b_ns', 'step', 'body_forward_mps', 'body_yaw_rad_s'))
         for block, initial, rows in blocks(args.frozen, args.car, False):
-            states = replay(args.track, cal, model, initial, rows)[1:]
+            states = replay(track, cal, model, initial, rows)[1:]
             for step, s in enumerate(states):
                 writer.writerow((*block, step, s[3]*np.cos(s[6]), s[5]))
 

@@ -181,9 +181,15 @@ def solo_arguments(law, speed, lateral, laps, steering_limit, safety="map"):
 
 def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit, speed, lateral, law,
               grip_scale=None, grip_coupling=None, start_wheel_speed=None, understeer=None,
-              launch=None):
+              launch=None, turn_response=None):
     from pure_pursuit import racing_math
     cal = floor_calibration(floor, grip_scale, grip_coupling)
+    if turn_response is not None:
+        from fit_turn_response import apply_response, frozen_model
+        if (cal.car_id != 'rb2' or floor != 'sfu_course_2026_11_11_rb2'
+                or grip_scale is not None or grip_coupling is not None):
+            raise ValueError('turn-response lap comparison needs rb2 on its November 11 floor without grip overrides')
+        model = frozen_model(Path(turn_response), cal.car_id)
     rv.RACELINE_SOURCE = "plan"
     xy, profiled = racing_math.load_profiled_csv(line_csv)
     plan = rv.PathPlan(xy=np.asarray(xy, float), seg_len=racing_math.compute_segment_lengths(xy, closed=True),
@@ -197,6 +203,8 @@ def trace_run(track, floor, line_csv, start, seed, seconds, laps, steering_limit
 
     def wrapped(*a, **k):
         plant = make_plant(*a, **k)
+        if turn_response is not None:
+            apply_response(plant, model)
         step = plant.step
         if start_wheel_speed is not None:
             reset = plant.reset         # already moving: the wheels read true speed times the odometry scale
@@ -272,7 +280,7 @@ def check_profile_alone(args, line_xy):
             seed = args.first_seed + k
             cal, plan, trace, result = trace_run(args.track, args.floor, args.line, start, seed, args.seconds, laps,
                                                  args.steering_limit, args.speed, 99.0, args.law,
-                                                 args.grip_scale, args.grip_coupling)
+                                                 args.grip_scale, args.grip_coupling, turn_response=args.turn_response)
             row = summarise(cal, plan, trace, result, [])
             row.update(label=label, seed=seed)
             hit = bool(row["seed_result"]["contact"] > 0 or row["seed_result"]["collision"])
@@ -300,6 +308,7 @@ def parse_args(argv=None):
     ap.add_argument("--start-heading-error", type=float, default=0.0,
                     help="degrees left of the line's heading at --start-s")
     ap.add_argument("--seeds", type=int, default=6)
+    ap.add_argument("--turn-response", help="experimental rb2 turn-response manifest (offline comparison only)")
     ap.add_argument("--first-seed", type=int, default=12345)
     ap.add_argument("--seconds", type=float, default=80.0)
     ap.add_argument("--laps", type=int, default=3)
@@ -357,7 +366,7 @@ def main(argv=None) -> int:
                                              args.seconds, args.laps, args.steering_limit, args.speed,
                                              args.lateral, args.law, args.grip_scale, args.grip_coupling, start_wheel_speed,
                                              launch=dict(scale=args.launch_scale, distance=args.launch_distance,
-                                                         driven=args.launch_driven))
+                                                         driven=args.launch_driven), turn_response=args.turn_response)
         row = summarise(cal, plan, trace, result, arcs)
         row["seed"] = args.first_seed + k
         rows.append(row)

@@ -19,10 +19,9 @@ class TurnResponse:
     lag_s: float
 
     def __post_init__(self):
-        if not all(map(math.isfinite, (self.gain, self.trim_rad, self.lateral_limit_mps2, self.lag_s))):
-            raise ValueError("turn response parameters must be finite")
-        if self.gain <= 0 or self.lateral_limit_mps2 <= 0 or self.lag_s < .025 or abs(self.trim_rad) > .1:
-            raise ValueError("invalid gain, lateral limit, lag or trim")
+        if not (.6 <= self.gain <= 1.4 and abs(self.trim_rad) <= .04
+                and 1.5 <= self.lateral_limit_mps2 <= 10 and .025 <= self.lag_s <= .35):
+            raise ValueError("turn response outside the fitted parameter bounds")
 
 
 def steady_rate(speed, steer, wheelbase, gain, trim, limit):
