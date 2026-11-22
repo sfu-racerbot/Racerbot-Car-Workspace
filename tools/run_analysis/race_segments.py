@@ -186,7 +186,7 @@ def read_run(run):
 
 
 def segment(scan_t, scans, odom, joy, imu, course_m=COURSE_M):
-    """(grid seconds from the first scan, labels, stretches) for one run's arrays."""
+    """(step times from the first scan, wheel speed per step, labels, stretches) for one run's arrays."""
     t0 = scan_t[0]
     grid = np.arange(t0, scan_t[-1], STEP_S)
     order = np.argsort(odom[:, 0])
