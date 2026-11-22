@@ -32,6 +32,21 @@ Each cell is baseline → candidate, lower is better. Root mean square error (RM
 - Car 2: all seven eligible drives improved; mean turn-rate RMSE fell 44.1%.
 - Both models returned all 199,200 ticks across 415 accepted 12-second blocks. No October data entered this study.
 
+## Path and sideways motion against the club maps
+
+Replay the recorded steering and speed from the same trusted scan-to-map starts. Compare the final rear-axle position and direction over 1, 2 and 4 seconds. Slip is the angle between the car's heading and its estimated direction of travel at the assumed midpoint of the chassis.
+
+| Car | Horizon | Windows | Final position error (m) | Slip RMSE (rad) | Final heading error (rad) |
+|---|---:|---:|---:|---:|---:|
+| 1 | 1 s | 53 | 0.260 → 0.293 | 0.110 → 0.141 | 0.167 → 0.174 |
+| 1 | 2 s | 44 | 0.613 → 0.692 | 0.139 → 0.174 | 0.303 → 0.359 |
+| 1 | 4 s | 24 | 1.323 → 1.652 | 0.137 → 0.163 | 0.517 → 0.705 |
+| 2 | 1 s | 544 | 0.218 → 0.183 | 0.088 → 0.080 | 0.115 → 0.090 |
+| 2 | 2 s | 450 | 0.503 → 0.389 | 0.091 → 0.081 | 0.177 → 0.140 |
+| 2 | 4 s | 307 | 1.183 → 0.963 | 0.093 → 0.081 | 0.212 → 0.242 |
+
+These are window-weighted means, not independent lap trials. All seven evaluation drives contributed for Car 2; only 095242 contributed for Car 1. This cross-check uses the upstream driving commands (`/drive`), not the final commands used in the gyro benchmark. At four seconds Car 2 ended closer but pointed farther from the recorded heading.
+
 ## When the controller steered itself
 
 The unchanged race controller followed the rebuilt November 11 Car 2 map. Six paired seeds, three flying laps per seed, no contact for either model. Baseline mean lap: **10.046 s**. Candidate: **9.326 s**. The recorded comparison was **10.05 s**.

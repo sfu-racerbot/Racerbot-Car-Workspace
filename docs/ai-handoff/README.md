@@ -1,5 +1,10 @@
 # AI handoff: start here
 
+> **Who this is for:** an assistant or new club member taking over simulator work.
+> **Read first:** start with the team rules below.
+> **You'll be able to:** find the decisions, evidence and open work before changing anything.
+> **Time:** five minutes.
+
 This folder lets any AI assistant (or new club member) pick up the SFU Racerbot
 coordination work without prior context. It was exported from the team coordinator's
 notes on 2026-11-22.
@@ -24,7 +29,7 @@ and [docs/architecture.md](../architecture.md) before touching driving code.
 - Commits and PRs are signed as SFU Racerbot only: check author, committer and message
   trailers before every push.
 - Never commit run data (bags, recordings, intake inventories) or secrets.
-- Never weaken safety: keep the LB deadman, braking margins and test bounds as they are.
+- Never weaken safety: keep the LB deadman (the driver must hold LB to drive), braking margins and test bounds as they are.
 
 ## What was left out
 
