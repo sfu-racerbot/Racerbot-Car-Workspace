@@ -239,6 +239,25 @@ def blocked_loop_maps(tmp_path):
     return driving, line, expected
 
 
+@pytest.mark.parametrize('seed_rc', [None, (60, 5), (60, 100)])
+def test_narrowing_tries_cropped_loop_after_larger_side_room(tmp_path, seed_rc):
+    """Oracle: a cropped ring and larger filled room joined by a 15 cm neck."""
+    image = np.zeros((120, 180), np.uint8)
+    image[10:110, :60] = 255
+    image[25:95, 15:45] = 0
+    image[10:110, 80:170] = 255
+    image[58:61, 60:80] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    seed = None if seed_rc is None else pixel_to_world(spec, *seed_rc)
+    track = extract_track(spec, seed_xy=seed)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert ((rows >= 10) & (rows < 110) & (cols >= 0) & (cols < 60)).all()
+    np.testing.assert_array_equal(track.region, image == 255)
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert narrowed[60, 5] and narrowed[60, 100]
+    assert not narrowed[59, 70]
+
+
 def test_open_corridor_beats_smaller_border_loop(blocked_loop_maps):
     """Oracle: the barrier opens the corridor, not permission to select the exterior."""
     driving, _, expected = blocked_loop_maps

@@ -121,8 +121,8 @@ def world_to_pixel(spec: MapSpec, x, y):
     return row, col
 
 
-def _free_regions(free: np.ndarray, seed_rc=None):
-    """Free components, enclosed first then border-touching, largest first."""
+def _free_regions(free: np.ndarray, seed_rc=None, reference_rc=None):
+    """Free components ranked by reference votes, enclosure, then size."""
     import cv2
 
     count, labels = cv2.connectedComponents(free.astype(np.uint8), connectivity=4)
@@ -135,8 +135,10 @@ def _free_regions(free: np.ndarray, seed_rc=None):
         yield labels == label
         return
     sizes = np.bincount(labels.ravel())
+    votes = np.zeros(count, int) if reference_rc is None else np.bincount(
+        labels[reference_rc], minlength=count)
     border = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
-    for label in sorted(range(1, count), key=lambda i: (i in border, -sizes[i], i)):
+    for label in sorted(range(1, count), key=lambda i: (-votes[i], i in border, -sizes[i], i)):
         yield labels == label
 
 
@@ -192,7 +194,7 @@ def drop_narrow_gaps(region: np.ndarray, resolution: float, half_width: float) -
         return region
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
     opened = cv2.morphologyEx(region.astype(np.uint8), cv2.MORPH_OPEN, kernel)
-    region = driveable_region(opened.astype(bool))
+    region = opened.astype(bool)
     # Wall specks under SPECK_AREA_M2 inside free space (single-pixel SLAM
     # noise) would bend the line round themselves; fill them for this
     # purpose. Real obstacles are bigger (circularTrack's smallest box is
@@ -292,15 +294,20 @@ class ImportedTrack:
 
 def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
     last_error = None
+    reference = None if seed_rc is None else (np.array([seed_rc[0]]), np.array([seed_rc[1]]))
     for region in _free_regions(spec.free, seed_rc):
         try:
             narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
-            island = find_island(narrowed)
-            pixels = centerline_pixels(narrowed, island)
+            for candidate in _free_regions(narrowed, reference_rc=reference):
+                try:
+                    island = find_island(candidate)
+                    pixels = centerline_pixels(candidate, island)
+                except ValueError as exc:
+                    last_error = exc
+                    continue
+                return region, pixels
         except ValueError as exc:
             last_error = exc
-            continue
-        return region, pixels
     raise ValueError("free space is not a loop: no usable race loop after narrowing") from last_error
 
 
