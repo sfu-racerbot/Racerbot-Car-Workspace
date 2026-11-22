@@ -24,8 +24,9 @@ and [docs/architecture.md](../architecture.md) before touching driving code.
 
 ## The rules that matter most
 
-- Work on an isolated branch and open a pull request; never merge, deploy or run the
-  physical car without the owner's explicit go-ahead.
+- Work on an isolated branch and open a pull request. Vera reviews and merges club PRs;
+  merge them as squash merges only (a regular merge commit is authored by the Devin app).
+- No training run, hardware test or deployment without the owner's explicit sign-off.
 - Commits and PRs are signed as SFU Racerbot only: check author, committer and message
   trailers before every push.
 - Never commit run data (bags, recordings, intake inventories) or secrets.

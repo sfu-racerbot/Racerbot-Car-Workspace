@@ -1,23 +1,28 @@
-# Project state (as of 2026-11-22)
+# Project state (as of 2026-11-22, after the review batch)
 
-Snapshot of open pull requests, held work and pushed checkpoints. Nothing here is merged
-or approved for the physical car. Re-check every PR and branch on GitHub before acting.
+The owner handed PR review and merging to Vera on 2026-11-22. Re-check every PR and branch
+on GitHub before acting: this is a snapshot.
 
-## Open pull requests
+## Merged on 2026-11-22
 
-- https://github.com/sfu-racerbot/racerbot-docs/pull/54 | Vera guides | Open, verified onboarding v2 988181a7; SFU Racerbot author but unwanted coauthor and banner. No merge or history edits. Held pending authorship, not ready to merge.
-- https://github.com/sfu-racerbot/racerbot-docs/pull/55 | Vera guides | Open, verified November guide d47d2b1d; same attribution hold.
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/97 | Gazebo mapped-course integration, not completed laps or a common held-out comparison; quota stopped further work. Batch review only.
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/98 | MuJoCo stock model, native motion and Lichtblick odometry/IMU/TF; no stock LiDAR map validation. The 0.495 vs 0.222 m/s wheel-proxy comparison is fit data only. Batch review only.
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/92 | Latest unpublished review artifacts: corrected five-real-run player, rebuild and both players. None of 36 real run dirs had an internal odom interval over 0.5 s; dropout behavior independently tested with synthetic case. PR unchanged. The held review now carries the real player.
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/95 | Tight-course verdict, paired evidence. Four tight layouts, 108 matched pairs, identical command streams; change never triggered at 133,185 selections, 0.000 s/lap benefit. All 324 laps per arm finished, no contacts or timeouts; two separate Levine failures per geometry persist. Next: attribute time loss from existing traces before any distinct candidate. Held review updated.
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/92 | Run Visualizer | Published build: five real logs in Chromium and 53 tests; bridges missing odometry. Separate local-only patch: leaves trajectory and measured speed blank across the synthetic 4–8 s gap, preserves recorded commands, marks distance incomplete. Continuous control 5.0 m; 50 Python + 5 Node tests passed. Corrected synthetic replay (private link) ; local patch (private link) ; offline example (private link) ; tests (private link) . No commit or push. All 10 existing commits include Devin coauthor; audit (private link) | On hold
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/93 | Sim Fidelity | open; reported gain sweep fixed on 317236f with 16 focused tests passing; published commit coauthor credit conflicts with owner preference | On hold
-- https://github.com/sfu-racerbot/racerbot-docs/pull/51 | Sim Fidelity | open; stop timing vs distance guide; Racerbot Docs checked the raw PR body: bot banner and session link, in addition to published commit credit | On hold for batch review
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/95 | Gap Sprint | open; Spielberg gain on rb2 over six original matched seeds: 1.719 s/lap within documented-mount geometry vs 1.218 s/lap within pinned geometry. Both arms were slower in absolute time with documented mount. 24/24 three-lap runs finished contact-free; minimum sampled clearance 0.130 m. Two separate Levine controls: both arms stalled on pinned geometry and contacted on documented geometry. Four other tracks did not improve in earlier tests. No physical test, PR unchanged, published commits retain coauthor credit. (private link) ; (private link) | On hold for batch review
-- https://github.com/sfu-racerbot/racerbot-docs/pull/53 | Gap Sprint | open; benchmark guide and stress-test limitations; coauthor credit plus bot banner and session link in raw PR body per Racerbot Docs | On hold for batch review
-- https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/94 | Neural Racer | open; offline evaluator only, not a deployable correction; 50,670 pairs in 35 drives, steering error fell 3.9% on 34,146 later-day samples (not blind), worse below 1 m/s, 0/12 finished for each driver | four club-authored commits also credit Devin; Devin Review passed | On hold
-- https://github.com/sfu-racerbot/racerbot-docs/pull/52 | Neural Racer | open; guide agrees with corrected scorecard | two club-authored commits also credit Devin; bot banner and session link in raw PR body per Racerbot Docs; Devin Review passed | On hold
+Workspace:
+- [#100](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/100) calibrated physics in the ROS bridge (opt-in, stock stays default), then [#101](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/101) Car 2's measured LiDAR mount.
+- [#102](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/102) offline run player (replaces #92), [#103](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/103) read-only Lichtblick viewer, [#104](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/104) this handoff folder, [#105](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/105) offline RL racer package.
+- [#107](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/107) (`ecc92ec`), [#108](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/108) SLAM-measured calibration (rb2 speed scales accepted, tyre fits rejected), [#109](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/109) Neural Racer diagnosis and calibrated retraining setup behind a sign-off gate (replaces #106).
+- [#110](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/110) calibrated wall contact on contact-map tracks, [#111](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/111) turn-response study ([turn-response.md](turn-response.md)); both cars keep their defaults.
+
+Docs: [56](https://github.com/sfu-racerbot/racerbot-docs/pull/56), [57](https://github.com/sfu-racerbot/racerbot-docs/pull/57), [58](https://github.com/sfu-racerbot/racerbot-docs/pull/58), [59](https://github.com/sfu-racerbot/racerbot-docs/pull/59), [64](https://github.com/sfu-racerbot/racerbot-docs/pull/64) and [65](https://github.com/sfu-racerbot/racerbot-docs/pull/65). Website: [#29](https://github.com/sfu-racerbot/racerbot-website/pull/29).
+
+Closed as duplicates: workspace #92 and #106, docs 51 to 55.
+
+## Still open
+
+- [#91](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/91) Neural Racer shadow model, swept-path braking cap and flank creep. Needs its own review because it changes the safety wrapper.
+- [#93](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/93), [#94](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/94) and [#95](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/95), and the docs that describe them: [60](https://github.com/sfu-racerbot/racerbot-docs/pull/60) (#93), [61](https://github.com/sfu-racerbot/racerbot-docs/pull/61) (#91 and #94) and [62](https://github.com/sfu-racerbot/racerbot-docs/pull/62) (#95). Merge each doc after its workspace PR.
+- Follow-up: `slam_replay.py` should write `free_thresh` 0.196.
+- Older open PRs not reviewed in this batch: workspace #46, #47, #55, #84, #96, #97, #98, #99; docs #40, #63.
+
+The sections below are the coordinator's earlier snapshot, kept for its evidence notes.
 
 ## Held for the owner's batch review
 
