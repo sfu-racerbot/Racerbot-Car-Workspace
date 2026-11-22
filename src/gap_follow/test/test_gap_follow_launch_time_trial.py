@@ -36,6 +36,7 @@ def test_off_it_sets_nothing_and_leaves_opponent_awareness_on():
     nodes, _includes, ctx = _launch()
     params = _node_params(_gap_node(nodes), ctx)
     assert 'aim_depth_bias' not in params
+    assert 'open_aim_min_width' not in params
     assert 'max_lateral_accel' not in params
     assert params['enable_opponent_awareness'] is True
 
@@ -45,6 +46,7 @@ def test_on_it_sets_the_time_trial_values():
     params = _node_params(_gap_node(nodes), ctx)
     # oracle: spec -- docs/gap-follow.md#speed-on-the-real-course-2026-10-30.
     assert params['aim_depth_bias'] == 1.0
+    assert params['open_aim_min_width'] == 1.24
     assert params['max_lateral_accel'] == 3.0
 
 

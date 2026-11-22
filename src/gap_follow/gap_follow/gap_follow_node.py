@@ -94,6 +94,7 @@ class GapFollowNode(Node):
         # Aim from the gap's midpoint (0) toward its deepest beam (1):
         # gap_logic.aim_within_gap. 0 is the classic midpoint.
         self.declare_parameter('aim_depth_bias', 0.0)
+        self.declare_parameter('open_aim_min_width', 0.0)
         # The same, for a fallback gap: wide and shallow, so its midpoint can
         # point at the outer wall of a bend.
         self.declare_parameter('aim_depth_bias_fallback', 0.0)
@@ -440,6 +441,7 @@ class GapFollowNode(Node):
         self.fallback_min_gap_distance = float(
             self.get_parameter('fallback_min_gap_distance').value)
         self.aim_depth_bias = float(self.get_parameter('aim_depth_bias').value)
+        self.open_aim_min_width = float(self.get_parameter('open_aim_min_width').value)
         self.aim_depth_bias_fallback = float(
             self.get_parameter('aim_depth_bias_fallback').value)
         self.gap_switch_margin = float(
@@ -2376,6 +2378,8 @@ class GapFollowNode(Node):
         if not (math.isfinite(self.steering_gain_speed_ref)
                 and self.steering_gain_speed_ref >= 0.0):
             raise ValueError('steering_gain_speed_ref must be finite and non-negative')
+        if not (math.isfinite(self.open_aim_min_width) and self.open_aim_min_width >= 0.0):
+            raise ValueError('open_aim_min_width must be finite and non-negative')
         for name in ('aim_depth_bias', 'aim_depth_bias_fallback'):
             value = getattr(self, name)
             if not (math.isfinite(value) and 0.0 <= value <= 1.0):
@@ -2691,7 +2695,8 @@ class GapFollowNode(Node):
         )
         target = gap_logic.aim_within_gap(
             processed, gap_start, gap_end, beam_angles,
-            self.aim_depth_bias_fallback if used_fallback else self.aim_depth_bias)
+            self.aim_depth_bias_fallback if used_fallback else self.aim_depth_bias,
+            open_aim_min_width=self.open_aim_min_width, max_range=self.max_range)
         near_bearing = gap_logic.near_gap_bearing(
             processed, gap_start, gap_end, beam_angles, self.anticipation_near_depth)
         return (processed, closest_dist, gap_start, gap_end, used_fallback, target,

@@ -82,6 +82,9 @@ gap_follow_node:
     # cars around. time_trial:=true sets 1.0 for one car against the clock:
     # docs/gap-follow.md#speed-on-the-real-course-2026-10-30.
     aim_depth_bias: 0.0
+    # Minimum width (m of arc at the scan range cap) to center the aim
+    # inside one band of equally deep beams. Zero keeps the normal aim.
+    open_aim_min_width: 0.0
     # The same for a fallback gap, which is wide and shallow: its midpoint can
     # point at the outer wall of a bend. Simulator only.
     aim_depth_bias_fallback: 1.0
