@@ -53,20 +53,21 @@ def ring():
 # --- trajectory parity with the referee ----------------------------------------------------
 
 @pytest.mark.skipif(not fidelity.gym_available(), reason='needs the pinned gym: tools/f1tenth_sim/setup.sh')
-def test_trajectory_matches_fidelity_plant(arena):
+@pytest.mark.parametrize('car_id', ['rb1', 'rb2'])
+def test_trajectory_matches_fidelity_plant(arena, car_id, monkeypatch, request):
     """10 s of steering and speed commands through FidelityPlant ('car' profile)
     and through this sim, from the same start: same ST state within 2 cm and
     0.5 deg (plan, Phase 3). Physics only: walls affect neither."""
+    monkeypatch.setenv('RACERBOT_CAR', car_id)
     fidelity.ensure_paths()
     import run_validation as rv
-    cal = rv.CALIBRATION
     plant = rv.make_plant('Spielberg', 1, 0)
+    request.addfinalizer(plant.close)
     start = np.array([[0.0, 0.0, 0.3]])
     plant.reset(start)
     spec, _, pool = arena
-    p = CarParams(steering_max_left=cal.steering_max_left, steering_max_right=cal.steering_max_right,
-                  speed_max=cal.speed_max, speed_min=cal.speed_min)
-    sim = BatchedRaceSim(1, 1, pool, car=p, randomize=False, wrapper_cfg=_open_wrapper())
+    sim = BatchedRaceSim(1, 1, pool, randomize=False, wrapper_cfg=_open_wrapper())
+    p = sim.car
     # put our CoG at the ring's edge point, heading along it; compare displacements
     k = 0
     pose = np.array([[spec.centre[k, 0] - p.lr * math.cos(math.pi / 2), spec.centre[k, 1] - p.lr * math.sin(math.pi / 2), math.pi / 2]])
@@ -102,6 +103,18 @@ def _open_wrapper():
     return WrapperConfig(max_speed=10.0, max_steering_angle=1.0, max_steering_rate=1e6,
                          max_lateral_accel=1e6, max_braking_decel=1e6, reserve_distance=0.0,
                          braking_latency_sec=0.0, max_invalid_fraction=1.0)
+
+
+def test_randomized_speed_delays_follow_the_base_car(ring):
+    from dataclasses import replace
+    spec, _, pool = ring
+    n = 32
+    # Deliberately different from either production car: catch a fixed FIFO or sampling range.
+    p = replace(CarParams(), speed_delay_ticks=5)
+    sim = BatchedRaceSim(n, 1, pool, car=p, seed=1)
+    level = Level(slot=0, poses=np.array([[*spec.centre[0], math.pi / 2]]), start_idx=np.array([0]))
+    sim.reset_envs(range(n), [level] * n)
+    assert set(sim.speed_delay.delay.flatten().tolist()) == {4, 5, 6}
 
 
 # --- LiDAR -----------------------------------------------------------------------------------
@@ -169,7 +182,7 @@ def test_ray_box_closed_form():
 
 def test_other_cars_appear_in_the_scan_but_not_yourself(ring):
     spec, _, pool = ring
-    sim = BatchedRaceSim(1, 2, pool, randomize=False)
+    sim = BatchedRaceSim(1, 2, pool, car=CarParams(), randomize=False)
     k = 0
     tangent = math.pi / 2
     p0 = spec.centre[k]

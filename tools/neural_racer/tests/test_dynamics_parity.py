@@ -17,7 +17,7 @@ import torch
 
 from neural_racer_train import fidelity
 from neural_racer_train.gpu_sim import actuation, dynamics
-from neural_racer_train.gpu_sim.params import BatchParams, CarParams
+from neural_racer_train.gpu_sim.params import BatchParams, CarParams, from_calibration
 
 pytestmark = pytest.mark.skipif(not fidelity.gym_available(),
                                 reason='needs the pinned gym: run tools/f1tenth_sim/setup.sh')
@@ -107,17 +107,16 @@ def test_servo_matches_sim_fidelity():
         assert ours == pytest.approx(servo.velocity(t, c), abs=1e-6)
 
 
-def test_speed_loop_matches_plant():
+@pytest.mark.parametrize('car_id', ['rb1', 'rb2'])
+def test_speed_loop_matches_plant(car_id):
     """Oracle: FidelityPlant._measured_speed_loop's body, called with a stub
     `self` carrying the same calibration and gym parameters."""
     fidelity.ensure_paths()
     from types import SimpleNamespace
     from sim_fidelity.plant import FidelityPlant
-    p = CarParams()
+    p = from_calibration(car_id)
     stub = SimpleNamespace(
-        calibration=SimpleNamespace(
-            speed_loop_accel_gain=p.speed_loop_accel_gain, speed_loop_accel_max=p.speed_loop_accel_max,
-            speed_loop_brake_gain=p.speed_loop_brake_gain, speed_loop_brake_max=p.speed_loop_brake_max),
+        calibration=fidelity.calibration_module().calibration_for_car(car_id),
         params=SimpleNamespace(a_max=p.a_max, v_max=p.gym_v_max, v_min=p.gym_v_min))
     bp = BatchParams.constant(p, 1, 'cpu')
     rng = np.random.default_rng(4)
