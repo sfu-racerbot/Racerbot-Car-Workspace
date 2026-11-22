@@ -340,6 +340,64 @@ def rasterize(spec: TrackSpec, resolution: float = RESOLUTION) -> RasterTrack:
     return RasterTrack(spec, occ, sdf, (float(lo[0]), float(lo[1])), resolution, lap_length(c), digest)
 
 
+def _free_cells(image: np.ndarray, free_thresh: float, negate: int) -> np.ndarray:
+    """ROS map_server's trinary rule: free where occupancy probability < free_thresh;
+    unknown cells count as walls."""
+    p = image.astype(np.float64) / 255.0
+    occ_prob = p if negate else 1.0 - p
+    return occ_prob < free_thresh
+
+
+def from_gym_map(map_dir, name: str, resolution: float = RESOLUTION) -> RasterTrack:
+    """A club course from tools/f1tenth_sim/maps (its SLAM walls, not a redrawn
+    corridor) as a training RasterTrack: the map cropped to its centreline plus
+    MARGIN, at the pool's resolution, with the same SDF convention as rasterize().
+    Widths come from casting along each centreline normal to the first wall."""
+    from pathlib import Path
+    from PIL import Image
+    import yaml
+    map_dir = Path(map_dir)
+    meta = yaml.safe_load((map_dir / f'{name}_map.yaml').read_text())
+    res = float(meta['resolution'])
+    if abs(res - resolution) > 1e-6:
+        raise ValueError(f'{name}: map resolution {res} m, the pool stores {resolution} m')
+    img = np.asarray(Image.open(map_dir / meta['image']).convert('L'))[::-1]   # row 0 at origin_y
+    free_full = _free_cells(img, float(meta.get('free_thresh', 0.196)), int(meta.get('negate', 0)))
+    ox, oy = float(meta['origin'][0]), float(meta['origin'][1])
+    raw = np.loadtxt(map_dir / f'{name}_centerline.csv', delimiter=',', skiprows=1, usecols=(0, 1))
+    centre = resample_closed(raw)
+    lo = np.floor((centre.min(axis=0) - MARGIN - np.array([ox, oy])) / res).astype(int)
+    hi = np.ceil((centre.max(axis=0) + MARGIN - np.array([ox, oy])) / res).astype(int)
+    lo = np.maximum(lo, 0)
+    hi = np.minimum(hi, [free_full.shape[1], free_full.shape[0]])
+    free = free_full[lo[1]:hi[1], lo[0]:hi[0]].copy()
+    free[[0, -1], :] = False
+    free[:, [0, -1]] = False
+    origin = (ox + lo[0] * res, oy + lo[1] * res)
+    nrm = normals(centre)
+
+    def cast(sign):
+        out = np.zeros(len(centre))
+        for k, (c, n) in enumerate(zip(centre, nrm)):
+            d = 0.0
+            while d < 3.0:
+                x, y = c + sign * (d + res / 2) * n
+                col, row = int((x - origin[0]) / res), int((y - origin[1]) / res)
+                if not (0 <= row < free.shape[0] and 0 <= col < free.shape[1]) or not free[row, col]:
+                    break
+                d += res / 2
+            out[k] = d
+        return out
+    spec = TrackSpec(kind=f'club:{name}', seed=-1, centre=centre, w_left=cast(1.0), w_right=cast(-1.0))
+    occ = ~free
+    outside = ndimage.distance_transform_edt(free) * res - res / 2
+    inside = ndimage.distance_transform_edt(occ) * res - res / 2
+    sdf = np.where(free, outside, -inside).astype(np.float32)
+    digest = hashlib.sha256(occ.tobytes() + np.array([res, *origin], np.float64).tobytes()
+                            + np.array(occ.shape, np.int64).tobytes()).hexdigest()[:16]
+    return RasterTrack(spec, occ, sdf, origin, res, lap_length(centre), digest)
+
+
 def start_grid(spec: TrackSpec, n_cars: int, rng, stagger: float = 1.0):
     """Grid start (team decision 2026-10-23): cars in a line along the lap,
     `stagger` m apart (a 0.535 m body plus a gap: 0.6 m left bodies

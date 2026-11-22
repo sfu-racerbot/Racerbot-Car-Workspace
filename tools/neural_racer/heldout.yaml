@@ -3,6 +3,9 @@ real:
 - levine_blocked
 - levine_obs
 - circular_obs
+# Club SLAM courses held out of the calibrated retraining setup (retrain_calibrated.yaml).
+club_holdout:
+- car2_course_2026_11_11
 procedural:
 - name: heldout_00
   seed: 1000000000

@@ -15,7 +15,7 @@ import time
 import numpy as np
 import torch
 
-from neural_racer_train import common, matchmaking
+from neural_racer_train import common, matchmaking, retrain
 from neural_racer_train.archive import Archive
 from neural_racer_train.learn import Runner, SeatAssignment, aux_loss, aux_targets, opponent_actions
 from neural_racer_train.model import Critic, PolicyNet, gaussian_logp, squash
@@ -70,7 +70,8 @@ def train(args, stop) -> bool:
     archive = Archive(args.archive or (args.run_dir.parent / 'archive'))
     rates = matchmaking.WinRates()
     runner = Runner(args.num_envs, args.max_cars, dev, args.seed, pool_slots=args.pool_slots,
-                    cpu_workers=args.cpu_workers)
+                    cpu_workers=args.cpu_workers,
+                    **retrain.runner_kwargs(args))
     sim, E, T = runner.sim, args.num_envs, args.rollout
     seats = SeatAssignment(E, args.max_cars, dev)
     log = common.MetricLog(args.run_dir)
@@ -96,7 +97,8 @@ def train(args, stop) -> bool:
         runner.refresh_tracks()
         entries = [e.entry_id for e in archive.entries()]
         mains = [e for e in entries if e.startswith('main0/') or e.startswith('main1')]
-        refs = matchmaking.sample_opponents(args.role, args.opponents, entries, rates, rng, main_ids=mains)
+        refs = matchmaking.sample_opponents(args.role, args.opponents, entries, rates, rng, main_ids=mains,
+                                            scripted=retrain.scripted_share(args))
         sources, stacked, names = build_sources(refs, archive, policy, rng)
         seats.assign(list(range(E)), len(sources), gen)        # regroup every rollout; GRU state restarts
         h0 = h.clone()

@@ -139,8 +139,12 @@ class RaceResult:
         return vars(self)
 
 
-def race(track: str, drivers: dict, seed: int, laps: int = 1, timeout_s: float = 120.0) -> RaceResult:
-    """drivers: {name: factory(plant) -> driver}. Grid start in the given order."""
+def race(track: str, drivers: dict, seed: int, laps: int = 1, timeout_s: float = 120.0,
+         on_tick=None) -> RaceResult:
+    """drivers: {name: factory(plant) -> driver}. Grid start in the given order.
+
+    on_tick(step, i, truth, progress_m, lap_count), if given, sees each car
+    after every tick it is still racing; it observes only and cannot steer."""
     rv = _rv()
     names = list(drivers)
     n = len(names)
@@ -187,6 +191,9 @@ def race(track: str, drivers: dict, seed: int, laps: int = 1, timeout_s: float =
                 if not stopped[i] and obs_[f'agent_{i}']['collision']:
                     stopped[i] = contact[i] = True
                     fault[i] = _at_fault(i, truths, n)
+                if on_tick is not None and not stopped[i] and finish[i] is None:
+                    on_tick(step, i, np.asarray(plant.truth(i), dtype=np.float64), progress[i],
+                            float(info['lap_counts'][i]))
                 if finish[i] is None and float(info['lap_counts'][i]) >= laps:
                     finish[i] = float(info['sim_time'])
             if all(stopped[i] or finish[i] is not None for i in range(n)):

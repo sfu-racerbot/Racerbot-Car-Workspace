@@ -15,7 +15,7 @@ from collections import deque
 import torch
 
 from neural_racer import observation as obs
-from neural_racer_train import common, matchmaking
+from neural_racer_train import common, matchmaking, retrain
 from neural_racer_train.learn import Runner, SeatAssignment, aux_loss, aux_targets, opponent_actions
 from neural_racer_train.model import PolicyNet, TeacherNet, squash
 from neural_racer_train.ppo import PPOConfig
@@ -55,7 +55,8 @@ def train(args, stop) -> bool:
     total_iters = max(int(args.steps / max(args.iteration_steps, 1)), 1)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=total_iters * 100)
     runner = Runner(args.num_envs, args.max_cars, dev, args.seed, pool_slots=args.pool_slots,
-                    cpu_workers=args.cpu_workers)
+                    cpu_workers=args.cpu_workers,
+                    **retrain.runner_kwargs(args))
     sim, E, T = runner.sim, args.num_envs, args.seq
     sources = [('scripted', name) for name in matchmaking.SCRIPTED]
     seats = SeatAssignment(E, args.max_cars, dev)
