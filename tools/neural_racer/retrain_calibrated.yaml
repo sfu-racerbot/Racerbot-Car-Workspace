@@ -1,0 +1,23 @@
+# Calibrated retraining setup for Neural Racer (arXiv 2504.02420's recipe:
+# narrow randomization around each car's fit, steering and motor lag, scripted
+# opponents). Training stages refuse this file until signed_off_by is set.
+#
+#   python -m neural_racer_train.retrain --config retrain_calibrated.yaml   # dry run, no training
+#
+# One job per car: each run randomizes around that car's own fitted calibration.
+car: rb2
+randomization: fitted          # gpu_sim/params.py FITTED_RANDOMIZATION; 'wide' is the old spread
+# Club SLAM courses (tools/f1tenth_sim/maps) pinned in the training pool beside
+# the procedural tracks. The holdout is declared in heldout.yaml (club_holdout)
+# and is never trained on.
+club_tracks:
+  - car1_course_2026_10_26
+  - course_2026_10_30
+  - car2_course_2026_11_06a
+  - car2_course_2026_11_06b
+# Share of league matches against scripted opponents (gap_follow, pure pursuit,
+# blocker, erratic, parked): starts at base, fades to floor as the policy beats them.
+scripted_share:
+  base: 0.30
+  floor: 0.10
+signed_off_by: null            # Vera's sign-off; null keeps every training stage refusing

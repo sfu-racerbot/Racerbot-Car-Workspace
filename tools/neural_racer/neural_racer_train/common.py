@@ -39,6 +39,8 @@ def base_parser(description: str) -> argparse.ArgumentParser:
     ap.add_argument('--num-envs', type=int, default=16384)
     ap.add_argument('--log-every', type=int, default=10, help='updates between metric copies to the host')
     ap.add_argument('--checkpoint-every', type=int, default=50)
+    ap.add_argument('--retrain-config', type=Path, default=None,
+                    help='a calibrated retraining setup (retrain_calibrated.yaml); refused until signed off')
     return ap
 
 

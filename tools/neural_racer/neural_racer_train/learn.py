@@ -25,6 +25,17 @@ V_CAP_RANGE = (1.0, 6.37)                  # Phase 10's ladder, up to the firmwa
 IMU_DROPOUT_EPISODES = 0.05
 
 
+CLUB_MAP_DIR = Path(__file__).resolve().parents[2] / 'f1tenth_sim' / 'maps'
+
+
+def heldout_real() -> set:
+    """Real courses never trained on: heldout.yaml's own, plus any club holdout it declares."""
+    if not HELDOUT_FILE.exists():
+        return set()
+    data = yaml.safe_load(HELDOUT_FILE.read_text()) or {}
+    return set(data.get('real', [])) | set(data.get('club_holdout', []))
+
+
 def heldout_digests() -> set:
     if not HELDOUT_FILE.exists():
         return set()
@@ -102,7 +113,8 @@ class Runner:
 
     def __init__(self, num_envs: int, max_cars: int, device, seed: int, *, pool_slots: int = 64,
                  canvas=(1024, 1024), cpu_workers: int = 0, solo: bool = False, initial_tracks: int = 8,
-                 warmup_levels: int = 64):
+                 warmup_levels: int = 64, car_id: str | None = None, randomization: str = 'wide',
+                 club_tracks: tuple = ()):
         self.E, self.C, self.device = num_envs, max_cars, device
         self.warmup_levels = warmup_levels
         self.rng = np.random.default_rng(seed)
@@ -114,9 +126,19 @@ class Runner:
         self.slot_digest = {}
         self.free_slots = list(range(pool_slots))
         self.env_level = [None] * num_envs
+        self.pinned = set()
+        held_real = heldout_real()
+        for name in club_tracks:
+            if name in held_real:
+                raise RuntimeError(f'held-out course {name} requested for training')
+            raster = tracks.from_gym_map(CLUB_MAP_DIR, name)
+            if not self._insert(raster):
+                raise RuntimeError(f'club course {name} does not fit the {canvas} canvas')
+            self.pinned.add(next(s for s, d in self.slot_digest.items() if d == raster.digest))
         for k in range(min(initial_tracks, pool_slots)):
             self._insert(_generate(int(self.rng.integers(HELDOUT_SEED_BASE))))
-        self.sim = BatchedRaceSim(num_envs, max_cars, self.pool, device=device, seed=seed)
+        self.sim = BatchedRaceSim(num_envs, max_cars, self.pool, device=device, seed=seed,
+                                  car_id=car_id, randomization=randomization)
         self.env_replay = torch.zeros(num_envs, dtype=torch.bool, device=device)
         self.score_sum = np.zeros(num_envs)
         self.score_n = np.zeros(num_envs)
@@ -131,7 +153,7 @@ class Runner:
             slot = self.free_slots.pop()
         else:
             busy = {self.levels.levels[i].meta['slot'] for i in self.env_level if i in self.levels.levels}
-            cand = [s for s in self.slot_digest if s not in busy]
+            cand = [s for s in self.slot_digest if s not in busy and s not in self.pinned]
             if not cand:
                 return False
             score = {s: max((r.score for r in self.levels.levels.values() if r.meta.get('slot') == s), default=0.0)

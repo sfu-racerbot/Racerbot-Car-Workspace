@@ -3,7 +3,8 @@
 # resumable segments. Run from the workspace root on a FIR login node.
 #
 #   tools/neural_racer/slurm/fir_league_submit.sh --account def-<pi> --run <name> \
-#       --init <student checkpoint> [--segments 6] [--time 12:00:00] [--dry-run]
+#       --init <student checkpoint> [--segments 6] [--time 12:00:00] [--car rb2] \
+#       [--retrain-config <signed-off retrain_calibrated.yaml>] [--dry-run]
 #
 # Every role shares <run>/archive, so snapshots from any role become opponents
 # for all of them. Segments are chained with afterany: a segment that fails or
@@ -12,7 +13,7 @@
 set -euo pipefail
 
 ROLES=(main0 main1_mlp main_exploiter league_exploiter)
-ACCOUNT="" RUN="" INIT="" SEGMENTS=6 TIME="12:00:00" DRY_RUN=0 NUM_ENVS=""
+ACCOUNT="" RUN="" INIT="" SEGMENTS=6 TIME="12:00:00" DRY_RUN=0 NUM_ENVS="" CAR="rb2" RETRAIN_CONFIG=""
 
 while (( $# )); do
     case "$1" in
@@ -23,6 +24,8 @@ while (( $# )); do
         --time)     TIME="$2"; shift 2 ;;
         --dry-run)  DRY_RUN=1; shift ;;
         --num-envs) NUM_ENVS="$2"; shift 2 ;;
+        --car)      CAR="$2"; shift 2 ;;
+        --retrain-config) RETRAIN_CONFIG="$2"; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -39,10 +42,11 @@ for role in "${ROLES[@]}"; do
     for (( segment = 1; segment <= SEGMENTS; segment++ )); do
         cmd=(sbatch --parsable --account "${ACCOUNT}" --time "${TIME}"
              --job-name "nr-${RUN}-${role}"
-             --export "ALL,NR_ROLE=${role},NR_REPO=${REPO}")
+             --export "ALL,NR_ROLE=${role},NR_REPO=${REPO},RACERBOT_CAR=${CAR}")
         [[ -n "${prev}" ]] && cmd+=(--dependency "afterany:${prev}")
         cmd+=("${HERE}/fir_train.sbatch" league_learner "${RUN}" --init-from "${INIT}")
         [[ -n "${NUM_ENVS}" ]] && cmd+=(--num-envs "${NUM_ENVS}")
+        [[ -n "${RETRAIN_CONFIG}" ]] && cmd+=(--retrain-config "${RETRAIN_CONFIG}")
         if (( DRY_RUN )); then
             echo "${cmd[*]}"
             prev="DRYRUN_${role}_${segment}"

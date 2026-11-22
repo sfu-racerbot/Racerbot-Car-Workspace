@@ -21,7 +21,9 @@ from neural_racer.safety_wrapper import WrapperConfig
 from neural_racer_train.gpu_sim import actuation, contact, imu as imu_mod, lidar, race as race_mod
 from neural_racer_train.gpu_sim import observation_torch as ot
 from neural_racer_train.gpu_sim.dynamics import rk4, st_derivative
-from neural_racer_train.gpu_sim.params import CONTROL_DT, INTEGRATOR_DT, BatchParams, CarParams
+from neural_racer_train.gpu_sim.params import (CONTROL_DT, INTEGRATOR_DT, SPEED_DELAY_JITTER,
+                                             RANDOMIZATION_PROFILES, BatchParams, CarParams,
+                                             from_calibration, max_delay_ticks)
 from neural_racer_train.gpu_sim.safety_torch import SafetyTorch, nominal_angles
 
 SUBSTEPS = int(round(CONTROL_DT / INTEGRATOR_DT))       # 5
@@ -52,12 +54,18 @@ class Level:
 
 class BatchedRaceSim:
 
-    def __init__(self, num_envs: int, max_cars: int, pool, car: CarParams = CarParams(),
+    def __init__(self, num_envs: int, max_cars: int, pool, car: CarParams | None = None,
                  device='cpu', seed: int = 0, randomize: bool = True, laps: int = 3,
                  max_seconds: float = 90.0, cast_limit: float = 12.0, cast_iters: int = 48,
                  reward_cfg: race_mod.RewardConfig = race_mod.RewardConfig(),
-                 wrapper_cfg: WrapperConfig = WrapperConfig(max_speed=6.37)):
+                 wrapper_cfg: WrapperConfig = WrapperConfig(max_speed=6.37),
+                 car_id: str | None = None, randomization: str = 'wide'):
         E, C = num_envs, max_cars
+        if randomization not in RANDOMIZATION_PROFILES:
+            raise ValueError(f'unknown randomization profile {randomization!r}')
+        if car is None:
+            car = from_calibration(car_id)
+        self.randomization = randomization
         self.E, self.C, self.pool, self.car, self.device = E, C, pool, car, device
         self.gen = torch.Generator(device=device).manual_seed(seed)   # on-device: no host copies per tick
         self.randomize = randomize
@@ -95,9 +103,14 @@ class BatchedRaceSim:
     def _make_delays(self):
         E, C, d = self.E, self.C, self.device
         per_car = lambda v: v.view(E, 1).expand(E, C)     # noqa: E731
-        self.steer_delay = actuation.DelayLine((E, C), 4, per_car(self.p.steer_delay_ticks), device=d)
-        self.speed_delay = actuation.DelayLine((E, C), 3, per_car(self.p.speed_delay_ticks), device=d)
-        self.imu_delay = actuation.DelayLine((E, C, 3), 2, per_car(self.p.imu_delay_ticks), device=d)
+        most = lambda name: max_delay_ticks(self.car, name, self.randomization)   # noqa: E731
+        self.steer_delay = actuation.DelayLine((E, C), max(4, most('steer_delay_ticks')),
+                                               per_car(self.p.steer_delay_ticks), device=d)
+        self.speed_delay = actuation.DelayLine((E, C), max(self.car.speed_delay_ticks + SPEED_DELAY_JITTER,
+                                                           most('speed_delay_ticks')),
+                                              per_car(self.p.speed_delay_ticks), device=d)
+        self.imu_delay = actuation.DelayLine((E, C, 3), max(2, most('imu_delay_ticks')),
+                                             per_car(self.p.imu_delay_ticks), device=d)
 
     def _pc(self):
         """BatchParams viewed (E, 1), to broadcast against (E, C)."""
@@ -113,7 +126,7 @@ class BatchedRaceSim:
         ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         n = len(levels)
         if self.randomize:
-            fresh = BatchParams.randomized(self.car, n, self.gen, self.device)
+            fresh = BatchParams.randomized(self.car, n, self.gen, self.device, self.randomization)
         else:
             fresh = BatchParams.constant(self.car, n, self.device)
         self.p.assign(ids, fresh)

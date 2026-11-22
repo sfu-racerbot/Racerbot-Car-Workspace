@@ -11,7 +11,7 @@ import time
 
 import torch
 
-from neural_racer_train import common
+from neural_racer_train import common, retrain
 from neural_racer_train.model import Critic, TeacherNet, gaussian_logp, squash
 from neural_racer_train.learn import Runner
 from neural_racer_train.ppo import PPOConfig, gae, normalize, policy_loss, value_loss
@@ -30,7 +30,8 @@ def train(args, stop) -> bool:
     dev = args.device
     cfg = PPOConfig()
     runner = Runner(args.num_envs, 1, dev, args.seed, pool_slots=args.pool_slots,
-                    cpu_workers=args.cpu_workers, solo=True)
+                    cpu_workers=args.cpu_workers, solo=True,
+                    **retrain.runner_kwargs(args))
     actor, critic = TeacherNet().to(dev), Critic().to(dev)
     opt = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=cfg.lr)
     log = common.MetricLog(args.run_dir)

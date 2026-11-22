@@ -44,7 +44,8 @@ def measured_speed_loop(command, measured, p):
     gym's pid_accl produce this car's fitted acceleration for `command`."""
     diff = command - measured
     accel_up = torch.minimum(p.speed_loop_accel_gain * diff, p.speed_loop_accel_max)
-    accel_dn = torch.maximum(p.speed_loop_brake_gain * diff, -p.speed_loop_brake_max)
+    excess = (-diff - p.speed_loop_brake_deadband).clamp_min(0)
+    accel_dn = -torch.minimum(p.speed_loop_brake_gain * excess, p.speed_loop_brake_max)
     gain_up = 10.0 * p.a_max / p.gym_v_max
     gain_dn = 10.0 * p.a_max / (-p.gym_v_min)
     out = measured + torch.where(diff >= 0.0, accel_up / gain_up, accel_dn / gain_dn)

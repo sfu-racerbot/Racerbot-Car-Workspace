@@ -20,6 +20,7 @@ from neural_racer_train import common, tracks
 from neural_racer_train.learn import HELDOUT_FILE, HELDOUT_SEED_BASE
 
 REAL = ('room_2026_07_27', 'levine_blocked', 'levine_obs', 'circular_obs')
+CLUB_HOLDOUT = ('car2_course_2026_11_11',)     # the race-day course: never trained on
 N_PROCEDURAL = 20
 MAP_DIR = common.REPO / '.sim' / 'neural_racer_heldout'
 
@@ -51,7 +52,7 @@ def build() -> dict:
         write_gym_map(r, MAP_DIR, name_of(k))
         entries.append({'name': name_of(k), 'seed': seed, 'digest': r.digest,
                         'lap_length_m': round(r.lap_length, 2), 'kind': r.spec.kind})
-    data = {'real': list(REAL), 'procedural': entries,
+    data = {'real': list(REAL), 'club_holdout': list(CLUB_HOLDOUT), 'procedural': entries,
             'note': 'Never train on these. Regenerate with python -m neural_racer_train.heldout.'}
     HELDOUT_FILE.write_text(yaml.safe_dump(data, sort_keys=False))
     return data
