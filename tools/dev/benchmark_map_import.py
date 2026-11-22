@@ -26,6 +26,7 @@ import sys
 import types
 
 import numpy as np
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 IMPORTER = 'tools/f1tenth_sim/track_import.py'
@@ -170,6 +171,20 @@ def positive(value):
     return number
 
 
+def map_hashes(*yaml_paths):
+    hashes = {}
+    for path in yaml_paths:
+        path = Path(path).expanduser().resolve()
+        metadata = yaml.safe_load(path.read_text())
+        image = metadata.get('image') if isinstance(metadata, dict) else None
+        if not isinstance(image, str) or not image.strip():
+            raise ValueError(f'{path}: image must be a nonempty path')
+        for source in (path, (path.parent / image).resolve()):
+            key = str(source.relative_to(ROOT)) if source.is_relative_to(ROOT) else str(source)
+            hashes[key] = hashlib.sha256(source.read_bytes()).hexdigest()
+    return hashes
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--car', required=True, choices=['rb1', 'rb2'])
@@ -183,8 +198,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.laps < 1 or len(set(args.seeds)) != len(args.seeds) or min(args.seeds) < 0:
         ap.error('laps must be positive and seeds must be unique nonnegative integers')
+    args.map_yaml = args.map_yaml.expanduser().resolve()
+    args.centerline_from = args.centerline_from.expanduser().resolve()
+    try:
+        hashes = map_hashes(args.map_yaml, args.centerline_from)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        ap.error(str(exc))
     output = args.output.expanduser().resolve()
-    output.mkdir(parents=True, exist_ok=False)
     sys.path[:0] = [str(ROOT / 'tools/f1tenth_sim'), str(ROOT / 'tools')]
     import eval_gap
     import run_validation as rv
@@ -201,9 +221,11 @@ def main(argv=None):
     for label, module in modules.items():
         spec = module.load_map(args.map_yaml)
         tracks[label] = module.extract_track(spec, centerline_from=fixed_line_map)
-        paths[label] = module.write_gym_track(tracks[label], output / label, 'nov9').with_suffix('')
     if not np.array_equal(tracks['before'].centerline, tracks['after'].centerline):
         raise RuntimeError('comparison requires identical centrelines')
+    output.mkdir(parents=True, exist_ok=False)
+    for label, module in modules.items():
+        paths[label] = module.write_gym_track(tracks[label], output / label, 'nov9').with_suffix('')
     spec = tracks['before'].spec
     old = GridGeometry(tracks['before'].region, spec.resolution, spec.origin_x, spec.origin_y)
     calibration = calibration_for_car(args.car)
@@ -212,10 +234,9 @@ def main(argv=None):
                     git_status=git('status', '--short'), seeds=args.seeds, laps=args.laps,
                     timeout_s=args.timeout, calibration=asdict(calibration), gap_params=params,
                     pure_params=rv.PURE_PURSUIT_PARAMS,
-                    hashes={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                            for p in (args.map_yaml, args.map_yaml.parent / 'map.pgm', args.centerline_from,
-                                      ROOT / 'tools/f1tenth_sim/eval_gap.py', ROOT / 'tools/f1tenth_sim/gap_mirror.py',
-                                      ROOT / 'tools/f1tenth_sim/run_validation.py', ROOT / 'tools/f1tenth_sim/sim_fidelity/plant.py')},
+                    hashes={**hashes, **{str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+                            for p in (ROOT / 'tools/f1tenth_sim/eval_gap.py', ROOT / 'tools/f1tenth_sim/gap_mirror.py',
+                                      ROOT / 'tools/f1tenth_sim/run_validation.py', ROOT / 'tools/f1tenth_sim/sim_fidelity/plant.py')}},
                     importer_hashes={k: hashlib.sha256(v.encode()).hexdigest() for k, v in sources.items()})
     (output / 'metadata.json').write_text(json.dumps(metadata, indent=2, default=str) + '\n')
     results = []

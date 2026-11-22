@@ -1,5 +1,6 @@
 """Independent geometry and observer checks; python3 -m pytest tools/dev/tests/."""
 import argparse
+import hashlib
 import importlib.util
 from pathlib import Path
 import sys
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import yaml
 
 PATH = Path(__file__).resolve().parents[1] / 'benchmark_map_import.py'
 SPEC = importlib.util.spec_from_file_location('benchmark_map_import', PATH)
@@ -117,3 +119,44 @@ def test_invalid_timeouts(value):
 
 def test_positive_timeout():
     assert bench.positive('0.025') == .025
+
+
+@pytest.mark.parametrize('relative', [False, True])
+def test_map_hashes_resolve_yaml_image_outside_workspace(tmp_path, monkeypatch, relative):
+    """Oracle: hashes cover the exact YAML/image bytes, not a hard-coded map.pgm."""
+    image = tmp_path / 'club.png'
+    image.write_bytes(b'club map image bytes')
+    source = tmp_path / 'club.yaml'
+    source.write_text(yaml.safe_dump({'image': image.name}))
+    monkeypatch.chdir(tmp_path.parent)
+    path = Path(tmp_path.name) / source.name if relative else source
+    assert bench.map_hashes(path) == {
+        str(source): hashlib.sha256(source.read_bytes()).hexdigest(),
+        str(image): hashlib.sha256(image.read_bytes()).hexdigest(),
+    }
+
+
+def test_map_hashes_default_relative_path():
+    """Oracle: relative/absolute workspace inputs identify the same bytes."""
+    hashes = bench.map_hashes(Path(bench.MAP))
+    assert hashes == bench.map_hashes(bench.ROOT / bench.MAP)
+    assert bench.MAP in hashes
+    assert bench.MAP.replace('map.yaml', 'map.pgm') in hashes
+
+
+@pytest.mark.parametrize('metadata,error', [
+    ({'image': 'absent.png'}, 'No such file'),
+    ({}, 'image must be a nonempty path'),
+    ({'image': None}, 'image must be a nonempty path'),
+    ([], 'image must be a nonempty path'),
+])
+def test_invalid_map_fails_before_output(tmp_path, metadata, error, capsys):
+    """Invariant: missing/malformed inputs are rejected before creating exports."""
+    source = tmp_path / 'map.yaml'
+    source.write_text(yaml.safe_dump(metadata))
+    output = tmp_path / 'output'
+    with pytest.raises(SystemExit) as exc:
+        bench.main(['--car', 'rb2', '--map-yaml', str(source), '--output', str(output)])
+    assert exc.value.code == 2
+    assert error in capsys.readouterr().err
+    assert not output.exists()
