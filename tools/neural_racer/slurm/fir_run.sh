@@ -4,6 +4,7 @@
 #   tools/neural_racer/slurm/fir_run.sh setup              once, on a login node
 #   tools/neural_racer/slurm/fir_run.sh shakedown          1 h GPU job: does everything work on an H100?
 #   tools/neural_racer/slurm/fir_run.sh benchmark          30 min: how many envs fill the GPU
+#   tools/neural_racer/slurm/fir_run.sh retrain-check      checks NR_RETRAIN_CONFIG, its sign-off, and dry-runs it
 #   tools/neural_racer/slurm/fir_run.sh teacher [seeds]    Stage 1 (default seeds 0 1 2)
 #   tools/neural_racer/slurm/fir_run.sh distill <seed>     Stage 2, from that teacher seed
 #   tools/neural_racer/slurm/fir_run.sh league             Stage 3, all four roles
@@ -21,6 +22,13 @@ REPO="$(cd "${HERE}/../../.." && pwd)"
 source "${HERE}/fir.conf"
 RUNS="${NR_RUNS_ROOT:-${SCRATCH:-/scratch/${USER}}/neural_racer/runs}"
 DRY="${NR_DRY_RUN:-0}"
+NR_CAR="${NR_CAR:-rb2}"
+JOB_ENV="NR_REPO=${REPO},NR_PYTHON_MODULE=${NR_PYTHON_MODULE},RACERBOT_CAR=${NR_CAR}"
+RETRAIN_ARGS=()
+if [[ -n "${NR_RETRAIN_CONFIG:-}" ]]; then
+    RETRAIN_CONFIG="$(cd "${REPO}" && realpath -m "${NR_RETRAIN_CONFIG}")"
+    RETRAIN_ARGS=(--retrain-config "${RETRAIN_CONFIG}")
+fi
 STEP="${1:-help}"
 shift || true
 
@@ -45,7 +53,7 @@ chain() {  # chain <label> <sbatch args...>: NR_SEGMENTS resumable segments
     local prev="" jid
     for (( k = 1; k <= NR_SEGMENTS; k++ )); do
         jid="$(sb ${prev:+--dependency=afterany:${prev}} --time="${NR_TIME}" \
-               --export="ALL,NR_REPO=${REPO},NR_PYTHON_MODULE=${NR_PYTHON_MODULE}${NR_EXTRA_EXPORT:-}" "$@")"
+               --export="ALL,${JOB_ENV}${NR_EXTRA_EXPORT:-}" "$@")"
         echo "${label} segment ${k}/${NR_SEGMENTS}: job ${jid}"
         prev="${jid}"
     done
@@ -60,7 +68,13 @@ login_python() {
     set +u
     module load StdEnv/2023 "${NR_PYTHON_MODULE}" >/dev/null 2>&1 || true
     set -u
-    PYTHONPATH="${REPO}/tools/neural_racer" "${venv}/bin/python" "$@"
+    RACERBOT_CAR="${NR_CAR}" PYTHONPATH="${REPO}/tools/neural_racer" "${venv}/bin/python" "$@"
+}
+
+need_signed_retrain() {  # a set NR_RETRAIN_CONFIG must be valid, for NR_CAR, and signed off
+    (( ${#RETRAIN_ARGS[@]} )) || return 0
+    login_python -m neural_racer_train.retrain --config "${RETRAIN_CONFIG}" --check-only \
+        --car "${NR_CAR}" --require-signoff
 }
 
 case "${STEP}" in
@@ -69,38 +83,47 @@ case "${STEP}" in
 
     shakedown)
         need_account
-        jid="$(sb --export="ALL,NR_REPO=${REPO},NR_PYTHON_MODULE=${NR_PYTHON_MODULE}" "${HERE}/fir_shakedown.sbatch")"
+        jid="$(sb --export="ALL,${JOB_ENV}" "${HERE}/fir_shakedown.sbatch")"
         echo "shakedown: job ${jid}. When it ends: less ${REPO}/nr-shakedown-${jid}.out (summary at the bottom)" ;;
 
     benchmark)
         need_account
         name="bench-$(date +%Y%m%d-%H%M)"
-        jid="$(sb --time=00:30:00 --export="ALL,NR_REPO=${REPO},NR_PYTHON_MODULE=${NR_PYTHON_MODULE}" \
+        jid="$(sb --time=00:30:00 --export="ALL,${JOB_ENV}" \
                "${HERE}/fir_train.sbatch" benchmark "${name}")"
         echo "benchmark: job ${jid}. Result: ${RUNS}/${name}/solo/benchmark.json -> put chosen.num_envs into fir.conf" ;;
 
+    retrain-check)
+        [[ -n "${NR_RETRAIN_CONFIG:-}" ]] || { echo "NR_RETRAIN_CONFIG is empty in ${HERE}/fir.conf" >&2; exit 2; }
+        login_python -m neural_racer_train.retrain --config "${RETRAIN_CONFIG}" --car "${NR_CAR}" ;;
+
     teacher)
         need_account
+        need_signed_retrain
         seeds=("$@"); (( ${#seeds[@]} )) || seeds=(0 1 2)
         for s in "${seeds[@]}"; do
             NR_EXTRA_EXPORT=",NR_ROLE=seed${s}" chain "teacher seed ${s}" --job-name="nr-teacher-s${s}" \
-                "${HERE}/fir_train.sbatch" teacher "${NR_TEACHER_RUN}" --seed "${s}" --num-envs "${NR_NUM_ENVS}"
+                "${HERE}/fir_train.sbatch" teacher "${NR_TEACHER_RUN}" --seed "${s}" --num-envs "${NR_NUM_ENVS}" \
+                "${RETRAIN_ARGS[@]}"
         done ;;
 
     distill)
         need_account
+        need_signed_retrain
         seed="${1:?usage: fir_run.sh distill <teacher seed>  (pick the best from: fir_run.sh status)}"
         ckpt="${RUNS}/${NR_TEACHER_RUN}/seed${seed}/checkpoints/latest.pt"
         [[ "${DRY}" == "1" || -f "${ckpt}" ]] || { echo "no teacher checkpoint at ${ckpt}" >&2; exit 2; }
         chain "distill" --job-name=nr-distill "${HERE}/fir_train.sbatch" distill "${NR_DISTILL_RUN}" \
-            --teacher "${ckpt}" --num-envs "${NR_NUM_ENVS}" ;;
+            --teacher "${ckpt}" --num-envs "${NR_NUM_ENVS}" "${RETRAIN_ARGS[@]}" ;;
 
     league)
         need_account
+        need_signed_retrain
         init="${RUNS}/${NR_DISTILL_RUN}/solo/checkpoints/student_final.pt"
         [[ "${DRY}" == "1" || -f "${init}" ]] || { echo "no student at ${init}: distill first" >&2; exit 2; }
         args=(--account "${NR_ACCOUNT}" --run "${NR_LEAGUE_RUN}" --init "${init}" --segments "${NR_SEGMENTS}"
-              --time "${NR_TIME}" --num-envs "${NR_NUM_ENVS}")
+              --time "${NR_TIME}" --num-envs "${NR_NUM_ENVS}" --car "${NR_CAR}")
+        (( ${#RETRAIN_ARGS[@]} )) && args+=(--retrain-config "${RETRAIN_CONFIG}")
         [[ "${DRY}" == "1" ]] && args+=(--dry-run)
         (cd "${REPO}" && "${HERE}/fir_league_submit.sh" "${args[@]}") ;;
 
@@ -151,5 +174,5 @@ EOF
         ;;
 
     *)
-        sed -n '2,15p' "$0" ;;
+        sed -n '2,16p' "$0" ;;
 esac

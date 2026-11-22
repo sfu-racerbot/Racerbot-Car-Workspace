@@ -208,3 +208,16 @@ def test_diagnosis_reports_where_a_run_failed():
     runs = [_run('neural', lambda s: 2.0, finish=False), _run('gap_follow', lambda s: 2.0)]
     f = diagnose.summarize(runs)['c']['drivers']['neural']['failures']
     assert len(f) == 1 and f[0]['kind'] == 'contact' and f[0]['s'] == pytest.approx(20.0, abs=0.1)
+
+
+def test_the_cli_gate_fir_run_uses(tmp_path, capsys):
+    assert retrain.main(['--config', SETUP, '--check-only']) == 0
+    assert retrain.main(['--config', SETUP, '--check-only', '--require-signoff']) == 3
+    cfg = yaml.safe_load(open(SETUP).read())
+    cfg['signed_off_by'] = 'Vera'
+    p = tmp_path / 'setup.yaml'
+    p.write_text(yaml.safe_dump(cfg))
+    assert retrain.main(['--config', str(p), '--check-only', '--require-signoff', '--car', cfg['car']]) == 0
+    other = 'rb1' if cfg['car'] == 'rb2' else 'rb2'
+    assert retrain.main(['--config', str(p), '--check-only', '--require-signoff', '--car', other]) == 2
+    assert 'RACERBOT_CAR' in capsys.readouterr().err

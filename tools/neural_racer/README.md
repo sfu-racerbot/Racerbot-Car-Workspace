@@ -76,6 +76,8 @@ RACERBOT_CAR=rb1 python3 -m neural_racer_train.diagnose \
 python3 -m neural_racer_train.retrain --config retrain_calibrated.yaml   # dry run: checks, builds the sim, steps it, prints the plan
 ```
 
+To train with it on Fir, follow [Calibrated retraining](slurm/README.md#calibrated-retraining-retrain_calibratedyaml) in `slurm/README.md`.
+
 ## The stages, in order
 
 | Stage | Command (`python -m neural_racer_train.<stage> --run-dir DIR ...`) | Plan phase |
