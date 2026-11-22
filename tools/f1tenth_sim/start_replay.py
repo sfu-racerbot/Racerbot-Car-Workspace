@@ -262,7 +262,7 @@ def summarise(cal, plan, trace, result, arcs_wanted):
                 np.r_[plan.speed, plan.speed[0]])) for a in arcs_wanted}, start_arc=float(s[0]), start_offset=float(off[0]))
 
 
-def check_profile_alone(args, line_xy):
+def check_profile_alone(args, line_xy, *, turn_response=None):
     """The planned profile driven without the online cap's help: standing starts round the line, then flying laps.
 
     Every run is cap-off (online lateral 99). Prints per run the worst right and left offset and any contact;
@@ -280,7 +280,7 @@ def check_profile_alone(args, line_xy):
             seed = args.first_seed + k
             cal, plan, trace, result = trace_run(args.track, args.floor, args.line, start, seed, args.seconds, laps,
                                                  args.steering_limit, args.speed, 99.0, args.law,
-                                                 args.grip_scale, args.grip_coupling, turn_response=args.turn_response)
+                                                 args.grip_scale, args.grip_coupling, turn_response=turn_response)
             row = summarise(cal, plan, trace, result, [])
             row.update(label=label, seed=seed)
             hit = bool(row["seed_result"]["contact"] > 0 or row["seed_result"]["collision"])
@@ -343,7 +343,7 @@ def main(argv=None) -> int:
     if args.check_profile_alone:
         from pure_pursuit import racing_math
         line_xy, _ = racing_math.load_profiled_csv(args.line)
-        code, runs = check_profile_alone(args, line_xy)
+        code, runs = check_profile_alone(args, line_xy, turn_response=args.turn_response)
         if args.out:
             Path(args.out).write_text(json.dumps(runs, indent=1))
         return code
