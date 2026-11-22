@@ -300,6 +300,24 @@ def test_clipped_free_seed_projects_to_surviving_loop(tmp_path):
         extract_track(narrow, seed_xy=pixel_to_world(narrow, 50, 20))
 
 
+def test_clipped_seed_on_pinch_requires_intended_loop(tmp_path):
+    """Oracle: two rectangular loops separate when their 15 cm pinch is closed."""
+    image = np.zeros((100, 200), np.uint8)
+    image[10:90, 10:90] = 255
+    image[30:70, 30:70] = 0
+    image[10:90, 110:190] = 255
+    image[30:70, 130:170] = 0
+    image[49:52, 90:110] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert spec.free[50, 100]
+    assert not narrowed[:, 100].any()
+    assert narrowed[50, 20] and narrowed[50, 120]
+    seed = pixel_to_world(spec, 50, 100)
+    with pytest.raises(ValueError, match='seed lies on a pinch.*move.*intended loop'):
+        extract_track(spec, seed_xy=seed, centerline_from=spec)
+
+
 def test_open_corridor_beats_smaller_border_loop(blocked_loop_maps):
     """Oracle: the barrier opens the corridor, not permission to select the exterior."""
     driving, _, expected = blocked_loop_maps

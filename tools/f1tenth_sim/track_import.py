@@ -295,6 +295,8 @@ class ImportedTrack:
 
 
 def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
+    import cv2
+
     last_error = None
     for region in _free_regions(spec.free, seed_rc):
         try:
@@ -304,6 +306,10 @@ def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
                 survivors = np.argwhere(narrowed & region)
                 if not len(survivors):
                     raise ValueError("seed component has no free space after narrowing")
+                count, _ = cv2.connectedComponents((narrowed & region).astype(np.uint8), connectivity=4)
+                if count > 2:
+                    raise ValueError("seed lies on a pinch between connected regions; "
+                                     "move it into the intended loop")
                 nearest = np.argmin(((survivors - seed_rc) ** 2).sum(axis=1))
                 narrowed_seed = tuple(survivors[nearest])
             for candidate in _free_regions(narrowed, narrowed_seed):
@@ -317,7 +323,9 @@ def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
         except ValueError as exc:
             last_error = exc
     source = "free space" if seed_rc is None else f"seed component at {seed_rc}"
-    raise ValueError(f"{source} is not a loop: no usable race loop after narrowing") from last_error
+    raise ValueError(
+        f"{source} is not a loop: no usable race loop after narrowing: {last_error}"
+    ) from last_error
 
 
 def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
