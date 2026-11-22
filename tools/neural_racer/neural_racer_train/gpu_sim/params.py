@@ -123,6 +123,39 @@ RANDOMIZATION = {
 # Steering-gain error of +/-10% (car 1's gain was 30% off until 2026-10-21):
 STEER_GAIN_ERROR = 0.10
 
+# Narrow randomization around the selected car's own fit (arXiv 2504.02420's
+# recipe): every spread is centred on the calibrated value, friction included,
+# and both actuator lags jitter one tick around the measured delay.
+FITTED_RANDOMIZATION = {
+    'speed_loop_accel_gain': ('rel', 0.05), 'speed_loop_accel_max': ('rel', 0.05),
+    'speed_loop_brake_gain': ('rel', 0.05), 'speed_loop_brake_max': ('rel', 0.05),
+    'lidar_noise_std': ('rel', 0.10), 'lidar_dropout_rate': ('rel', 0.30),
+    'mu': ('rel', 0.10),
+    'C_Sf': ('rel', 0.10), 'C_Sr': ('rel', 0.10), 'h': ('rel', 0.10), 'I': ('rel', 0.10),
+    'servo_gain': ('rel', 0.05),
+    'steer_delay_ticks': ('tick_jitter', 1), 'speed_delay_ticks': ('tick_jitter', SPEED_DELAY_JITTER),
+    'lidar_offset_x': ('abs', 0.02), 'imu_offset_x': ('abs', 0.02),
+    'imu_gyro_noise': ('rel', 0.30), 'imu_accel_noise': ('rel', 0.30),
+    'imu_delay_ticks': ('tick_jitter', 1),
+}
+FITTED_STEER_GAIN_ERROR = 0.03
+# name -> (spreads, steering-gain error)
+RANDOMIZATION_PROFILES = {
+    'wide': (RANDOMIZATION, STEER_GAIN_ERROR),
+    'fitted': (FITTED_RANDOMIZATION, FITTED_STEER_GAIN_ERROR),
+}
+
+
+def max_delay_ticks(p: 'CarParams', name: str, profile: str = 'wide') -> int:
+    """The longest delay a profile can draw for `name`, so delay lines are sized to hold it."""
+    kind, spread = RANDOMIZATION_PROFILES[profile][0].get(name, ('fixed', 0))
+    nominal = int(getattr(p, name))
+    if kind == 'ticks':
+        return max(nominal, int(spread[1]))
+    if kind == 'tick_jitter':
+        return nominal + int(spread)
+    return nominal
+
 
 class BatchParams:
     """Every CarParams field as an (E,) tensor, plus derived fields."""
@@ -142,9 +175,10 @@ class BatchParams:
         return out
 
     @classmethod
-    def randomized(cls, p: CarParams, n: int, gen: torch.Generator, device='cpu'):
+    def randomized(cls, p: CarParams, n: int, gen: torch.Generator, device='cpu', profile: str = 'wide'):
+        spreads, gain_error = RANDOMIZATION_PROFILES[profile]
         out = cls.constant(p, n, device)
-        for name, (kind, spread) in RANDOMIZATION.items():
+        for name, (kind, spread) in spreads.items():
             base = getattr(out, name)
             u = torch.rand(n, generator=gen, device=gen.device).to(device)
             if kind == 'rel':
@@ -161,7 +195,7 @@ class BatchParams:
                     lo, hi = spread
                 val = torch.floor(lo + (hi - lo + 1) * u).clamp(lo, hi)
             setattr(out, name, val)
-        out.steer_gain = 1.0 + STEER_GAIN_ERROR * (2 * torch.rand(n, generator=gen, device=gen.device).to(device) - 1)
+        out.steer_gain = 1.0 + gain_error * (2 * torch.rand(n, generator=gen, device=gen.device).to(device) - 1)
         out._derive()
         return out
 

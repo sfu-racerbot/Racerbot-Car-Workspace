@@ -44,6 +44,38 @@ PYTHONPATH=.torchenv python3 -m pytest tools/neural_racer/tests/ -v
 
 **If it doesn't:** the parity tests need the pinned gym. Run `tools/f1tenth_sim/setup.sh` once.
 
+## Club-map diagnosis and the calibrated retraining setup
+
+**Where the current model (`a0eef2af0a3757b6`) loses time or fails.** `neural_racer_train.diagnose` races it and `gap_follow` solo on the club's SLAM courses, each on the profile of the car that mapped it, and records what the safety wrapper did every tick. Measured 2026-11-22 (3 laps, seeds 0-2, cap 5.05 m/s, mean lap):
+
+| Course | Car | Neural | gap_follow | What limits the model |
+|---|---|---|---|---|
+| car1_course_2026_10_26 | rb1 | 3/3, 11.90 s | 3/3, 12.09 s | its own speed into the last corner (27-30 m) |
+| room_2026_07_27 | rb1 | 3/3, 6.63 s | 3/3, 7.45 s | cornering cap, 30 % of ticks |
+| course_2026_10_30 | rb2 | 3/3, 20.77 s | 3/3, 21.37 s | its own speed at 29-31 m and 38-41 m (1.2-1.5 m/s) |
+| car2_course_2026_11_06a | rb2 | **0/3, stuck at 6.3 m** | 3/3, 14.82 s | braking cap holds 0 m/s while the network asks 0.9 m/s |
+| car2_course_2026_11_06b | rb2 | 3/3, 10.08 s | 3/3, 10.47 s | its own speed at 4-6 m |
+| car2_course_2026_11_11 (race day) | rb2 | **0/3, stuck at 5.9 m** | 3/3, 14.83 s | braking cap holds 0 m/s while the network asks 0.5 m/s |
+
+Where it finishes it is faster than `gap_follow`; most remaining loss is the network's own slow corner entries. It never finishes the two tight car 2 courses: it slows into a narrow section until the swept-path braking cap reads no room and stops it, and the policy never steers to a clear arc. That needs retraining on those geometries, not a wrapper change.
+
+```bash
+RACERBOT_CAR=rb1 python3 -m neural_racer_train.diagnose \
+    --model ../../src/neural_racer/models/a0eef2af0a3757b6 --out /tmp/nr_diag   # report.md, summary.json, runs.json
+```
+
+**The retraining setup** is `retrain_calibrated.yaml` (arXiv 2504.02420's recipe):
+
+- **Car:** the batched simulator is built on the selected car's own calibration (`from_calibration(car_id)`), one run per car.
+- **Narrow randomization** (`randomization: fitted`): friction, tyre stiffness, CoG height and inertia within ±10 % of that car's fit, servo gain ±5 %, steering-gain error ±3 %, steering, speed-loop and IMU lag one tick either side of the measured delay. `wide` keeps the old spread (friction 0.40-1.10).
+- **Club courses:** four club SLAM courses are pinned in the training pool with their real walls (`tracks.from_gym_map`). `heldout.yaml`'s `club_holdout` keeps the race-day course out of training; the pool refuses it.
+- **Scripted opponents:** league matches against the scripted pool start at a 30 % share and fade to 10 % (was 15 % to 3 %).
+- **Sign-off gate:** `teacher`, `distill` and `league_learner` take the file with `--retrain-config` and refuse it until `signed_off_by` is set. Nothing trains by default.
+
+```bash
+python3 -m neural_racer_train.retrain --config retrain_calibrated.yaml   # dry run: checks, builds the sim, steps it, prints the plan
+```
+
 ## The stages, in order
 
 | Stage | Command (`python -m neural_racer_train.<stage> --run-dir DIR ...`) | Plan phase |

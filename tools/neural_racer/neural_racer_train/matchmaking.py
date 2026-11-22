@@ -56,23 +56,24 @@ def scripted_share(p_scripted: float, base: float = 0.15, floor: float = 0.03) -
     return max(floor, min(base, base * (1.0 - p_scripted) / 0.5))
 
 
-def role_mix(role: str, p_scripted: float) -> dict:
-    """Shares of matches by source for a role."""
+def role_mix(role: str, p_scripted: float, scripted: tuple = (0.15, 0.03)) -> dict:
+    """Shares of matches by source for a role. scripted = (base, floor) of the scripted share."""
     if role.startswith('main_exploiter'):
         return {'mains': 1.0}
     if role.startswith('league_exploiter'):
         return {'pfsp_var': 0.9, 'uniform': 0.1}
-    sc = scripted_share(p_scripted)
-    return {'self': 0.35, 'pfsp': 0.40 + (0.15 - sc), 'scripted': sc, 'uniform': 0.10}
+    sc = scripted_share(p_scripted, *scripted)
+    return {'self': 0.35, 'pfsp': 0.55 - sc, 'scripted': sc, 'uniform': 0.10}
 
 
-def archive_probabilities(role: str, archive_ids: list, rates: WinRates) -> dict:
+def archive_probabilities(role: str, archive_ids: list, rates: WinRates,
+                          scripted: tuple = (0.15, 0.03)) -> dict:
     """Each archived opponent's exact share of matches for a role -- the
     quantity the uniform floor guarantees (>= 0.10 / N for main agents)."""
     if not archive_ids:
         return {}
     scripted_ids = [f'scripted:{s}' for s in SCRIPTED]
-    mix = role_mix(role, float(np.mean([rates.p(s) for s in scripted_ids])))
+    mix = role_mix(role, float(np.mean([rates.p(s) for s in scripted_ids])), scripted)
     n = len(archive_ids)
     prob = dict.fromkeys(archive_ids, 0.0)
     for src, share in mix.items():
@@ -87,11 +88,11 @@ def archive_probabilities(role: str, archive_ids: list, rates: WinRates) -> dict
 
 
 def sample_opponents(role: str, n: int, archive_ids: list, rates: WinRates, rng,
-                     main_ids: list | None = None) -> list:
+                     main_ids: list | None = None, scripted: tuple = (0.15, 0.03)) -> list:
     """n opponent references for one rollout's opponent groups."""
     scripted_ids = [f'scripted:{s}' for s in SCRIPTED]
     p_scr = float(np.mean([rates.p(s) for s in scripted_ids]))
-    mix = role_mix(role, p_scr)
+    mix = role_mix(role, p_scr, scripted)
     sources = list(mix)
     probs = np.array([mix[s] for s in sources])
     probs = probs / probs.sum()
