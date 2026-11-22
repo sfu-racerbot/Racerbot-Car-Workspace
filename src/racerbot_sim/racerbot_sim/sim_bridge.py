@@ -27,6 +27,7 @@ import sys
 import numpy as np
 from racerbot_car import identity
 from racerbot_car.profile import load_profile
+from racerbot_sim.lidar_geometry import measured_st_lidar
 
 
 def add_sim_python_path(workspace_root=None) -> Path:
@@ -114,6 +115,7 @@ class SimConfig:
     car: str = ''
     physics: str = 'stock'
     floor: str = ''
+    measured_lidar_mount: bool = False
 
     def __post_init__(self):
         if self.physics not in ('stock', 'calibrated'):
@@ -301,6 +303,7 @@ class SimBridge:
             base_link_to_lidar_tf=(LIDAR_OFFSET_X, 0.0, 0.0),
         )
         self.plant = None
+        model = DynamicModel.ST
         if config.physics == 'calibrated':
             fidelity_path = str(root / 'tools' / 'f1tenth_sim')
             if fidelity_path not in sys.path:
@@ -317,6 +320,13 @@ class SimBridge:
                 params=F1TENTH_VEHICLE_PARAMETERS.with_updates(
                     **vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad)),
                 control_config=ControlConfig(steer_delay_steps=1))
+        self._odom_origin_offset = 0.0
+        if config.measured_lidar_mount:
+            lr = components['params'].lr
+            self.lidar_config = measured_st_lidar(self.lidar_config, car_id=profile.id, model=model, lr=lr)
+            # ROS publishes the physical base_link -> laser TF. Initialize the
+            # dead-reckoned base_link at the rear axle, not at Gym's ST state.
+            self._odom_origin_offset = -lr
         components['lidar_config'] = self.lidar_config
         env_config = EnvConfig(
             seed=config.seed,
@@ -326,7 +336,7 @@ class SimBridge:
                 timestep=config.control_dt,
                 integrator_timestep=INTEGRATOR_DT,
                 integrator=IntegratorType.RK4,
-                dynamics_model=DynamicModel.ST,
+                dynamics_model=model,
                 max_laps=10_000,
             ),
             observation_config=ObservationConfig(type=ObservationType.DIRECT),
@@ -407,7 +417,9 @@ class SimBridge:
         for i in range(self.config.controlled_cars):
             state = self.agent_state(i)
             self._odometry.append(DeadReckonedOdometry(
-                state.x, state.y, state.yaw, self.config, self._rng))
+                state.x + self._odom_origin_offset * math.cos(state.yaw),
+                state.y + self._odom_origin_offset * math.sin(state.yaw),
+                state.yaw, self.config, self._rng))
         self.odom = self._odometry[0]
         return self._obs
 

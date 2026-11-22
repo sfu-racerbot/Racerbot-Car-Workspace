@@ -69,6 +69,7 @@ from gap_mirror import GapController, node_params  # noqa: E402
 from imu_bridge.vehicle_state import steering_from_yaw_rate  # noqa: E402
 from recognition import false_movers, moving_track_ids  # noqa: E402
 from racerbot_sim import tracks as sim_tracks  # noqa: E402
+from racerbot_sim.lidar_geometry import measured_st_lidar  # noqa: E402
 from run_analysis import weave  # noqa: E402
 from sim_fidelity import calibration_for_car, FLOORS, PROFILES, with_floor, with_friction  # noqa: E402
 from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
@@ -145,11 +146,19 @@ def track_map_yaml(track_spec: str):
     return Path(path).parent / f"{Path(path).name}_map.yaml"
 
 
-def make_plant(track_spec: str, seed: int, calibration=None, car_id=None, max_laps: int = 1) -> FidelityPlant:
+def make_plant(track_spec: str, seed: int, calibration=None, car_id=None, max_laps: int = 1,
+               *, measured_lidar_mount: bool = False) -> FidelityPlant:
     """Build a fidelity plant for a gym circuit name or an indoor layout."""
     # The selected car's own calibration unless one (e.g. with a floor profile) is given.
     calibration = calibration if calibration is not None else calibration_for_car(car_id)
     components = env_components(PROFILES[DEFAULT_PROFILE], calibration)
+    model = DynamicModel.ST
+    lidar_config = components["lidar_config"]
+    if measured_lidar_mount:
+        if car_id is not None and car_id != calibration.car_id:
+            raise ValueError("car_id must match the LiDAR calibration's car_id")
+        lidar_config = measured_st_lidar(lidar_config, car_id=calibration.car_id,
+                                        model=model, lr=components["params"].lr)
     map_name = track_path(track_spec)
     config = EnvConfig(
         seed=seed,
@@ -161,11 +170,11 @@ def make_plant(track_spec: str, seed: int, calibration=None, car_id=None, max_la
             timestep=CONTROL_DT,
             integrator_timestep=INTEGRATOR_DT,
             integrator=IntegratorType.RK4,
-            dynamics_model=DynamicModel.ST,
+            dynamics_model=model,
             max_laps=max_laps,
         ),
         observation_config=ObservationConfig(type=ObservationType.DIRECT),
-        lidar_config=components["lidar_config"],
+        lidar_config=lidar_config,
         collision_check=components["collision_check"],
         render_enabled=False,
     )
@@ -183,7 +192,7 @@ def _reverse_laps(plant) -> float:
 
 def run_track(track: str, params: dict, seed: int, timeout_s: float,
               reverse: bool = False, calibration=None, car_id=None, trace=None,
-              max_laps: int = 1, grip_scale: float | None = None) -> dict:
+              max_laps: int = 1, grip_scale: float | None = None, *, measured_lidar_mount: bool = False) -> dict:
     """``max_laps`` laps of ``track`` (default one, from a standing start). ``reverse`` starts facing
     backwards, so the indoor layouts (all counter-clockwise) get exercised with right turns.
     ``lap_times_s`` lists each completed lap's own time: the first includes the standing start, the
@@ -192,7 +201,8 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
         raise ValueError("max_laps must be at least 1")
     if reverse and max_laps != 1:
         raise ValueError("reverse runs count one lap only")
-    plant = make_plant(track, seed, calibration=calibration, car_id=car_id, max_laps=max_laps)
+    plant = make_plant(track, seed, calibration=calibration, car_id=car_id, max_laps=max_laps,
+                       measured_lidar_mount=measured_lidar_mount)
     line = plant.env.unwrapped.track.raceline
     start = np.array([[line.xs[0], line.ys[0],
                        line.yaws[0] + (math.pi if reverse else 0.0)]], dtype=float)
@@ -359,6 +369,8 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
     else:
         result.update(false_mover_ticks=None, false_mover_tracks=None)
     result.update(plant_report)
+    if measured_lidar_mount:
+        result["measured_lidar_mount"] = True
     return result
 
 
@@ -461,15 +473,17 @@ def parse_set(values, car_id=None):
 
 
 def _job(job):
-    track, seed, params, timeout, reverse, car_id, calibration, *extra = job
+    track, seed, params, timeout, reverse, car_id, calibration, measured_lidar_mount, *extra = job
     return run_track(track, params, seed, timeout, reverse, calibration=calibration, car_id=car_id,
-                     trace=extra[0] if extra else None)
+                     trace=extra[0] if extra else None, measured_lidar_mount=measured_lidar_mount)
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     add_car_argument(parser)
+    parser.add_argument("--measured-lidar-mount", action="store_true",
+                        help="rb2 only: cast from the measured mount instead of the legacy ray origin")
     parser.add_argument("--track", default="asb_10000",
                         help="track name, 'indoor', 'narrow', 'maps', 'gym', 'all', "
                              "or a comma-separated list of any of these")
@@ -494,13 +508,15 @@ def main(argv=None) -> int:
                         help="a measured floor profile (default: the plain calibration)")
     args = parser.parse_args(argv)
     car_id = car_from_args(parser, args)
+    if args.measured_lidar_mount and car_id != "rb2":
+        parser.error("--measured-lidar-mount is only verified for rb2")
 
     selected = select_tracks(args.track)
     params = parse_set(args.set, car_id)
     for track in selected:
         track_path(track)  # build the layouts before any worker process forks
     calibration = with_friction(args.friction, with_floor(args.floor, calibration_for_car(car_id)))
-    jobs = [(track, args.seed + k, params, args.timeout, args.reverse, car_id, calibration)
+    jobs = [(track, args.seed + k, params, args.timeout, args.reverse, car_id, calibration, args.measured_lidar_mount)
             for track in selected for k in range(args.seeds)]
     if args.trace:
         out = Path(args.trace)
