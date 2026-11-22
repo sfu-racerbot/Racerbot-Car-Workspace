@@ -1,0 +1,391 @@
+{
+  "frozen_utc": "2026-11-21T18:31:46.055165+00:00",
+  "data_commit": "76db7abecd8c66ca14bbc56d77e82331a08e3cb6",
+  "evaluator_commit": "a7b766acfb8901ccc495b407b7f98dfc8e5d8849",
+  "head_sha256": "1945fc92b4a0bd6b685dbcaaebb7168a876e09e0a4199ec40911d69e2f91f3e0",
+  "inference_sha256": "136ba79564f48aa76096f2d38c601ecde416b0352048ba4626a0556a6b90e2ba",
+  "base_model": "a0eef2af0a3757b6",
+  "cap_mps": 5,
+  "primary": "All three rb1 Nov 16 gap_follow runs as one reserved date, irrespective of speed, duration, missing topics, or direction of effect. No replacements. Equal-weight mean of eligible runs’ wrapped steering MAE (learned minus original, rad); list each run and paired tick-weighted aggregate. Negative means closer imitation, not better driving. An empty run is reported and not imputed.",
+  "secondary": "Same comparison to the fixed October gains. Report speed MAE, turn direction, safety interventions and stops; per car/date/publisher and measured-speed bucket; contextual Nov 9/11 kept separate. Compare original, October gains, frozen learned steering separately, no selector. No inferential generalization across dates on one reserved day.",
+  "protocol": "PR94 exact alignment and history resets; each policy feeds back its own wrapped commands. Same causal scans, reactive mode, no map/preview/camera/IMU, per-car wrapper at fixed comparison cap. No safety changes, training, re-selection, fitted gains or November fitting. All outcomes offline; if zero usable examples, no metric.",
+  "prior_use": "October 19/26 fit and October 30 design evaluation excluded. Frozen head trained on procedural geometries; bundled input scorecard and model/floor history came from previous development. November 9 crash/November 11 races, excerpts/tests, floor fitting, race maps or lines have prior analysis/overlap; all are descriptive only. No Nov 6 dependency. No rb2 Nov 16 driving bag included (line is not a run). Intake shared topic availability and top speeds before reservation, not frozen-policy errors. Configuration/hardware/course or indirect development overlap unresolved for Nov 16; call reserved, not independent. Never promote a run based on outcomes. Preserve any new provenance qualification.",
+  "runs": [
+    {
+      "car": "rb1",
+      "run": "20261111-153409",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ba196b6f2dc75941a6a6487f63fd55adf95e5ef9d6e9f9cf8ba9728a5a26fbb1",
+      "parameter_sha256": {}
+    },
+    {
+      "car": "rb1",
+      "run": "20261111-153436",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ba196b6f2dc75941a6a6487f63fd55adf95e5ef9d6e9f9cf8ba9728a5a26fbb1",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "820a15bc707005ae4a3c0458e6d58a4666f4142855a2f0953643712a19ba18f1",
+        "gap_follow_node": "4f19d19ed480d2977554b3b90ce6972a239b00ac4a5152a4e4063abc2268b748",
+        "imu_bridge_node": "bd3479191256aba662b89ecc1beb49853e03b3c6c10bfb9610e265cdfc0720c8",
+        "vesc_to_odom_node": "9ba099934783166475254fca687b4d6f5eead5dc5873a0d6a8803c0f348214ef"
+      }
+    },
+    {
+      "car": "rb1",
+      "run": "20261111-153721",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ba196b6f2dc75941a6a6487f63fd55adf95e5ef9d6e9f9cf8ba9728a5a26fbb1",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "820a15bc707005ae4a3c0458e6d58a4666f4142855a2f0953643712a19ba18f1",
+        "gap_follow_node": "4f19d19ed480d2977554b3b90ce6972a239b00ac4a5152a4e4063abc2268b748",
+        "imu_bridge_node": "bd3479191256aba662b89ecc1beb49853e03b3c6c10bfb9610e265cdfc0720c8",
+        "vesc_to_odom_node": "9ba099934783166475254fca687b4d6f5eead5dc5873a0d6a8803c0f348214ef"
+      }
+    },
+    {
+      "car": "rb1",
+      "run": "20261111-155542",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ba196b6f2dc75941a6a6487f63fd55adf95e5ef9d6e9f9cf8ba9728a5a26fbb1",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "820a15bc707005ae4a3c0458e6d58a4666f4142855a2f0953643712a19ba18f1",
+        "gap_follow_node": "4f19d19ed480d2977554b3b90ce6972a239b00ac4a5152a4e4063abc2268b748",
+        "imu_bridge_node": "bd3479191256aba662b89ecc1beb49853e03b3c6c10bfb9610e265cdfc0720c8",
+        "vesc_to_odom_node": "9ba099934783166475254fca687b4d6f5eead5dc5873a0d6a8803c0f348214ef"
+      }
+    },
+    {
+      "car": "rb1",
+      "run": "20261116-095058",
+      "cohort": "reserved-Nov16",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "82c69a3945fd1d3e5cbdbffdd78b2e2580fa8d57d3ee244f62470b40c79df5a1",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "820a15bc707005ae4a3c0458e6d58a4666f4142855a2f0953643712a19ba18f1",
+        "gap_follow_node": "0c64bcdefc9d7cb1b879edce1584e40d698711ef7161c8132bd3912759a39014",
+        "imu_bridge_node": "bd3479191256aba662b89ecc1beb49853e03b3c6c10bfb9610e265cdfc0720c8",
+        "vesc_to_odom_node": "9ba099934783166475254fca687b4d6f5eead5dc5873a0d6a8803c0f348214ef"
+      }
+    },
+    {
+      "car": "rb1",
+      "run": "20261116-095242",
+      "cohort": "reserved-Nov16",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "82c69a3945fd1d3e5cbdbffdd78b2e2580fa8d57d3ee244f62470b40c79df5a1",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "820a15bc707005ae4a3c0458e6d58a4666f4142855a2f0953643712a19ba18f1",
+        "vesc_to_odom_node": "9ba099934783166475254fca687b4d6f5eead5dc5873a0d6a8803c0f348214ef"
+      }
+    },
+    {
+      "car": "rb1",
+      "run": "20261116-095652",
+      "cohort": "reserved-Nov16",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "82c69a3945fd1d3e5cbdbffdd78b2e2580fa8d57d3ee244f62470b40c79df5a1",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "820a15bc707005ae4a3c0458e6d58a4666f4142855a2f0953643712a19ba18f1",
+        "gap_follow_node": "c332185113775d0d8f0022ee1e62d2a4f4591ac183697e7ac640323fc81ff61f",
+        "imu_bridge_node": "bd3479191256aba662b89ecc1beb49853e03b3c6c10bfb9610e265cdfc0720c8",
+        "vesc_to_odom_node": "9ba099934783166475254fca687b4d6f5eead5dc5873a0d6a8803c0f348214ef"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261109-183455",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "gap_follow_node": "1f1edccb00aa21ef591e1b302156c70280ac05831f842a02e65533ee03d8b416",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261109-183910",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "gap_follow_node": "2714f632ad0b1ef29b21b452033d8f5199b61366aa80f9f22143a6f1eea67bf2",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261109-190202",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/pure_pursuit_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "pure_pursuit_node": "680b926929d97fd79b695e867c00056d4762ac55e479518998533271504d71e0",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261109-190356",
+      "cohort": "context-only",
+      "recorded_publishers": null,
+      "car_yaml_sha256": null,
+      "parameter_sha256": {}
+    },
+    {
+      "car": "rb2",
+      "run": "20261109-190617",
+      "cohort": "context-only",
+      "recorded_publishers": null,
+      "car_yaml_sha256": null,
+      "parameter_sha256": {}
+    },
+    {
+      "car": "rb2",
+      "run": "20261109-190837",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/pure_pursuit_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "pure_pursuit_node": "680b926929d97fd79b695e867c00056d4762ac55e479518998533271504d71e0",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-135453",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/ftg_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-135934",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "gap_follow_node": "2cc46aa7322fc824a02f4c9a3a5b365ded2b09e9c8e28830e2c2b2d0848e6925",
+        "imu_bridge_node": "f43a6cbe7b724a9d8fedd62e6c8c10c0d467d92b0a8178a7d5a43d0d344f28f4",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-140322",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/disparity_extender_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-141227",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/ftg_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-142036",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "gap_follow_node": "2cc46aa7322fc824a02f4c9a3a5b365ded2b09e9c8e28830e2c2b2d0848e6925",
+        "imu_bridge_node": "f43a6cbe7b724a9d8fedd62e6c8c10c0d467d92b0a8178a7d5a43d0d344f28f4",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-142254",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/gap_follow_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "gap_follow_node": "2cc46aa7322fc824a02f4c9a3a5b365ded2b09e9c8e28830e2c2b2d0848e6925",
+        "imu_bridge_node": "f43a6cbe7b724a9d8fedd62e6c8c10c0d467d92b0a8178a7d5a43d0d344f28f4",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-142604",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/disparity_extender_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-143337",
+      "cohort": "context-only",
+      "recorded_publishers": null,
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "gap_follow_node": "fc04bd4f075cfc09972fe55346a725789b9c19c0e98e78c5cafda4b1c6079c24",
+        "imu_bridge_node": "f43a6cbe7b724a9d8fedd62e6c8c10c0d467d92b0a8178a7d5a43d0d344f28f4",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-151026",
+      "cohort": "context-only",
+      "recorded_publishers": null,
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "gap_follow_node": "fc04bd4f075cfc09972fe55346a725789b9c19c0e98e78c5cafda4b1c6079c24",
+        "imu_bridge_node": "f43a6cbe7b724a9d8fedd62e6c8c10c0d467d92b0a8178a7d5a43d0d344f28f4",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-152132",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/pure_pursuit_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "imu_bridge_node": "f43a6cbe7b724a9d8fedd62e6c8c10c0d467d92b0a8178a7d5a43d0d344f28f4",
+        "pure_pursuit_node": "5af17bc6016d971b42bbbd0b4e9d7117eb68f75a4343547298f3ade218b2902b",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-152844",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/disparity_extender_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    },
+    {
+      "car": "rb2",
+      "run": "20261111-154204",
+      "cohort": "context-only",
+      "recorded_publishers": {
+        "/drive": [
+          "/disparity_extender_node"
+        ]
+      },
+      "car_yaml_sha256": "ab9301f48e7ce23e29618a363d89a07f4c25fbe5311286e26ab9e7ea5b7aa80b",
+      "parameter_sha256": {
+        "ackermann_to_vesc_node": "929d59b0e66fcdadf7fd03b1add280ae08eb94308b8edfda595509e0678fe5cc",
+        "vesc_to_odom_node": "66be97b7042132642c83188a89bde910217172e42199f217987d6608f4549dba"
+      }
+    }
+  ]
+}
