@@ -2,7 +2,8 @@
 
 runlog.load_run caches a fixed set of topics in <run>/analysis/, inside data/.
 The tools built on this module need other topics (/drive_intent, the VESC IMU)
-and must leave data/ untouched, so they read the bag directly. Needs ROS sourced.
+and must leave data/ untouched, so they read the bag directly. Without ROS, uses
+rosbags to deserialize the bag's embedded message definitions.
 """
 
 from __future__ import annotations
@@ -19,9 +20,21 @@ def bag_dir(run) -> Path:
 def messages(run, topics):
     """Yield (topic, receive time in seconds, message) for ``topics``, skipping
     any the bag does not have."""
-    import rosbag2_py
-    from rclpy.serialization import deserialize_message
-    from rosidl_runtime_py.utilities import get_message
+    try:
+        import rosbag2_py
+        from rclpy.serialization import deserialize_message
+        from rosidl_runtime_py.utilities import get_message
+    except ImportError:
+        from rosbags.highlevel import AnyReader
+
+        with AnyReader([bag_dir(run)]) as reader:
+            connections = [c for c in reader.connections if c.topic in topics]
+            if not connections:
+                return
+            for connection, stamp_ns, data in reader.messages(connections=connections):
+                yield (connection.topic, stamp_ns / 1e9,
+                       reader.deserialize(data, connection.msgtype))
+        return
 
     path = bag_dir(run)
     storage = "mcap" if any(path.glob("*.mcap")) else "sqlite3"
