@@ -148,7 +148,20 @@ def heading_study(data, map_dir, laser_x, geom, hold):
         fit, score, _ = match(grid, c*bx-s*by+dt*vx, s*bx+c*by+dt*vy, pose, iters=20)
         ref.append(fit[2])
         h10.append(score)
-    bias = np.median(imu[(imu[:, 0] < start) & (imu[:, 0] >= start-2), 2])
+    # The first recorded joystick message arrives after launch. Use only the
+    # initial header-time interval covered by zero commands AND zero wheel speed.
+    parked = []
+    for rows in (data["/drive"], od):
+        first_motion = np.flatnonzero(rows[:, 2] != 0)
+        if not len(first_motion) or first_motion[0] == 0:
+            raise ValueError("No recorded stationary-to-moving transition")
+        parked.append((rows[0, 1], rows[first_motion[0]-1, 1]))
+    baseline = imu[(imu[:, 1] >= max(lo for lo, _ in parked))
+                   & (imu[:, 1] <= min(hi for _, hi in parked)), 2]
+    if not len(baseline):
+        raise ValueError("No gyro samples in the verified stationary interval")
+    bias = np.median(baseline)
+    print(f"  stationary gyro bias: {bias:.4f} deg/s ({len(baseline)} samples)")
     gyro = cumulative_trapezoid(imu[:, 2]-bias, imu[:, 1], initial=0)  # VESC: deg/s
     pf_last = np.searchsorted(pf[:, 0], [s[0] for s in scans], side="right")-1
     if np.any(pf_last < 0):

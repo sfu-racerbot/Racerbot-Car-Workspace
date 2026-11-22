@@ -10,14 +10,16 @@
 
 | Heading comparison against scan-to-map alignment | Steering odometry: max error in heading change | Integrated gyro: same metric | Filter: median / max absolute heading error¹ |
 |---|---:|---:|---:|
-| Two seconds ending at 3.07 m/s (0.468–2.468 s; 80 scans) | 47.13° | 1.84° | 0.74° / 2.34° |
-| Braking interval only (2.090–2.468 s; 15 scans) | 22.94° | 0.68° | 0.91° / 1.98° |
+| Two seconds ending at 3.07 m/s (0.468–2.468 s; 80 scans) | 47.13° | 1.95° | 0.74° / 2.34° |
+| Braking interval only (2.090–2.468 s; 15 scans) | 22.94° | 0.69° | 0.91° / 1.98° |
 
 ¹ Filter heading is already in the map frame; values use header-time interpolation. Gyro and odometry instead compare **change** in heading, aligned at the start of each row. Times are seconds from the first recorded LB-held joystick message, not from the start of the bag. The original analysis gives neither a time origin for its two-second window nor an alignment pose. These are independently defined windows, not a claim to have repeated its exact sample selection.
 
 **Why the filter number changes:** In the later right turn at 3.05–3.50 s, using the latest filter heading received as of each scan gives a median 4.35° lag (peak 6.56°). Interpolating the filter by header time gives 2.79° (peak 4.65°) instead. The former comparison includes message age; neither is the exact pose known to have been consumed by the controller. Between these windows, filter, wheel, gyro, drive, and intent have 0.33–0.37 s gaps in bag receipt; the sensor headers also have gaps, while scan headers continue. Do not interpolate across that interval as if vehicle motion were measured.
 
-**How the reference was built:** Match LiDAR endpoints to the exact map’s distance field at scan-midpoint time, using the recorded 0.26 m laser offset. Initialize from a global map search near the racing line, propagate with previous scan fits, then correct within-scan motion using velocities estimated from those fits. Neither gyro, wheel odometry nor filter poses drive this reference. A second, filter-seeded fit checks for a different solution. In the pre-gap two-second interval at least 98.8% of retained endpoints were within 0.10 m of map obstacles; the two initializations differed by at most 0.59° before motion correction. The reference is map-based, not surveyed ground truth. Integrate the raw VESC z gyro in its native deg/s after subtracting the parked two-second median bias; applying the recorded mount tilt changes its two-second heading change by less than 0.02°.
+**How the reference was built:** Match LiDAR endpoints to the exact map’s distance field at scan-midpoint time, using the recorded 0.26 m laser offset. Initialize from a global map search near the racing line, propagate with previous scan fits, then correct within-scan motion using velocities estimated from those fits. Neither gyro, wheel odometry nor filter poses drive this reference. A second, filter-seeded fit checks for a different solution. In the pre-gap two-second interval at least 98.8% of retained endpoints were within 0.10 m of map obstacles; the two initializations differed by at most 0.59° before motion correction. The reference is map-based, not surveyed ground truth.
+
+For the gyro comparison, subtract the median raw VESC z rate while both commanded and measured wheel speed were zero (34 gyro samples, −0.2441°/s), then integrate in degrees. The car was already moving by the first recorded LB-held message, so the whole pre-LB interval is not a stationary baseline.
 
 ## What actually stopped
 
