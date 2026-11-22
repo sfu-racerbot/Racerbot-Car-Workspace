@@ -23,6 +23,7 @@ from track_import import (
     load_map,
     pixel_to_world,
     signed_area,
+    track_free,
     track_summary,
     world_to_pixel,
     write_gym_track,
@@ -182,12 +183,12 @@ def test_saver_unknown_opens_only_enclosed_holes(tmp_path):
     image[25, 41] = 205            # hole touching a wall
     spec = load_map(write_map(tmp_path, image, .05, free_thresh=0.25))
     assert spec.free.sum() == image.size - 1
-    track_free = spec.track_free
-    assert track_free[5:35, 5:55].sum() == 30 * 50 - 36 - 2
-    assert track_free[20, 20]
-    assert not track_free[10:16, 30:36].any()
-    assert not track_free[25, 40:42].any()
-    assert not track_free[:5].any() and not track_free[:, :5].any()
+    free_for_track = track_free(spec)
+    assert free_for_track[5:35, 5:55].sum() == 30 * 50 - 36 - 2
+    assert free_for_track[20, 20]
+    assert not free_for_track[10:16, 30:36].any()
+    assert not free_for_track[25, 40:42].any()
+    assert not free_for_track[:5].any() and not free_for_track[:, :5].any()
     assert load_map(write_map(tmp_path, image, .05, free_thresh=0.196, name='strict')).unexplored is None
 
 

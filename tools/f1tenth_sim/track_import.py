@@ -63,10 +63,11 @@ class MapSpec:
     occupancy: np.ndarray | None = None  # map_server values: -1 unknown, 0..100
     unexplored: np.ndarray | None = None  # free only via map_saver's unknown code
 
-    @property
-    def track_free(self) -> np.ndarray:
-        """``free`` without unexplored space: the cells a Gym track may use."""
-        return self.free if self.unexplored is None else self.free & ~self.unexplored
+
+def track_free(spec: MapSpec) -> np.ndarray:
+    """``spec.free`` without unexplored space: the cells a Gym track may use."""
+    unexplored = getattr(spec, "unexplored", None)
+    return spec.free if unexplored is None else spec.free & ~unexplored
 
 
 # Enclosed wall blobs smaller than this are noise for centreline-finding.
@@ -378,7 +379,7 @@ def _project_seed(region, narrowed, seed_rc, radius):
 
 def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
     last_error = None
-    for region in _free_regions(spec.track_free, seed_rc):
+    for region in _free_regions(track_free(spec), seed_rc):
         try:
             narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
             narrowed_seed = seed_rc
@@ -436,7 +437,7 @@ def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
     rows, cols = world_to_pixel(spec, points[:, 0], points[:, 1])
     inside = (rows >= 0) & (rows < spec.free.shape[0]) & (cols >= 0) & (cols < spec.free.shape[1])
     region = line_region if centerline_from is None else driveable_region(
-        spec.track_free, seed_rc, reference_rc=(rows[inside], cols[inside]))
+        track_free(spec), seed_rc, reference_rc=(rows[inside], cols[inside]))
     d_wall = cv2.distanceTransform(region.astype(np.uint8), cv2.DIST_L2, 5) * spec.resolution
     widths = np.zeros(len(points))
     widths[inside] = 2.0 * d_wall[rows[inside], cols[inside]]
