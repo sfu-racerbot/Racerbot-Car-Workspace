@@ -5,7 +5,9 @@ or follows directly from map_server conventions / the formulas in the module.
 """
 import math
 import os
+import shlex
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,11 +17,13 @@ from PIL import Image
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from track_import import (
     SPECK_AREA_M2,
+    driveable_region,
     drop_narrow_gaps,
     extract_track,
     load_map,
     pixel_to_world,
     signed_area,
+    track_free,
     track_summary,
     world_to_pixel,
     write_gym_track,
@@ -48,24 +52,442 @@ def write_map(tmp_path, image_uint8, resolution, origin=(0.0, 0.0), free_thresh=
 
 
 def test_load_map_thresholds(tmp_path):
-    """oracle: closed form from occupancy = (255-v)/255 (negate=0), free if occupancy < min(free_thresh, free_below)."""
+    """Oracle: Nav2 Jazzy p=(255-v)/255; free iff p <= YAML free_thresh."""
     # 1x5 image with pixel values [0, 205, 214, 250, 254]
     img = np.array([[0, 205, 214, 250, 254]], dtype=np.uint8)
     yaml_path = write_map(tmp_path, img, resolution=0.05, origin=(0.0, 0.0), free_thresh=0.196, negate=0)
-    spec = load_map(yaml_path)  # default free_below (track_import.FREE_BELOW)
-    # 214 gives occupancy 41/255~0.1608, min(0.196,0.10)=0.10, 0.1608 < 0.10 is False
-    # 250 gives occupancy 5/255~0.0196 < 0.10 is True
-    assert spec.free[0].tolist() == [False, False, False, True, True]
-
-    # Same image with free_below=0.2 -> min(0.196,0.2)=0.196, 214 becomes free
-    spec2 = load_map(yaml_path, free_below=0.2)
-    assert spec2.free[0].tolist() == [False, False, True, True, True]
+    spec = load_map(yaml_path)
+    assert spec.free[0].tolist() == [False, False, True, True, True]
 
     # negate: 1 case: value 0 is free (occupancy = image/255 = 0)
     img_neg = np.array([[0]], dtype=np.uint8)
     yaml_path_neg = write_map(tmp_path, img_neg, resolution=0.05, origin=(0.0, 0.0), free_thresh=0.196, negate=1, name="map_neg")
     spec_neg = load_map(yaml_path_neg)
     assert bool(spec_neg.free[0, 0]) is True
+
+
+@pytest.mark.parametrize("negate", [0, 1])
+def test_load_map_jazzy_boundaries(tmp_path, negate):
+    """Oracle: navigation2/jazzy/nav2_map_server/src/map_io.cpp loadMapFromFile.
+
+    The occupied/free masks use >= occupied_thresh and <= free_thresh.
+    """
+    probabilities = np.array([[0, 50, 51, 52, 152, 153, 154, 255]], dtype=np.uint8)
+    pixels = probabilities if negate else 255 - probabilities
+    path = write_map(tmp_path, pixels, 0.05, free_thresh=51 / 255, negate=negate)
+    meta = yaml.safe_load(path.read_text())
+    meta['occupied_thresh'] = 153 / 255
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == [[0, 0, 0, -1, -1, 100, 100, 100]]
+    assert spec.free.tolist() == [[True, True, True, False, False, False, False, False]]
+
+
+@pytest.mark.parametrize("mode", ['scale', 'raw'])
+@pytest.mark.parametrize("negate", [0, 1])
+def test_load_map_cost_modes(tmp_path, mode, negate):
+    """Oracle: map_server raw 0..100 or scaled costs; live ROS grid blocks >=50."""
+    costs = np.array([[0, 1, 49, 50, 51, 99, 100]], dtype=np.uint8)
+    if mode == 'raw':
+        pixels = np.concatenate([costs, [[101, 255]]], axis=1).astype(np.uint8)
+        expected = [[0, 1, 49, 50, 51, 99, 100, -1, -1]]
+    else:
+        # Thresholds 0..1 make p*100 the decoded cost, rounded to nearest integer.
+        pixels = np.rint(costs.astype(float) * 255 / 100).astype(np.uint8)
+        pixels = pixels if negate else 255 - pixels
+        expected = costs.tolist()
+    path = write_map(tmp_path, pixels, .05, free_thresh=0, negate=negate)
+    meta = yaml.safe_load(path.read_text())
+    meta.update(mode=mode, occupied_thresh=1)
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == expected
+    assert spec.free.tolist() == [[v >= 0 and v < 50 for v in expected[0]]]
+
+
+@pytest.mark.parametrize('negate', [0, 1])
+def test_load_map_scale_uses_yaml_interval(tmp_path, negate):
+    """Oracle: scale maps [free_thresh, occupied_thresh] linearly to [0,100]."""
+    levels = np.array([[0, 51, 102, 153, 255]], dtype=np.uint8)
+    path = write_map(tmp_path, levels if negate else 255 - levels, .05,
+                     free_thresh=.2, negate=negate)
+    meta = yaml.safe_load(path.read_text())
+    meta.update(mode='scale', occupied_thresh=.6)
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == [[0, 0, 50, 100, 100]]
+    assert spec.free.tolist() == [[True, True, False, False, False]]
+
+
+@pytest.mark.parametrize('mode', ['trinary', 'scale'])
+def test_load_map_transparency_is_unknown(tmp_path, mode):
+    """Oracle: map_server marks nonopaque pixels unknown, including white."""
+    path = write_map(tmp_path, np.array([[255, 255, 0]]), .05)
+    Image.fromarray(np.array([[[255, 255, 255, 0], [255, 255, 255, 254],
+                               [0, 0, 0, 255]]], dtype=np.uint8), 'RGBA').save(path.with_suffix('.png'))
+    meta = yaml.safe_load(path.read_text())
+    meta['mode'] = mode
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == [[-1, -1, 100]]
+    assert not spec.free.any()
+
+
+@pytest.mark.parametrize('key,value,error', [
+    ('mode', 'typo', 'unsupported map mode'),
+    ('negate', 2, 'negate must be'),
+    ('negate', -1, 'negate must be'),
+    ('free_thresh', -0.1, 'require 0 <='),
+    ('free_thresh', .65, 'require 0 <='),
+    ('free_thresh', float('nan'), 'require 0 <='),
+    ('occupied_thresh', float('inf'), 'require 0 <='),
+    ('occupied_thresh', 1.01, 'require 0 <='),
+])
+def test_load_map_invalid_semantics(tmp_path, key, value, error):
+    """Oracle: malformed metadata must not silently invent drivable cells."""
+    path = write_map(tmp_path, np.array([[255]]), .05)
+    meta = yaml.safe_load(path.read_text())
+    meta[key] = value
+    path.write_text(yaml.safe_dump(meta))
+    with pytest.raises(ValueError, match=error):
+        load_map(path)
+
+
+def test_nov9_map_gray_free_cells(tmp_path):
+    """Measurement: Nov 9 rb2 /map in runs 190202 and 190837 is 0 in both 3x3s.
+
+    The rebuilt map's YAML free_thresh=.25 classifies 205 (p=50/255) as free.
+    Exercise the exported Gym image too, not just the parser's internal mask.
+    """
+    source = Path(__file__).resolve().parents[3] / 'data/rb2/racerbot_auto/20261109-185146-rebuilt/map.yaml'
+    spec = load_map(source)
+    # The rebuilt YAML also frees the gray background; use the recorded map
+    # for loop extraction, without changing the map Gym will drive on.
+    line_map = source.parent.parent / '20261109-185306/map.yaml'
+    track = extract_track(spec, centerline_from=load_map(line_map))
+    target = write_gym_track(track, tmp_path, 'nov9')
+    with Image.open(target.with_suffix('.png')) as handle:
+        exported = np.array(handle)
+    for row, col in [(207, 188), (307, 116)]:
+        assert spec.free[row-1:row+2, col-1:col+2].all()
+        assert (exported[row-1:row+2, col-1:col+2] == 255).all()
+
+
+@pytest.mark.parametrize('negate', [0, 1])
+def test_gray_corridor_is_not_saver_unknown(tmp_path, negate):
+    """Oracle: gray 200 has p=55/255 < .25; only 205 is map_saver's code."""
+    image = np.full((100, 100), 205, np.uint8)
+    image[10:90, 10:90] = 200
+    image[30:70, 30:70] = 0
+    corridor = image == 200
+    pixels = 255 - image if negate else image
+    spec = load_map(write_map(tmp_path, pixels, .05, free_thresh=.25, negate=negate))
+    np.testing.assert_array_equal(track_free(spec), corridor)
+    track = extract_track(spec)
+    np.testing.assert_array_equal(track.region, corridor)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert corridor[rows, cols].all()
+
+
+def test_saver_unknown_opens_only_enclosed_holes(tmp_path):
+    """Oracle: map_saver writes unknown as 205; free_thresh 0.25 decodes it free."""
+    image = np.full((40, 60), 205, np.uint8)
+    image[5:35, 5:55] = 254
+    image[20, 20] = 205            # one-pixel hole inside observed free space
+    image[10:16, 30:36] = 205      # 0.09 m^2 unexplored blob, larger than a hole
+    image[25, 40] = 0
+    image[25, 41] = 205            # hole touching a wall
+    spec = load_map(write_map(tmp_path, image, .05, free_thresh=0.25))
+    assert spec.free.sum() == image.size - 1
+    free_for_track = track_free(spec)
+    assert free_for_track[5:35, 5:55].sum() == 30 * 50 - 36 - 2
+    assert free_for_track[20, 20]
+    assert not free_for_track[10:16, 30:36].any()
+    assert not free_for_track[25, 40:42].any()
+    assert not free_for_track[:5].any() and not free_for_track[:, :5].any()
+    assert load_map(write_map(tmp_path, image, .05, free_thresh=0.196, name='strict')).unexplored is None
+
+
+@pytest.mark.parametrize('negate', [0, 1])
+def test_saver_hole_area_limit_is_inclusive(tmp_path, negate):
+    """Oracle: at 5 cm, 0.05 square metres is exactly 20 cells, inclusively."""
+    for area in (19, 20, 21):
+        image = np.full((40, 40), 254, np.uint8)
+        image[10:14, 10:15] = 205
+        if area == 19:
+            image[10, 10] = 254
+        elif area == 21:
+            image[14, 10] = 205
+        hole = image == 205
+        pixels = 255 - image if negate else image
+        spec = load_map(write_map(tmp_path, pixels, .05, free_thresh=.25,
+                                  negate=negate, name=f'hole{area}'))
+        assert spec.free.all()
+        expected = np.ones(image.shape, bool)
+        if area > 20:
+            expected[hole] = False
+        np.testing.assert_array_equal(track_free(spec), expected)
+
+
+def test_course_2026_10_30_exterior_stays_wall(tmp_path):
+    """Oracle: committed course PNG; the unexplored 205 exterior must not become floor."""
+    root = Path(__file__).resolve().parents[3]
+    maps = root / 'tools/f1tenth_sim/maps'
+    args = shlex.split(yaml.safe_load((maps / 'catalog.yaml').read_text())['course_2026_10_30']['import_command'])
+    other = load_map(root / args[args.index('--centerline-from') + 1]) if '--centerline-from' in args else None
+    source = load_map(root / 'data/rb2/racerbot_auto/20261030-185036-fixed/map.yaml')
+    write_gym_track(extract_track(source, centerline_from=other), tmp_path, 'course')
+    committed = np.asarray(Image.open(maps / 'course_2026_10_30.png')) == 255
+    exported = np.asarray(Image.open(tmp_path / 'course.png')) == 255
+    assert source.free[300, 50] and source.free[180, 240]
+    assert not exported[300, 50] and not exported[180, 240]
+    assert exported[committed].all()
+    assert (exported & ~committed).sum() < 100
+
+
+def test_driveable_region_prefers_enclosed_loop():
+    """Oracle: a rectangular corridor, with larger free exterior and interior."""
+    free = np.ones((60, 60), dtype=bool)
+    free[10:50, 10:50] = False
+    free[12:48, 12:48] = True
+    free[14:46, 14:46] = False
+    free[18:42, 18:42] = True
+    expected = np.zeros_like(free)
+    expected[12:48, 12:48] = True
+    expected[14:46, 14:46] = False
+    np.testing.assert_array_equal(driveable_region(free), expected)
+    selected = driveable_region(free, (0, 0))
+    assert selected[0, 0] and not selected[12, 12] and not selected[18, 18]
+
+
+def test_driveable_region_fallback_and_errors():
+    """Oracle: without an enclosed loop, retain the largest component."""
+    np.testing.assert_array_equal(driveable_region(np.ones((1, 1), bool)), [[True]])
+    free = np.zeros((5, 5), bool)
+    free[0, :3] = True
+    free[3, 3] = True
+    expected = np.zeros_like(free)
+    expected[0, :3] = True
+    np.testing.assert_array_equal(driveable_region(free), expected)
+    with pytest.raises(ValueError, match='no free space'):
+        driveable_region(np.zeros((1, 1), bool))
+    with pytest.raises(ValueError, match='not free space'):
+        driveable_region(free, (2, 2))
+
+
+def test_cropped_corridor_survives_false_enclosed_loop(tmp_path):
+    """Oracle: wide rectangular race ring at the border, thin false ring inside."""
+    image = np.zeros((100, 100), np.uint8)
+    image[:90, :90] = 255
+    image[15:75, 15:75] = 0
+    image[30:39, 30:39] = 255
+    image[32:37, 32:37] = 0
+    spec = load_map(write_map(tmp_path, image, .05))
+    expected = image == 255
+    expected[30:39, 30:39] = False
+    track = extract_track(spec)
+    np.testing.assert_array_equal(track.region, expected)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert expected[rows.astype(int), cols.astype(int)].all()
+    # Explicitly selecting the false loop must not silently switch corridors.
+    seed = pixel_to_world(spec, 30, 30)
+    with pytest.raises(ValueError, match='no free space|not a loop|usable race loop'):
+        extract_track(spec, seed_xy=seed)
+
+
+@pytest.fixture
+def blocked_loop_maps(tmp_path):
+    """A large rectangular corridor cut by a barrier, with a smaller free exterior."""
+    image = np.full((100, 100), 255, np.uint8)
+    image[4:96, 4:96] = 0
+    image[7:93, 7:93] = 255
+    image[32:68, 32:68] = 0
+    line = load_map(write_map(tmp_path, image, .05, name='line'))
+    image[7:32, 48:52] = 0
+    driving = load_map(write_map(tmp_path, image, .05, name='driving'))
+    expected = np.zeros((100, 100), bool)
+    expected[7:93, 7:93] = True
+    expected[32:68, 32:68] = False
+    expected[7:32, 48:52] = False
+    return driving, line, expected
+
+
+@pytest.mark.parametrize('seed_rc', [None, (60, 5)])
+def test_narrowing_tries_cropped_loop_after_larger_side_room(tmp_path, seed_rc):
+    """Oracle: a cropped ring and larger filled room joined by a 15 cm neck."""
+    image = np.zeros((120, 180), np.uint8)
+    image[10:110, :60] = 255
+    image[25:95, 15:45] = 0
+    image[10:110, 80:170] = 255
+    image[58:61, 60:80] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    seed = None if seed_rc is None else pixel_to_world(spec, *seed_rc)
+    track = extract_track(spec, seed_xy=seed)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert ((rows >= 10) & (rows < 110) & (cols >= 0) & (cols < 60)).all()
+    np.testing.assert_array_equal(track.region, image == 255)
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert narrowed[60, 5] and narrowed[60, 100]
+    assert not narrowed[59, 70]
+
+
+def test_seeded_room_cannot_switch_to_reference_loop(tmp_path):
+    """Oracle: a seeded room has no loop once its narrow connection is closed."""
+    image = np.zeros((120, 180), np.uint8)
+    image[10:110, :60] = 255
+    image[25:95, 15:45] = 0
+    image[10:110, 80:170] = 255
+    image[58:61, 60:80] = 255
+    line = load_map(write_map(tmp_path, image, .05, name='line'))
+    image[58:61, 60:80] = 0
+    driving = load_map(write_map(tmp_path, image, .05, name='driving'))
+    seed = pixel_to_world(driving, 60, 100)
+    with pytest.raises(ValueError, match='seed.*no usable race loop'):
+        extract_track(driving, seed_xy=seed, centerline_from=line)
+    with pytest.raises(ValueError, match='seed.*no usable race loop'):
+        extract_track(line, seed_xy=seed)
+    loop_seed = pixel_to_world(driving, 60, 5)
+    track = extract_track(driving, seed_xy=loop_seed, centerline_from=line)
+    rows, cols = world_to_pixel(driving, *track.centerline.T)
+    assert track.region[rows, cols].all()
+    assert not track.region[60, 100]
+
+
+def test_clipped_free_seed_projects_to_surviving_loop(tmp_path):
+    """Oracle: opening rounds a rectangular ring corner, not the connected loop."""
+    image = np.zeros((100, 100), np.uint8)
+    image[10:90, 10:90] = 255
+    image[30:70, 30:70] = 0
+    spec = load_map(write_map(tmp_path, image, .05))
+    assert spec.free[10, 10]
+    assert not drop_narrow_gaps(spec.free, .05, .155)[10, 10]
+    seed = pixel_to_world(spec, 10, 10)
+    track = extract_track(spec, seed_xy=seed, centerline_from=spec)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert track.region[rows, cols].all()
+    np.testing.assert_array_equal(track.region, image == 255)
+    thin = np.zeros((100, 100), np.uint8)
+    thin[50:52, 10:90] = 255
+    narrow = load_map(write_map(tmp_path, thin, .05, name='thin'))
+    with pytest.raises(ValueError, match='seed.*no usable race loop'):
+        extract_track(narrow, seed_xy=pixel_to_world(narrow, 50, 20))
+
+
+def test_clipped_seed_on_pinch_requires_intended_loop(tmp_path):
+    """Oracle: two rectangular loops separate when their 15 cm pinch is closed."""
+    image = np.zeros((100, 200), np.uint8)
+    image[10:90, 10:90] = 255
+    image[30:70, 30:70] = 0
+    image[10:90, 110:190] = 255
+    image[30:70, 130:170] = 0
+    image[49:52, 90:110] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert spec.free[50, 100]
+    assert not narrowed[:, 100].any()
+    assert narrowed[50, 20] and narrowed[50, 120]
+    seed = pixel_to_world(spec, 50, 100)
+    with pytest.raises(ValueError, match='seed lies on a pinch.*move.*intended loop'):
+        extract_track(spec, seed_xy=seed, centerline_from=spec)
+
+
+def test_open_corridor_beats_smaller_border_loop(blocked_loop_maps):
+    """Oracle: the barrier opens the corridor, not permission to select the exterior."""
+    driving, _, expected = blocked_loop_maps
+    np.testing.assert_array_equal(driveable_region(driving.free), expected)
+
+
+def test_clipped_corner_seed_ignores_distant_detached_room(tmp_path):
+    """Oracle: a clipped loop corner is far from the room's detached surviving front."""
+    image = np.zeros((100, 200), np.uint8)
+    image[10:90, 10:90] = 255
+    image[30:70, 30:70] = 0
+    image[10:90, 110:190] = 255
+    image[49:52, 90:110] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert spec.free[10, 10] and not narrowed[10, 10]
+    assert not narrowed[:, 100].any()
+    assert narrowed[50, 20] and narrowed[50, 120]
+    seed = pixel_to_world(spec, 10, 10)
+    track = extract_track(spec, seed_xy=seed, centerline_from=spec)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert ((rows >= 10) & (rows < 90) & (cols >= 10) & (cols < 90)).all()
+    assert track.region[rows, cols].all()
+    np.testing.assert_array_equal(track.region, image == 255)
+
+
+def test_clipped_seed_follows_corridor_instead_of_crossing_wall(tmp_path):
+    """Oracle: seed corridor leads to the lower loop; the upper loop is across a wall."""
+    image = np.zeros((220, 220), np.uint8)
+    image[10:90, 10:100] = 255
+    image[30:70, 30:80] = 0
+    image[120:210, 10:100] = 255
+    image[140:190, 30:80] = 0
+    image[50:163, 2:5] = 255
+    image[50:53, 2:11] = 255
+    image[160:163, 2:11] = 255
+    image[91:94, 50:110] = 255
+    image[91:130, 107:110] = 255
+    image[127:130, 95:110] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert spec.free[92, 50] and not narrowed[92, 50]
+    assert not spec.free[90, 50]
+    assert narrowed[80, 50] and narrowed[130, 50]
+    track = extract_track(spec, seed_xy=pixel_to_world(spec, 92, 50), centerline_from=spec)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert ((rows >= 120) & (rows < 210) & (cols >= 10) & (cols < 100)).all()
+    assert track.region[rows, cols].all()
+    np.testing.assert_array_equal(track.region, image == 255)
+
+
+def test_reference_centerline_selects_blocked_corridor(tmp_path, blocked_loop_maps):
+    """Oracle: export the rectangular corridor, retaining the real barrier as wall."""
+    driving, line, expected = blocked_loop_maps
+    track = extract_track(driving, centerline_from=line)
+    write_gym_track(track, tmp_path, 'blocked')
+    np.testing.assert_array_equal(track.region, expected)
+    exported = np.asarray(Image.open(tmp_path / 'blocked.png'))
+    np.testing.assert_array_equal(exported, np.where(expected, 255, 0))
+
+
+def test_reference_votes_and_explicit_seed():
+    """Oracle: three reference points in the small patch, one in the large patch."""
+    free = np.zeros((30, 30), bool)
+    free[1:20, 1:20] = True
+    free[22:28, 22:28] = True
+    reference = (np.array([24, 25, 26, 2]), np.array([24, 25, 26, 2]))
+    expected = np.zeros_like(free)
+    expected[22:28, 22:28] = True
+    np.testing.assert_array_equal(driveable_region(free, reference_rc=reference), expected)
+    np.testing.assert_array_equal(driveable_region(free, (2, 2), reference_rc=reference), free & ~expected)
+    with pytest.raises(ValueError, match='centreline does not intersect free space'):
+        driveable_region(free, reference_rc=(np.array([], int), np.array([], int)))
+    with pytest.raises(ValueError, match='seed component does not intersect'):
+        driveable_region(free, (2, 2), reference_rc=(np.array([24]), np.array([24])))
+
+
+@pytest.mark.parametrize('name', ['car1_course_2026_10_26', 'car2_course_2026_11_11',
+                                 'circular_obs', 'course_2026_10_30',
+                                 'levine_blocked', 'levine_obs', 'room_2026_07_27'])
+def test_catalog_regeneration_keeps_corridor(tmp_path, name):
+    """Invariant: regenerating available catalog maps must not wall off old free cells."""
+    root = Path(__file__).resolve().parents[3]
+    maps = root / 'tools/f1tenth_sim/maps'
+    args = shlex.split(yaml.safe_load((maps / 'catalog.yaml').read_text())[name]['import_command'])
+    source = Path(args[2])
+    if name == 'car1_course_2026_10_26':
+        source = Path('data/rb1/racerbot_auto/20261026-194514-clean/map.yaml')
+    elif name == 'course_2026_10_30':
+        source = Path('data/rb2/racerbot_auto/20261030-185036-fixed/map.yaml')
+    other = load_map(root / args[args.index('--centerline-from') + 1]) if '--centerline-from' in args else None
+    track = extract_track(load_map(root / source), centerline_from=other)
+    write_gym_track(track, tmp_path, name)
+    old_free = np.asarray(Image.open(maps / f'{name}.png')) == 255
+    exported = np.asarray(Image.open(tmp_path / f'{name}.png')) == 255
+    assert old_free.any()
+    assert exported[old_free].all()
 
 
 def test_pixel_to_world_world_to_pixel_roundtrip(tmp_path):

@@ -10,10 +10,14 @@ The simulators drive F1TENTH Gym, which needs three files per track:
 
 A SLAM map (slam_toolbox's map.pgm + map.yaml) or a map from another team's
 repo has the first two, in its own conventions, and never the third. This
-module writes all three: it re-thresholds the image so *unknown* space counts
-as wall (gym treats any pixel above 128 as free, and slam_toolbox writes
-unknown as 205, so a raw SLAM map would let the car drive into unexplored
-space), and it finds the loop's centreline itself.
+module writes all three: it decodes the image using its map_server YAML
+before making Gym's binary image, and it finds the loop's centreline itself.
+Unknown cells remain blocked; a gray pixel can be free under the map's own
+thresholds and must not automatically become a wall. One exception keeps
+SLAM's unexplored space out of the track: map_saver writes unknown as 205
+(p = 0.196), which a YAML free_thresh above 0.196 (our rebuilt maps use 0.25)
+decodes as free. Such cells only become Gym floor in small holes enclosed by
+other free cells; larger or border-touching areas stay walls.
 
 How the centreline is found. A driveable loop is a ring of free space around
 an *island* -- the block of wall the car drives round. The centreline is the
@@ -37,6 +41,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,39 +60,99 @@ class MapSpec:
     origin_x: float
     origin_y: float
     free: np.ndarray          # bool, row 0 = top of the image (largest y)
+    occupancy: np.ndarray | None = None  # map_server values: -1 unknown, 0..100
+    unexplored: np.ndarray | None = None  # free only via map_saver's unknown code
 
 
-# Occupancy below which a pixel counts as free. Stricter than the usual
-# map_server free_thresh (0.196): hand-drawn maps paint "outside the track"
-# light grey (levine: 214, circularTrack: 207, i.e. occupancy 0.16-0.19),
-# which passes 0.196 and would make the whole background driveable. SLAM's
-# free (254) and drawn white (255) are both far below this.
-FREE_BELOW = 0.10
+def track_free(spec: MapSpec) -> np.ndarray:
+    """``spec.free`` without unexplored space: the cells a Gym track may use."""
+    unexplored = getattr(spec, "unexplored", None)
+    return spec.free if unexplored is None else spec.free & ~unexplored
+
+
 # Enclosed wall blobs smaller than this are noise for centreline-finding.
 SPECK_AREA_M2 = 0.01
+# Nav2 map_saver's unknown pixel before applying negate.
+SAVER_UNKNOWN_PIXEL = 205
+# Unknown-coded holes up to this size, enclosed by free space, are free.
+UNKNOWN_HOLE_AREA_M2 = 0.05
 
 
-def load_map(yaml_path: Path, free_below: float = FREE_BELOW) -> MapSpec:
-    """Read a map_server yaml + image; return which pixels are known-free.
+def _unexplored(coded: np.ndarray, free: np.ndarray, resolution: float) -> np.ndarray:
+    """Cells of ``coded`` outside small holes enclosed by other free cells."""
+    import cv2
 
-    A pixel is free when its occupancy probability is below both the map's
-    ``free_thresh`` and ``free_below``. Everything else -- occupied *and*
-    unknown -- is wall: unexplored space is not somewhere the simulated car
-    may go.
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(coded.astype(np.uint8), connectivity=8)
+    known_free = free & ~coded
+    blocked = np.zeros_like(coded)
+    rows, cols = coded.shape
+    limit = math.floor(UNKNOWN_HOLE_AREA_M2 / resolution ** 2 + 1e-9)
+    for label in range(1, count):
+        x, y, w, h, area = stats[label]
+        mask = labels == label
+        if x == 0 or y == 0 or x + w == cols or y + h == rows or area > limit:
+            blocked |= mask
+            continue
+        window = np.s_[y - 1:y + h + 1, x - 1:x + w + 1]
+        local = mask[window].astype(np.uint8)
+        ring = cv2.dilate(local, np.ones((3, 3), np.uint8)).astype(bool) & ~local.astype(bool)
+        if not known_free[window][ring].all():
+            blocked |= mask
+    return blocked
+
+
+def load_map(yaml_path: Path) -> MapSpec:
+    """Decode Nav2 Jazzy map_server pixels, then binarize for Gym.
+
+    Unknown stays blocked, as in pure_pursuit.occupancy_map.OccupancyMap.
+    Jazzy includes threshold equality in the free/occupied classes.
+    Scale/raw costs use that stack's live-grid occupied threshold (50).
+    ``free`` is the map_server decoding. ``unexplored`` marks trinary
+    map_saver-unknown-coded cells decoded free, except small enclosed holes
+    (see _unexplored); track extraction excludes them.
     """
     from PIL import Image  # local: keeps the module importable without Pillow
 
     yaml_path = Path(yaml_path)
     spec = yaml.safe_load(yaml_path.read_text())
-    image = np.asarray(Image.open(yaml_path.parent / spec["image"]).convert("L"),
-                       dtype=np.float64)
+    with Image.open(yaml_path.parent / spec["image"]) as handle:
+        image = np.asarray(handle.convert("L"), dtype=np.float64)
+        alpha = np.asarray(handle.convert("RGBA"))[:, :, 3]
     if image.ndim != 2 or image.size == 0:
         raise ValueError(f"{yaml_path}: map image is empty or not 2-D")
-    negate = int(spec.get("negate", 0))
-    occupancy = image / 255.0 if negate else (255.0 - image) / 255.0
-    free = occupancy < min(float(spec["free_thresh"]), free_below)
+    mode = spec.get("mode", "trinary")
+    if mode not in ("trinary", "scale", "raw"):
+        raise ValueError(f"{yaml_path}: unsupported map mode {mode!r}")
+    negate = spec.get("negate", 0)
+    if negate not in (0, 1):
+        raise ValueError(f"{yaml_path}: negate must be 0 or 1")
+    free_thresh = float(spec["free_thresh"])
+    occupied_thresh = float(spec["occupied_thresh"])
+    if not 0 <= free_thresh < occupied_thresh <= 1:
+        raise ValueError(f"{yaml_path}: require 0 <= free_thresh < occupied_thresh <= 1")
+    if mode == "raw":
+        # Raw map_server pixels already encode 0..100; negate is not applied.
+        occupancy = np.where(image <= 100, image, -1).astype(np.int8)
+    else:
+        p = image / 255.0 if negate else (255.0 - image) / 255.0
+        occupancy = np.full(image.shape, -1, dtype=np.int8)
+        occupancy[p >= occupied_thresh] = 100
+        occupancy[p <= free_thresh] = 0
+        if mode == "scale":
+            middle = (p > free_thresh) & (p < occupied_thresh)
+            occupancy[middle] = np.floor(
+                100 * (p[middle] - free_thresh) / (occupied_thresh - free_thresh) + 0.5
+            ).astype(np.int8)
+        occupancy[alpha < 255] = -1
+    free = (occupancy >= 0) & (occupancy < 50)
+    resolution = float(spec["resolution"])
+    unexplored = None
+    if mode == "trinary":
+        coded = free & (image == (255 - SAVER_UNKNOWN_PIXEL if negate else SAVER_UNKNOWN_PIXEL))
+        if coded.any():
+            unexplored = _unexplored(coded, free, resolution)
     origin = spec["origin"]
-    return MapSpec(float(spec["resolution"]), float(origin[0]), float(origin[1]), free)
+    return MapSpec(resolution, float(origin[0]), float(origin[1]), free, occupancy, unexplored)
 
 
 def pixel_to_world(spec: MapSpec, rows, cols):
@@ -104,9 +169,8 @@ def world_to_pixel(spec: MapSpec, x, y):
     return row, col
 
 
-def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
-    """The connected free region the car drives in: the one containing
-    ``seed_rc`` (row, col), or the largest if no seed is given."""
+def _free_regions(free: np.ndarray, seed_rc=None, reference_rc=None):
+    """Free components ranked by reference votes, enclosure, then size."""
     import cv2
 
     count, labels = cv2.connectedComponents(free.astype(np.uint8), connectivity=4)
@@ -116,11 +180,53 @@ def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
         label = labels[seed_rc]
         if label == 0:
             raise ValueError(f"seed pixel {seed_rc} is not free space")
-    else:
-        sizes = np.bincount(labels.ravel())
-        sizes[0] = 0
-        label = int(np.argmax(sizes))
-    return labels == label
+        yield labels == label
+        return
+    sizes = np.bincount(labels.ravel())
+    votes = np.zeros(count, int) if reference_rc is None else np.bincount(
+        labels[reference_rc], minlength=count)
+    border = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
+    for label in sorted(range(1, count), key=lambda i: (-votes[i], i in border, -sizes[i], i)):
+        yield labels == label
+
+
+def driveable_region(free: np.ndarray, seed_rc=None, reference_rc=None) -> np.ndarray:
+    """Prefer a free loop, or the component containing most reference points.
+
+    Reference rows/columns must be inside the map. An explicit seed wins.
+    A border loop never displaces a larger enclosed component.
+    """
+    largest, largest_size = None, 0
+    enclosed, enclosed_size = None, 0
+    best_reference, best_score = None, 0
+    for region in _free_regions(free, seed_rc, reference_rc):
+        size = int(region.sum())
+        if size > largest_size:
+            largest, largest_size = region, size
+        if seed_rc is not None:
+            if reference_rc is not None and not region[reference_rc].any():
+                raise ValueError("seed component does not intersect the reference centreline")
+            return region
+        if reference_rc is not None:
+            score = int(np.count_nonzero(region[reference_rc]))
+            if score > best_score:
+                best_reference, best_score = region, score
+            continue
+        border = region[0].any() or region[-1].any() or region[:, 0].any() or region[:, -1].any()
+        if not border and size > enclosed_size:
+            enclosed, enclosed_size = region, size
+        elif border and enclosed_size > size:
+            return enclosed
+        try:
+            find_island(region)
+        except ValueError:
+            continue
+        return region
+    if reference_rc is not None:
+        if best_reference is None:
+            raise ValueError("reference centreline does not intersect free space")
+        return best_reference
+    return largest
 
 
 def drop_narrow_gaps(region: np.ndarray, resolution: float, half_width: float) -> np.ndarray:
@@ -138,7 +244,7 @@ def drop_narrow_gaps(region: np.ndarray, resolution: float, half_width: float) -
         return region
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
     opened = cv2.morphologyEx(region.astype(np.uint8), cv2.MORPH_OPEN, kernel)
-    region = driveable_region(opened.astype(bool))
+    region = opened.astype(bool)
     # Wall specks under SPECK_AREA_M2 inside free space (single-pixel SLAM
     # noise) would bend the line round themselves; fill them for this
     # purpose. Real obstacles are bigger (circularTrack's smallest box is
@@ -236,6 +342,65 @@ class ImportedTrack:
     region: np.ndarray          # bool driveable free space
 
 
+def _project_seed(region, narrowed, seed_rc, radius):
+    """Nearest survivor in four-neighbour free-space steps, rejecting competing fronts."""
+    import cv2
+
+    count, labels = cv2.connectedComponents((narrowed & region).astype(np.uint8), connectivity=4)
+    if count < 2:
+        raise ValueError("seed component has no free space after narrowing")
+    visited = np.zeros(region.shape, bool)
+    visited[seed_rc] = True
+    queue = deque([(seed_rc[0], seed_rc[1], 0)])
+    height, width = region.shape
+    nearest, nearest_label, reach = None, 0, None
+    while queue:
+        row, col, distance = queue.popleft()
+        if reach is not None and distance > reach:
+            break
+        label = labels[row, col]
+        if label:
+            if nearest is None:
+                nearest, nearest_label = (row, col), label
+                reach = distance + radius + 1
+            elif label != nearest_label:
+                raise ValueError("seed lies on a pinch between connected regions; "
+                                 "move it into the intended loop")
+        for nr, nc in ((row - 1, col), (row, col - 1), (row, col + 1), (row + 1, col)):
+            if (0 <= nr < height and 0 <= nc < width
+                    and region[nr, nc] and not visited[nr, nc]):
+                visited[nr, nc] = True
+                queue.append((nr, nc, distance + 1))
+    if nearest is None:
+        raise ValueError("seed component has no reachable free space after narrowing")
+    return nearest
+
+
+def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
+    last_error = None
+    for region in _free_regions(track_free(spec), seed_rc):
+        try:
+            narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
+            narrowed_seed = seed_rc
+            if seed_rc is not None and not narrowed[seed_rc]:
+                narrowed_seed = _project_seed(
+                    region, narrowed, seed_rc, int(math.ceil(car_half_width / spec.resolution)))
+            for candidate in _free_regions(narrowed, narrowed_seed):
+                try:
+                    island = find_island(candidate)
+                    pixels = centerline_pixels(candidate, island)
+                except ValueError as exc:
+                    last_error = exc
+                    continue
+                return region, pixels
+        except ValueError as exc:
+            last_error = exc
+    source = "free space" if seed_rc is None else f"seed component at {seed_rc}"
+    raise ValueError(
+        f"{source} is not a loop: no usable race loop after narrowing: {last_error}"
+    ) from last_error
+
+
 def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
                   smooth_m: float = 0.5, centerline_from: MapSpec | None = None,
                   car_half_width: float = 0.155) -> ImportedTrack:
@@ -252,16 +417,10 @@ def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
     if seed_xy is not None:
         r, c = world_to_pixel(spec, seed_xy[0], seed_xy[1])
         seed_rc = (int(r), int(c))
-    region = driveable_region(spec.free, seed_rc)
-
     line_spec = centerline_from or spec
-    line_region = region if centerline_from is None else driveable_region(
-        centerline_from.free,
-        None if seed_xy is None else tuple(int(v) for v in world_to_pixel(
-            centerline_from, seed_xy[0], seed_xy[1])))
-    line_region = drop_narrow_gaps(line_region, line_spec.resolution, car_half_width)
-    island = find_island(line_region)
-    pix = centerline_pixels(line_region, island)
+    line_seed = None if seed_xy is None else tuple(int(v) for v in world_to_pixel(
+        line_spec, seed_xy[0], seed_xy[1]))
+    line_region, pix = _race_loop(line_spec, line_seed, car_half_width)
     x, y = pixel_to_world(line_spec, pix[:, 0], pix[:, 1])
     points = np.column_stack((x, y))
     points = resample_closed(points, line_spec.resolution)
@@ -274,9 +433,11 @@ def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
     points = np.roll(points, -start, axis=0)
 
     # Corridor width at each centreline point, from the map the car drives.
-    d_wall = cv2.distanceTransform(region.astype(np.uint8), cv2.DIST_L2, 5) * spec.resolution
     rows, cols = world_to_pixel(spec, points[:, 0], points[:, 1])
-    inside = (rows >= 0) & (rows < region.shape[0]) & (cols >= 0) & (cols < region.shape[1])
+    inside = (rows >= 0) & (rows < spec.free.shape[0]) & (cols >= 0) & (cols < spec.free.shape[1])
+    region = line_region if centerline_from is None else driveable_region(
+        track_free(spec), seed_rc, reference_rc=(rows[inside], cols[inside]))
+    d_wall = cv2.distanceTransform(region.astype(np.uint8), cv2.DIST_L2, 5) * spec.resolution
     widths = np.zeros(len(points))
     widths[inside] = 2.0 * d_wall[rows[inside], cols[inside]]
     return ImportedTrack(points, widths, spec, region)
