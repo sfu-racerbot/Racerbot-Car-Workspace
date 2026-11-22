@@ -10,8 +10,8 @@ SLURM = ROOT / 'tools/rl_racer/slurm'
 
 
 def test_fir_scripts_parse():
-    subprocess.run(['bash', '-n', *(str(SLURM / name) for name in
-                   ('fir_setup.sh', 'fir_env.sh', 'train_paper.sbatch'))], check=True)
+    for name in ('fir_setup.sh', 'fir_env.sh', 'train_paper.sbatch'):
+        subprocess.run(['bash', '-n', str(SLURM / name)], check=True)
 
 
 def test_fir_requires_signoff():
