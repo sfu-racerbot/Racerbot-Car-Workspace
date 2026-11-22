@@ -122,7 +122,11 @@ def world_to_pixel(spec: MapSpec, x, y):
 
 def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
     """The connected free region the car drives in: the one containing
-    ``seed_rc`` (row, col), or the largest if no seed is given."""
+    ``seed_rc`` (row, col), or the largest enclosed loop if available.
+
+    A free exterior or island interior is not the race corridor. If no
+    enclosed loop exists, retain the largest component (e.g. an open map).
+    """
     import cv2
 
     count, labels = cv2.connectedComponents(free.astype(np.uint8), connectivity=4)
@@ -136,6 +140,16 @@ def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
         sizes = np.bincount(labels.ravel())
         sizes[0] = 0
         label = int(np.argmax(sizes))
+        border = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
+        for candidate in np.argsort(sizes)[::-1]:
+            if sizes[candidate] == 0 or candidate in border:
+                continue
+            try:
+                find_island(labels == candidate)
+            except ValueError:
+                continue
+            label = int(candidate)
+            break
     return labels == label
 
 

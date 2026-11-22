@@ -5,6 +5,7 @@ or follows directly from map_server conventions / the formulas in the module.
 """
 import math
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from PIL import Image
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from track_import import (
     SPECK_AREA_M2,
+    driveable_region,
     drop_narrow_gaps,
     extract_track,
     load_map,
@@ -165,6 +167,58 @@ def test_nov9_map_gray_free_cells(tmp_path):
     for row, col in [(207, 188), (307, 116)]:
         assert spec.free[row-1:row+2, col-1:col+2].all()
         assert (exported[row-1:row+2, col-1:col+2] == 255).all()
+
+
+def test_driveable_region_prefers_enclosed_loop():
+    """Oracle: a rectangular corridor, with larger free exterior and interior."""
+    free = np.ones((60, 60), dtype=bool)
+    free[10:50, 10:50] = False
+    free[12:48, 12:48] = True
+    free[14:46, 14:46] = False
+    free[18:42, 18:42] = True
+    expected = np.zeros_like(free)
+    expected[12:48, 12:48] = True
+    expected[14:46, 14:46] = False
+    np.testing.assert_array_equal(driveable_region(free), expected)
+    selected = driveable_region(free, (0, 0))
+    assert selected[0, 0] and not selected[12, 12] and not selected[18, 18]
+
+
+def test_driveable_region_fallback_and_errors():
+    """Oracle: without an enclosed loop, retain the largest component."""
+    np.testing.assert_array_equal(driveable_region(np.ones((1, 1), bool)), [[True]])
+    free = np.zeros((5, 5), bool)
+    free[0, :3] = True
+    free[3, 3] = True
+    expected = np.zeros_like(free)
+    expected[0, :3] = True
+    np.testing.assert_array_equal(driveable_region(free), expected)
+    with pytest.raises(ValueError, match='no free space'):
+        driveable_region(np.zeros((1, 1), bool))
+    with pytest.raises(ValueError, match='not free space'):
+        driveable_region(free, (2, 2))
+
+
+@pytest.mark.parametrize('name', ['car1_course_2026_10_26', 'car2_course_2026_11_11',
+                                 'circular_obs', 'course_2026_10_30',
+                                 'levine_blocked', 'levine_obs', 'room_2026_07_27'])
+def test_catalog_regeneration_keeps_corridor(tmp_path, name):
+    """Invariant: regenerating available catalog maps must not wall off old free cells."""
+    root = Path(__file__).resolve().parents[3]
+    maps = root / 'tools/f1tenth_sim/maps'
+    args = shlex.split(yaml.safe_load((maps / 'catalog.yaml').read_text())[name]['import_command'])
+    source = Path(args[2])
+    if name == 'car1_course_2026_10_26':
+        source = Path('data/rb1/racerbot_auto/20261026-194514-clean/map.yaml')
+    elif name == 'course_2026_10_30':
+        source = Path('data/rb2/racerbot_auto/20261030-185036-fixed/map.yaml')
+    other = load_map(root / args[args.index('--centerline-from') + 1]) if '--centerline-from' in args else None
+    track = extract_track(load_map(root / source), centerline_from=other)
+    write_gym_track(track, tmp_path, name)
+    old_free = np.asarray(Image.open(maps / f'{name}.png')) == 255
+    exported = np.asarray(Image.open(tmp_path / f'{name}.png')) == 255
+    assert old_free.any()
+    assert exported[old_free].all()
 
 
 def test_pixel_to_world_world_to_pixel_roundtrip(tmp_path):
