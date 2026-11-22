@@ -612,10 +612,12 @@ class Floor:
     fit_runs: tuple
     held_out_runs: tuple
     track: str = ""
+    measured_car: str = ""
 
 
 FLOORS: dict[str, Floor] = {
     "sfu_course_2026_11_06": Floor(
+        measured_car="rb2",
         name="sfu_course_2026_11_06",
         description="Car 2 on the 2026-11-06 floor and tyres; fitted only on course 06a, "
                     "held out on 06a and 06b. See docs/sim-calibration.md and the adjacent measurement JSON.",
@@ -687,6 +689,7 @@ FLOORS: dict[str, Floor] = {
         ),
     ),
     "sfu_course_2026_11_11_rb2": Floor(
+        measured_car="rb2",
         name="sfu_course_2026_11_11_rb2",
         description="Car 2 on the 2026-11-11 race-day course (UVic), measured from its race-day runs. The grip "
                     "curve FALLS past its peak (2.94 m/s^2 at 3.75 asked, 2.7 beyond). See docs/sim-calibration.md "
@@ -754,6 +757,7 @@ FLOORS: dict[str, Floor] = {
         ),
     ),
     "sfu_course_2026_10_30": Floor(
+        measured_car="rb2",
         name="sfu_course_2026_10_30",
         description="The 2026-10-30 course's floor and the tyres on car 2 that day. Measured "
                     "with tools/run_analysis/car_measure.py; see docs/sim-calibration.md.",

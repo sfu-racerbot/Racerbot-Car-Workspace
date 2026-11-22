@@ -29,7 +29,7 @@ from racerbot_car import identity
 from racerbot_car.profile import load_profile
 
 
-def add_sim_python_path(workspace_root=None) -> None:
+def add_sim_python_path(workspace_root=None) -> Path:
     """Put the pinned F1TENTH Gym and its deps on sys.path.
 
     The gym lives under `.sim/` (gitignored, installed by
@@ -55,6 +55,7 @@ def add_sim_python_path(workspace_root=None) -> None:
         if text not in sys.path:
             sys.path.insert(0, text)
     os.environ.setdefault('NUMBA_CACHE_DIR', str(sim_root / 'numba-cache'))
+    return root
 
 
 # --- Geometry and timing, shared with tools/f1tenth_sim/run_validation.py ---
@@ -111,8 +112,19 @@ class SimConfig:
     controlled_cars: int = 1
     controlled_start_offsets_m: tuple = ()
     car: str = ''
+    physics: str = 'stock'
+    floor: str = ''
 
     def __post_init__(self):
+        if self.physics not in ('stock', 'calibrated'):
+            raise ValueError("physics must be 'stock' or 'calibrated'")
+        if self.floor and self.physics != 'calibrated':
+            raise ValueError('a floor requires calibrated physics')
+        if self.physics == 'calibrated':
+            if self.controlled_cars != 1 or self.opponents:
+                raise ValueError('calibrated physics supports a single car without opponents')
+            if self.control_dt != 0.025:
+                raise ValueError('calibrated command delays require 40 Hz')
         if type(self.controlled_cars) is not int or self.controlled_cars < 1:
             raise ValueError('controlled_cars must be a positive integer')
         if self.controlled_start_offsets_m and len(self.controlled_start_offsets_m) != self.controlled_cars:
@@ -260,7 +272,7 @@ class SimBridge:
 
     def __init__(self, config: SimConfig):
         profile = resolve_car_profile(config.car)
-        add_sim_python_path()
+        root = add_sim_python_path()
         import gymnasium as gym
         import f1tenth_gym  # noqa: F401  registers the environment
         from f1tenth_gym.envs.dynamic_models import (
@@ -288,14 +300,28 @@ class SimBridge:
             noise_std=LIDAR_NOISE_STD,
             base_link_to_lidar_tf=(LIDAR_OFFSET_X, 0.0, 0.0),
         )
-        params = F1TENTH_VEHICLE_PARAMETERS.with_updates(
-            **vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad))
+        self.plant = None
+        if config.physics == 'calibrated':
+            fidelity_path = str(root / 'tools' / 'f1tenth_sim')
+            if fidelity_path not in sys.path:
+                sys.path.insert(0, fidelity_path)
+            from sim_fidelity import FLOORS, PROFILES, FidelityPlant, calibration_for_car, with_floor
+            from sim_fidelity.plant import env_components
+            calibration = with_floor(config.floor or None, calibration_for_car(profile.id))
+            if config.floor and FLOORS[config.floor].measured_car != profile.id:
+                raise ValueError(f'floor {config.floor} was not measured on {profile.id}')
+            physics_profile = PROFILES['plant']  # The bridge owns the ROS sensor models.
+            components = env_components(physics_profile, calibration)
+        else:
+            components = dict(
+                params=F1TENTH_VEHICLE_PARAMETERS.with_updates(
+                    **vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad)),
+                control_config=ControlConfig(steer_delay_steps=1))
+        components['lidar_config'] = self.lidar_config
         env_config = EnvConfig(
             seed=config.seed,
             map_name=str(config.track_path),
-            params=params,
             num_agents=self.num_agents,
-            control_config=ControlConfig(steer_delay_steps=1),
             simulation_config=SimulationConfig(
                 timestep=config.control_dt,
                 integrator_timestep=INTEGRATOR_DT,
@@ -304,11 +330,14 @@ class SimBridge:
                 max_laps=10_000,
             ),
             observation_config=ObservationConfig(type=ObservationType.DIRECT),
-            lidar_config=self.lidar_config,
             render_enabled=False,
+            **components,
         )
         self.env = gym.make('f1tenth_gym:f1tenth-v0', config=env_config,
                             render_mode=None)
+        if config.physics == 'calibrated':
+            self.plant = FidelityPlant(self.env, physics_profile, self.num_agents,
+                                       config.seed, config.control_dt, calibration)
         # Gym's response zeros state[3:], including yaw, snapping a car to
         # heading zero on padded-envelope contact. On 2026-10-20 that sent
         # two cars lapping backwards. Use our body_contact/car_contact
@@ -361,14 +390,16 @@ class SimBridge:
         # Reassert before every reset: gym's collision response would zero
         # state[3:], including yaw; body_contact/car_contact are our verdicts.
         self.env.unwrapped.sim.ttc_threshold = -math.inf
-        self._obs, _ = self.env.reset(
-            options={'poses': np.asarray(poses, dtype=float)})
+        poses = np.asarray(poses, dtype=float)
+        if self.plant is None:
+            self._obs, _ = self.env.reset(options={'poses': poses})
+        else:
+            self._obs, _ = self.plant.reset(poses)
         # The environment zero-fills every scan until the first step, and a
         # zeroed LaserScan reads as "obstacle at 0m in every direction" to
         # every safety layer downstream. Take one stationary step so the
         # first scan the bridge can publish is a real one.
-        self._obs, _reward, _done, _truncated, _info = self.env.step(
-            np.zeros((self.num_agents, 2), dtype=np.float32))
+        self._advance(np.zeros((self.num_agents, 2), dtype=np.float32))
         self.sim_time = 0.0
         self.steps = 0
         self._last_ego_steering = 0.0
@@ -473,6 +504,12 @@ class SimBridge:
 
     # -- stepping ----------------------------------------------------------
 
+    def _advance(self, actions):
+        if self.plant is None:
+            self._obs, *_ = self.env.step(np.asarray(actions, dtype=np.float32))
+        else:
+            self._obs, *_ = self.plant.step(actions)
+
     def step(self, ego_steering: float, ego_speed: float):
         """Advance one control period with the ego's latest drive command."""
         if self.config.controlled_cars != 1:
@@ -489,8 +526,7 @@ class SimBridge:
             steering, speed = follower.command(state.x, state.y, state.yaw)
             actions.append([steering, speed])
 
-        self._obs, _reward, _done, _truncated, _info = self.env.step(
-            np.asarray(actions, dtype=np.float32))
+        self._advance(actions)
         self.sim_time += self.config.control_dt
         self.steps += 1
 

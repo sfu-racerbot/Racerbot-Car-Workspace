@@ -54,6 +54,8 @@ class GymBridgeNode(Node):
         super().__init__('gym_bridge_node')
         self.declare_parameter('car', '')
         car_profile = resolve_car_profile(self.get_parameter('car').value)
+        self.declare_parameter('physics', 'stock')
+        self.declare_parameter('floor', '')
 
         self.declare_parameter('track', 'indoor_oval')
         self.declare_parameter('track_directory', '~/.ros/racerbot_sim/tracks')
@@ -128,6 +130,7 @@ class GymBridgeNode(Node):
 
         self.bridge = SimBridge(SimConfig(
             car=car_profile.id,
+            physics=str(value('physics')), floor=str(value('floor')),
             track_path=str(track_path),
             centerline=centerline,
             control_dt=1.0 / self.rate_hz,
@@ -409,12 +412,16 @@ class GymBridgeNode(Node):
                              wall_contact_steps=self.wall_contact_counts[i]))
         message.data = json.dumps({
             'track': self.track_name,
+            'physics': self.bridge.config.physics,
+            'car_profile': self.bridge.config.car,
+            'floor': self.bridge.config.floor,
             'sim_time_s': round(self.bridge.sim_time, 3),
             'steps': self.bridge.steps,
             'num_agents': self.bridge.num_agents,
             'ego': {
                 'x': round(ego.x, 4), 'y': round(ego.y, 4),
                 'yaw': round(ego.yaw, 4), 'speed': round(ego.speed, 4),
+                'yaw_rate': round(ego.yaw_rate, 4),
             },
             'commanded': {
                 'speed': round(self.commanded_speed, 4),
