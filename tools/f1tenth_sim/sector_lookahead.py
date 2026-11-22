@@ -43,7 +43,8 @@ def select_schedule(training):
                 run = by[seed, o]
                 before = by[seed, 0.]['sectors'][j]
                 after = run['sectors'][j]
-                if (run['dnf'] or run['contacts'] or before is None or after is None
+                if (run['failed_start'] or run['dnf'] or run['contacts']
+                        or before is None or after is None
                         or after['min_wall'] + 1e-9 < before['min_wall']):
                     break
                 times.extend(after['times'])

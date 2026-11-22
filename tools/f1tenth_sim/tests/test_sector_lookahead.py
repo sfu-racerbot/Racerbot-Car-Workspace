@@ -33,8 +33,12 @@ def test_selection_rejects_contact_dnf_and_clearance_loss_before_sector_time():
         for o in OFFSETS:
             secs = [dict(min_wall=.1 - (.01 if o > 0 and j == 1 else 0.),
                          times=[2. - o * (1 if j < 2 else -1)]) for j in range(6)]
-            rows.append(dict(seed=seed, offset=o, contacts=0, dnf=False, sectors=secs))
+            rows.append(dict(seed=seed, offset=o, contacts=0, dnf=False,
+                             failed_start=False, sectors=secs))
     assert select_schedule(rows) == [.1, 0., -.1, -.1, -.1, -.1]
+    rows[-1]['failed_start'] = True
+    assert select_schedule(rows) == [0., 0., -.1, -.1, -.1, -.1]
+    rows[-1]['failed_start'] = False
     rows[-1]['contacts'] = 1   # fastest probe hit a wall on the second seed
     rows[-2]['dnf'] = True    # other nonzero probe didn't finish
     assert select_schedule(rows) == [0.] * 6
