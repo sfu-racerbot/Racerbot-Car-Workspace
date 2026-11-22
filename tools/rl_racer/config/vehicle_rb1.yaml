@@ -1,0 +1,34 @@
+vehicle:
+  mass: 3.74  # kg; sim_fidelity/calibration.py CarCalibration default; to be identified on rb1
+  wheelbase: 0.36  # m; tools/f1tenth_sim/sim_fidelity/calibration.py CarCalibration
+  inertia: 0.04712  # kg m^2; same source (stock estimate); to be identified
+  front_fraction: 0.5  # same source cog_front_fraction; to be identified by axle weighing
+  friction: 0.55  # same source surface_friction default; floor-specific, to be identified
+  lateral_b_front: 2.94875  # 4.718/1.6; same source cornering_stiffness_front, tyres.py C=1.6
+  lateral_b_rear: 3.410125  # 5.4562/1.6; same source cornering_stiffness_rear, tyres.py C=1.6
+  lateral_c: 1.6  # tools/f1tenth_sim/sim_fidelity/tyres.py TyreModel.shape default
+  lateral_e: 0.0  # matches tyres.py default atan formula; to be identified
+  longitudinal_b: 10.0  # to be identified; provisional longitudinal slip stiffness
+  longitudinal_c: 1.6  # to be identified; provisional shape, matching lateral C
+  longitudinal_e: 0.0  # to be identified; provisional curvature
+  steer_min: -0.46265060240963857  # rad; src/racerbot_car/cars/rb1/car.yaml full_lock_rad.right
+  steer_max: 0.401  # rad; same source full_lock_rad.left (physical, not autonomy's 0.33 cap)
+  steer_tau: 0.06666666666666667  # s; reciprocal of calibration.py steering_servo_gain=15; to be identified
+  steer_rate: 2.5  # rad/s; provisional calibration.py servo rate used for rb2; to be identified on rb1
+  wheel_tau: 0.05  # s; reciprocal rb1/sim/speed_loop.yaml accel_gain=20; symmetric approximation, to be identified
+  wheel_rate: 5.5  # m/s^2; src/racerbot_car/cars/rb1/sim/speed_loop.yaml accel_max; symmetric approximation
+  v_max: 5.054347826086956  # m/s; shared f1tenth_stack/config/vesc.yaml speed_max 23250 / rb1/calibration/vesc.yaml gain 4600
+  slip_floor: 0.5  # m/s; numerical regularizer; to be identified
+  substep: 0.002  # s; numerical integration choice, not a physical measurement
+
+environment:
+  dt: 0.05  # arXiv:2504.02420 section III-E
+  preview_points: 20  # design choice; paper does not specify N
+  time_limit: 1000  # control steps; design choice
+  reset_speed: 0.2  # m/s; design choice
+  dr_sigma: 0.02  # paper's selected friction-only configuration
+  dr_parameters: [friction]
+  # Fixed scales in observation order; provisional, to be identified from driving data.
+  observation_scale: [6.0, 3.0, 6.0, 3.141592653589793, 2.0, 0.5, 0.5, 6.0, 6.0, 5.0]
+  curvature_scale: 2.0  # 1/m; to be identified from track geometry
+  width_scale: 2.0  # m (full width); to be identified from track geometry
