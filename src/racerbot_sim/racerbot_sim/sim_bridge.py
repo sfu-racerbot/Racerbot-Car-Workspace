@@ -472,7 +472,14 @@ class SimBridge:
         return result
 
     def body_contact(self, index: int = 0) -> bool:
-        """True when any part of the padded body is in an occupied cell."""
+        """True when the car touches a wall.
+
+        Calibrated physics reports its own chassis check, which uses the
+        track's contact walls where it has them; stock tests any part of the
+        padded body against the occupancy grid.
+        """
+        if self.plant is not None:
+            return index in self.plant.wall_contacts()
         state = self.agent_state(index)
         cos_yaw, sin_yaw = math.cos(state.yaw), math.sin(state.yaw)
         # The collision rectangle is centred on base_link for this workspace's
