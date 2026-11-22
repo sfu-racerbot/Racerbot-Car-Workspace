@@ -174,12 +174,12 @@ def positive(value):
 def map_hashes(*yaml_paths):
     hashes = {}
     for path in yaml_paths:
-        path = Path(path).expanduser().resolve()
+        path = Path(path).expanduser().absolute()
         metadata = yaml.safe_load(path.read_text())
         image = metadata.get('image') if isinstance(metadata, dict) else None
         if not isinstance(image, str) or not image.strip():
             raise ValueError(f'{path}: image must be a nonempty path')
-        for source in (path, (path.parent / image).resolve()):
+        for source in (path, (path.parent / image).absolute()):
             key = str(source.relative_to(ROOT)) if source.is_relative_to(ROOT) else str(source)
             hashes[key] = hashlib.sha256(source.read_bytes()).hexdigest()
     return hashes
@@ -198,8 +198,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.laps < 1 or len(set(args.seeds)) != len(args.seeds) or min(args.seeds) < 0:
         ap.error('laps must be positive and seeds must be unique nonnegative integers')
-    args.map_yaml = args.map_yaml.expanduser().resolve()
-    args.centerline_from = args.centerline_from.expanduser().resolve()
+    args.map_yaml = args.map_yaml.expanduser().absolute()
+    args.centerline_from = args.centerline_from.expanduser().absolute()
     try:
         hashes = map_hashes(args.map_yaml, args.centerline_from)
     except (OSError, ValueError, yaml.YAMLError) as exc:

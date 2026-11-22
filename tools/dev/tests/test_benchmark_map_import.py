@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import yaml
+from PIL import Image
 
 PATH = Path(__file__).resolve().parents[1] / 'benchmark_map_import.py'
 SPEC = importlib.util.spec_from_file_location('benchmark_map_import', PATH)
@@ -142,6 +143,29 @@ def test_map_hashes_default_relative_path():
     assert hashes == bench.map_hashes(bench.ROOT / bench.MAP)
     assert bench.MAP in hashes
     assert bench.MAP.replace('map.yaml', 'map.pgm') in hashes
+
+
+def test_symlinked_yaml_uses_supplied_parent(tmp_path):
+    """Oracle: load_map opens the relative image beside the supplied YAML link."""
+    stored = tmp_path / 'stored'
+    supplied = tmp_path / 'supplied'
+    stored.mkdir()
+    supplied.mkdir()
+    target = stored / 'map.yaml'
+    target.write_text(yaml.safe_dump(dict(image='club.png', resolution=.05,
+                                        origin=[0., 0., 0.], negate=0,
+                                        free_thresh=.25, occupied_thresh=.65)))
+    alias = supplied / 'map.yaml'
+    alias.symlink_to(target)
+    Image.fromarray(np.zeros((2, 2), np.uint8)).save(stored / 'club.png')
+    Image.fromarray(np.full((2, 2), 255, np.uint8)).save(supplied / 'club.png')
+    importer = bench.load_importer((bench.ROOT / bench.IMPORTER).read_text(), 'symlink_test_importer')
+    assert importer.load_map(alias).free.all()
+    hashes = bench.map_hashes(alias)
+    assert hashes == {
+        str(alias): hashlib.sha256(target.read_bytes()).hexdigest(),
+        str(supplied / 'club.png'): hashlib.sha256((supplied / 'club.png').read_bytes()).hexdigest(),
+    }
 
 
 @pytest.mark.parametrize('metadata,error', [
