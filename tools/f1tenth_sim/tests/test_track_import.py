@@ -280,6 +280,26 @@ def test_seeded_room_cannot_switch_to_reference_loop(tmp_path):
     assert not track.region[60, 100]
 
 
+def test_clipped_free_seed_projects_to_surviving_loop(tmp_path):
+    """Oracle: opening rounds a rectangular ring corner, not the connected loop."""
+    image = np.zeros((100, 100), np.uint8)
+    image[10:90, 10:90] = 255
+    image[30:70, 30:70] = 0
+    spec = load_map(write_map(tmp_path, image, .05))
+    assert spec.free[10, 10]
+    assert not drop_narrow_gaps(spec.free, .05, .155)[10, 10]
+    seed = pixel_to_world(spec, 10, 10)
+    track = extract_track(spec, seed_xy=seed, centerline_from=spec)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert track.region[rows, cols].all()
+    np.testing.assert_array_equal(track.region, image == 255)
+    thin = np.zeros((100, 100), np.uint8)
+    thin[50:52, 10:90] = 255
+    narrow = load_map(write_map(tmp_path, thin, .05, name='thin'))
+    with pytest.raises(ValueError, match='seed.*no usable race loop'):
+        extract_track(narrow, seed_xy=pixel_to_world(narrow, 50, 20))
+
+
 def test_open_corridor_beats_smaller_border_loop(blocked_loop_maps):
     """Oracle: the barrier opens the corridor, not permission to select the exterior."""
     driving, _, expected = blocked_loop_maps

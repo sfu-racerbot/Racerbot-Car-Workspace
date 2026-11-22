@@ -299,7 +299,14 @@ def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
     for region in _free_regions(spec.free, seed_rc):
         try:
             narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
-            for candidate in _free_regions(narrowed, seed_rc):
+            narrowed_seed = seed_rc
+            if seed_rc is not None and not narrowed[seed_rc]:
+                survivors = np.argwhere(narrowed & region)
+                if not len(survivors):
+                    raise ValueError("seed component has no free space after narrowing")
+                nearest = np.argmin(((survivors - seed_rc) ** 2).sum(axis=1))
+                narrowed_seed = tuple(survivors[nearest])
+            for candidate in _free_regions(narrowed, narrowed_seed):
                 try:
                     island = find_island(candidate)
                     pixels = centerline_pixels(candidate, island)
