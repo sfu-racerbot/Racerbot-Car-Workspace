@@ -953,7 +953,8 @@ def find_gap_with_fallback(window: np.ndarray, preferred_distance: float,
     return start, end, start is not None
 
 
-def aim_within_gap(window, gap_start, gap_end, beam_angles, depth_bias: float = 0.0):
+def aim_within_gap(window, gap_start, gap_end, beam_angles, depth_bias: float = 0.0,
+                   *, open_aim_min_width: float = 0.0, max_range: float = math.inf):
     """Pick the beam to steer at inside a chosen gap.
 
     ``depth_bias`` slides the aim from the gap's midpoint (0, the classic
@@ -988,7 +989,9 @@ def aim_within_gap(window, gap_start, gap_end, beam_angles, depth_bias: float = 
     the edge of the field of view, i.e. hard over to one side in exactly
     the situation where the car should go straight. Among the beams that
     are effectively as deep as the deepest, take the one closest to
-    straight ahead.
+    straight ahead. If the gap reaches max_range and open-gap aim is enabled,
+    center the aim inside that beam's contiguous band of near-deepest rays.
+    Keep the old aim if the band is too narrow or ends at the field of view.
     """
     if gap_start is None:
         return None
@@ -1001,7 +1004,16 @@ def aim_within_gap(window, gap_start, gap_end, beam_angles, depth_bias: float = 
     near_deepest = np.nonzero(
         depths >= deepest - max(1e-6, 0.05 * deepest))[0]
     angles = beam_angles[gap_start:gap_end + 1][near_deepest]
-    deepest_idx = gap_start + int(near_deepest[int(np.argmin(np.abs(angles)))])
+    nearest = near_deepest[np.argmin(np.abs(angles))]
+    deepest_idx = gap_start + int(nearest)
+    if open_aim_min_width > 0.0 and deepest >= max_range:
+        # Split at shallower beams: averaging disconnected bands can aim at a wall.
+        breaks = np.flatnonzero(np.diff(near_deepest) > 1) + 1
+        band = next(b for b in np.split(near_deepest, breaks) if b[0] <= nearest <= b[-1])
+        left, right = gap_start + int(band[0]), gap_start + int(band[-1])
+        arc_width = deepest * (beam_angles[right] - beam_angles[left])
+        if left > 0 and right < len(window) - 1 and arc_width >= open_aim_min_width:
+            deepest_idx = (left + right) // 2
     if clipped:
         return deepest_idx
     midpoint = (gap_start + gap_end) // 2

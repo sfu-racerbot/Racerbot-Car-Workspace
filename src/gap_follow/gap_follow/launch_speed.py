@@ -66,7 +66,7 @@ def speed_cap_overrides(yaml_params, requested):
 #: the shipped values on the course of 2026-10-30, and worse with another car on the
 #: track, which is why opponent awareness goes off with it and why it is not the
 #: default (docs/gap-follow.md#speed-on-the-real-course-2026-10-30).
-TIME_TRIAL = {'aim_depth_bias': 1.0, 'max_lateral_accel': 3.0,
+TIME_TRIAL = {'aim_depth_bias': 1.0, 'open_aim_min_width': 1.24, 'max_lateral_accel': 3.0,
               'enable_opponent_awareness': False}
 
 

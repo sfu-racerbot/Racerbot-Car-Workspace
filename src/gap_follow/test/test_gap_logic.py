@@ -1624,3 +1624,35 @@ def test_aim_depth_bias_leaves_a_clipped_gap_on_the_deepest_beam():
 
 def test_aim_depth_bias_with_no_gap_is_none():
     assert gap_logic.aim_within_gap(_AIM_WINDOW, None, None, _AIM_ANGLES, 1.0) is None
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_open_aim_centers_only_one_contiguous_band(reverse):
+    # Two equally deep views of the track with a shallower return between.
+    # The closest-to-straight band is 22..28; its center, not the center of
+    # both views, is the target. Reflecting the scan must reflect the aim.
+    window = np.full(41, 4.0)
+    window[22:29] = 10.0
+    window[30:41] = 10.0
+    if reverse:
+        window = window[::-1]
+    aim = gap_logic.aim_within_gap(window, 0, 40, _AIM_ANGLES, 1.0,
+                                   open_aim_min_width=1.0, max_range=10.0)
+    assert aim == (40 - 25 if reverse else 25)
+
+
+@pytest.mark.parametrize('start,end,depth,min_width,expected', [
+    (22, 26, 10.0, 1.25, 24),  # 4 steps * (1/32 rad) * 10 m, exactly wide enough
+    (22, 26, 10.0, 1.251, 22),
+    (22, 26, 9.99, 1.0, 22),   # not range-limited
+    (22, 26, 10.0, 0.0, 22),   # opt-out
+    (0, 10, 10.0, 1.0, 10),    # missing left edge
+    (30, 40, 10.0, 1.0, 30),   # missing right edge
+    (25, 25, 10.0, 0.01, 25),  # isolated return
+])
+def test_open_aim_requires_a_wide_bounded_range_plateau(start, end, depth, min_width, expected):
+    window = np.full(41, 4.0)
+    window[start:end + 1] = depth
+    angles = (np.arange(41) - 20) / 32.0
+    assert gap_logic.aim_within_gap(window, 0, 40, angles, 1.0,
+                                    open_aim_min_width=min_width, max_range=10.0) == expected
