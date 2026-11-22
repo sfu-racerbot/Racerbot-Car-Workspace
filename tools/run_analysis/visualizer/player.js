@@ -46,10 +46,9 @@ function sample(series, t) {
   return series[lo - 1];
 }
 
-function path(parent, rows, point, attrs) {
+function drawOdometry(parent, rows, point, attrs) {
   if (!rows.length) return;
-  const coords = rows.map(row => point(row).map(n => n.toFixed(2)).join(","));
-  svg(parent, "path", {d: "M" + coords.join(" L"), fill: "none", "stroke-linejoin": "round", ...attrs});
+  svg(parent, "path", {d: odometryPath(rows, point), fill: "none", "stroke-linejoin": "round", ...attrs});
 }
 
 function trajectory(plot, run, ext, scale) {
@@ -62,7 +61,7 @@ function trajectory(plot, run, ext, scale) {
   for (let m = Math.ceil((cy - 94 / scale) / step) * step; y(m) > 0; m += step) {
     svg(plot, "line", {x1: 0, x2: 500, y1: y(m), y2: y(m), stroke: "#304b43"});
   }
-  path(plot, run.odom, r => [x(r[1]), y(r[2])], {stroke: "var(--accent)", "stroke-width": 1.7});
+  drawOdometry(plot, run.odom, r => [x(r[1]), y(r[2])], {stroke: "var(--accent)", "stroke-width": 1.7});
   svg(plot, "circle", {cx: x(0), cy: y(0), r: 5.5, fill: "#152d28", stroke: "#fff", "stroke-width": 1.5});
   svg(plot, "path", {d: "M9 158v15h15m-15 -15l-2 4m17 11l-4 -2", fill: "none", stroke: "#b5cabe"});
   svg(plot, "text", {x: 5, y: 155, fill: "#b5cabe"}, "Y");
@@ -95,7 +94,7 @@ function chart(plot, series, bounds) {
   }
   for (const [rows, col, kind] of series) {
     if (kind === "odom") {
-      path(plot, rows, r => [x(r[0]), y(r[col])], {stroke: "var(--trace)", "stroke-width": 1.8});
+      drawOdometry(plot, rows, r => [x(r[0]), y(r[col])], {stroke: "var(--trace)", "stroke-width": 1.8});
     } else {
       const attrs = kind === "target" ? {stroke: "#657382", "stroke-dasharray": "4 3"} : {stroke: "var(--trace)"};
       svg(plot, "path", {d: commandPath(rows, col, x, y), fill: "none", "stroke-width": 1.5, ...attrs});
@@ -132,9 +131,11 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
     selected[i] = Number(menu.value); refresh(time);
     panels.querySelectorAll(".run-select")[i].focus();
   };
-  for (const [cls, value, unit] of [["duration", run.duration, "s"], ["distance", run.distance, "m"], ["peak", run.peak, "m/s"]]) {
+  for (const [cls, value, unit] of [["duration", run.duration, "s"], ["distance", completeDistance(run), "m"], ["peak", run.peak, "m/s"]]) {
     const strong = q("." + cls), small = document.createElement("small");
-    strong.textContent = value.toFixed(1) + " "; small.textContent = unit; strong.append(small);
+    strong.textContent = (value === null ? "—" : value.toFixed(1)) + " ";
+    small.textContent = value === null ? "Incomplete · odometry gap" : unit;
+    strong.append(small);
   }
   const map = trajectory(q(".map"), run, ext, scale);
   q(".cmd-key").hidden = !run.cmdTopic;
@@ -147,7 +148,7 @@ function panel(run, i, ext, scale, speedRange, steerRange) {
   panels.append(root);
   return t => {
     const ended = t > run.duration;
-    const prev = sample(run.odom, t), odom = prev && t - prev[0] <= 0.5 ? prev : null;
+    const prev = sample(run.odom, t), odom = prev && t - prev[0] <= ODOM_MAX_AGE ? prev : null;
     const cmd = sample(run.cmd, t), joy = sample(run.joy, t);
     map(odom); speed(t); steer(t);
     poseState.textContent = odom ? "● Cursor" : t < run.odom[0][0] ? "Waiting for odometry" :
