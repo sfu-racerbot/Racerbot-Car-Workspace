@@ -202,6 +202,26 @@ def test_driveable_region_fallback_and_errors():
         driveable_region(free, (2, 2))
 
 
+def test_cropped_corridor_survives_false_enclosed_loop(tmp_path):
+    """Oracle: wide rectangular race ring at the border, thin false ring inside."""
+    image = np.zeros((100, 100), np.uint8)
+    image[:90, :90] = 255
+    image[15:75, 15:75] = 0
+    image[30:39, 30:39] = 255
+    image[32:37, 32:37] = 0
+    spec = load_map(write_map(tmp_path, image, .05))
+    expected = image == 255
+    expected[30:39, 30:39] = False
+    track = extract_track(spec)
+    np.testing.assert_array_equal(track.region, expected)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert expected[rows.astype(int), cols.astype(int)].all()
+    # Explicitly selecting the false loop must not silently switch corridors.
+    seed = pixel_to_world(spec, 30, 30)
+    with pytest.raises(ValueError, match='no free space|not a loop|usable race loop'):
+        extract_track(spec, seed_xy=seed)
+
+
 @pytest.mark.parametrize('name', ['car1_course_2026_10_26', 'car2_course_2026_11_11',
                                  'circular_obs', 'course_2026_10_30',
                                  'levine_blocked', 'levine_obs', 'room_2026_07_27'])

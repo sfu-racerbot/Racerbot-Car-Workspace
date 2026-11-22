@@ -121,13 +121,8 @@ def world_to_pixel(spec: MapSpec, x, y):
     return row, col
 
 
-def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
-    """The connected free region the car drives in: the one containing
-    ``seed_rc`` (row, col), or the largest enclosed loop if available.
-
-    A free exterior or island interior is not the race corridor. If no
-    enclosed loop exists, retain the largest component (e.g. an open map).
-    """
+def _free_regions(free: np.ndarray, seed_rc=None):
+    """Free components, enclosed first then border-touching, largest first."""
     import cv2
 
     count, labels = cv2.connectedComponents(free.astype(np.uint8), connectivity=4)
@@ -137,21 +132,32 @@ def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
         label = labels[seed_rc]
         if label == 0:
             raise ValueError(f"seed pixel {seed_rc} is not free space")
-    else:
-        sizes = np.bincount(labels.ravel())
-        sizes[0] = 0
-        label = int(np.argmax(sizes))
-        border = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
-        for candidate in np.argsort(sizes)[::-1]:
-            if sizes[candidate] == 0 or candidate in border:
-                continue
-            try:
-                find_island(labels == candidate)
-            except ValueError:
-                continue
-            label = int(candidate)
-            break
-    return labels == label
+        yield labels == label
+        return
+    sizes = np.bincount(labels.ravel())
+    border = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
+    for label in sorted(range(1, count), key=lambda i: (i in border, -sizes[i], i)):
+        yield labels == label
+
+
+def driveable_region(free: np.ndarray, seed_rc=None) -> np.ndarray:
+    """Prefer a free loop, falling back to the largest component for open maps.
+
+    An explicit seed selects its component even if it is not a loop.
+    """
+    largest, largest_size = None, 0
+    for region in _free_regions(free, seed_rc):
+        size = int(region.sum())
+        if size > largest_size:
+            largest, largest_size = region, size
+        if seed_rc is not None:
+            return region
+        try:
+            find_island(region)
+        except ValueError:
+            continue
+        return region
+    return largest
 
 
 def drop_narrow_gaps(region: np.ndarray, resolution: float, half_width: float) -> np.ndarray:
@@ -267,6 +273,20 @@ class ImportedTrack:
     region: np.ndarray          # bool driveable free space
 
 
+def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
+    last_error = None
+    for region in _free_regions(spec.free, seed_rc):
+        try:
+            narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
+            island = find_island(narrowed)
+            pixels = centerline_pixels(narrowed, island)
+        except ValueError as exc:
+            last_error = exc
+            continue
+        return region, pixels
+    raise ValueError("free space is not a loop: no usable race loop after narrowing") from last_error
+
+
 def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
                   smooth_m: float = 0.5, centerline_from: MapSpec | None = None,
                   car_half_width: float = 0.155) -> ImportedTrack:
@@ -283,16 +303,11 @@ def extract_track(spec: MapSpec, seed_xy=None, spacing: float = 0.10,
     if seed_xy is not None:
         r, c = world_to_pixel(spec, seed_xy[0], seed_xy[1])
         seed_rc = (int(r), int(c))
-    region = driveable_region(spec.free, seed_rc)
-
     line_spec = centerline_from or spec
-    line_region = region if centerline_from is None else driveable_region(
-        centerline_from.free,
-        None if seed_xy is None else tuple(int(v) for v in world_to_pixel(
-            centerline_from, seed_xy[0], seed_xy[1])))
-    line_region = drop_narrow_gaps(line_region, line_spec.resolution, car_half_width)
-    island = find_island(line_region)
-    pix = centerline_pixels(line_region, island)
+    line_seed = None if seed_xy is None else tuple(int(v) for v in world_to_pixel(
+        line_spec, seed_xy[0], seed_xy[1]))
+    line_region, pix = _race_loop(line_spec, line_seed, car_half_width)
+    region = line_region if centerline_from is None else driveable_region(spec.free, seed_rc)
     x, y = pixel_to_world(line_spec, pix[:, 0], pix[:, 1])
     points = np.column_stack((x, y))
     points = resample_closed(points, line_spec.resolution)
