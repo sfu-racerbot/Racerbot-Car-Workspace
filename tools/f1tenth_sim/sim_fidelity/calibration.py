@@ -24,6 +24,11 @@ import os
 from pathlib import Path
 import sys
 
+if __package__:
+    from .tyres import TyreModel
+else:
+    from tyres import TyreModel
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'src/racerbot_car'))
 from racerbot_car import identity  # noqa: E402
 from racerbot_car.identity import UnknownCarError, known_car_ids  # noqa: E402
@@ -615,6 +620,58 @@ class Floor:
 
 
 FLOORS: dict[str, Floor] = {
+    "slam_tyres_2026_11_rb1": Floor(
+        name="slam_tyres_2026_11_rb1",
+        description="REJECTED Car 1 November development-only effective Pacejka candidate, not a measured axle-force model. "
+                    "Selectable experiment, not the default; acceptance in tools/f1tenth_sim/slam_tyres_2026_11_fit.json. "
+                    "Only rb1 evaluation run 20261116-095242 has usable rollout windows. External grip clamp disabled.",
+        track="car2_course_2026_11_11",
+        fit_runs=("20261111-153436", "20261111-153721", "20261111-155542"),
+        held_out_runs=("20261116-095242",),
+        overrides=dict(
+            floor="slam_tyres_2026_11_rb1",
+            cornering_stiffness_front=5.153504850577635,
+            cornering_stiffness_rear=4.71326245124088,
+            tyre_model=TyreModel(0.3981510161398307, 0.6890943799648725, 1.5371303171196806),
+            grip_curve=None,
+        ),
+        sources=dict(
+            cornering_stiffness_front="fit_slam_tyres.py H=2 scan-motion rollout objective, November dev ONLY; "
+                                     "slam_tyres_2026_11_fit.json rb1, frozen SHA256 "
+                                     "ebf60b3eb178bb0129af504601316d85f20c12957ed57eb4cac81c466e20fd41",
+            cornering_stiffness_rear="same development-only H=2 fit; mass, CG and yaw inertia held fixed",
+            tyre_model="same fit: front/rear force peaks D and common shape C, B C D = mu C_S; coupling fixed 0; "
+                       "inspired by On-Track SysID arXiv:2411.17508, not its axle-force estimator",
+            grip_curve="off: TyreModel supplies saturation; development-only clamp ablations in fit JSON",
+        ),
+    ),
+    "slam_tyres_2026_11_rb2": Floor(
+        name="slam_tyres_2026_11_rb2",
+        description="REJECTED Car 2 November development-only effective Pacejka candidate, not a measured axle-force model. "
+                    "Selectable experiment, not the default; acceptance and independent October floor check in "
+                    "tools/f1tenth_sim/slam_tyres_2026_11_fit.json. External steering grip clamp disabled.",
+        track="car2_course_2026_11_11",
+        fit_runs=("20261111-135934", "20261111-142254", "20261111-152132"),
+        held_out_runs=("20261111-135453", "20261111-140322", "20261111-141227", "20261111-142036",
+                       "20261111-142604", "20261111-152844", "20261111-154204", "20261030-184826",
+                       "20261030-183134", "20261030-181003", "20261030-181819", "20261030-184316"),
+        overrides=dict(
+            floor="slam_tyres_2026_11_rb2",
+            cornering_stiffness_front=4.333612688384001,
+            cornering_stiffness_rear=5.882536607979519,
+            tyre_model=TyreModel(0.5296822924799998, 0.5836831052800002, 1.6724281753599997),
+            grip_curve=None,
+        ),
+        sources=dict(
+            cornering_stiffness_front="fit_slam_tyres.py H=2 scan-motion rollout objective, November dev ONLY; "
+                                     "slam_tyres_2026_11_fit.json rb2, frozen SHA256 "
+                                     "db715f7554a876b8cec76d4e2ce9a1c67066f5a4c2ed435f9220fbd9a5a8c858",
+            cornering_stiffness_rear="same development-only H=2 fit; mass, CG and yaw inertia held fixed",
+            tyre_model="same fit: front/rear force peaks D and common shape C, B C D = mu C_S; coupling fixed 0; "
+                       "inspired by On-Track SysID arXiv:2411.17508, not its axle-force estimator",
+            grip_curve="off: TyreModel supplies saturation; development-only clamp ablations in fit JSON",
+        ),
+    ),
     "sfu_course_2026_11_06": Floor(
         name="sfu_course_2026_11_06",
         description="Car 2 on the 2026-11-06 floor and tyres; fitted only on course 06a, "
