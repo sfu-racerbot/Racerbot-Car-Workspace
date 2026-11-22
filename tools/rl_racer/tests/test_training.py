@@ -250,7 +250,8 @@ def test_fidelity_metrics_use_truth(untrained_export, monkeypatch):
     assert result['laps_completed'] == 1
     assert result['resets'] == 0
     assert result['offtrack_integral_m_s'] == 0.
-    assert result['lap_time_s'] == pytest.approx(.2)
+    # 1 ps in seconds allows only roundoff in four 0.05 s steps.
+    assert result['lap_time_s'] == pytest.approx(.2, abs=1e-12, rel=0)
     assert all(abs(obs[0, 4]) > 1 for obs in observed)
 
 
