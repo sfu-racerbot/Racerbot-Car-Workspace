@@ -182,12 +182,14 @@ def heading_study(data, map_dir, laser_x, geom, hold):
     print(f"  wheel speed: {brake[2]:.3f} to {end[2]:.3f} m/s in {hi-lo:.3f} s")
     for lo, hi in [(hi-2, hi), (lo, hi), (3.05, 3.5)]:
         elapsed = t-start
-        ts = np.r_[lo, elapsed[(elapsed > lo) & (elapsed < hi)], hi]
-        print(f"  {lo:.3f}–{hi:.3f} s, {len(ts)-2} scans")
+        in_window = (elapsed >= lo) & (elapsed <= hi)
+        print(f"  {lo:.3f}–{hi:.3f} s, {in_window.sum()} scans")
         for name, values in fields.items():
-            v = np.interp(ts, elapsed, values)
+            v = values[in_window]
             if name in ("odom", "gyro"):
-                print(f"    {name}: max heading-change error {abs(v-v[0]).max():.2f}°")
+                # Heading change spans the exact window; only it needs the boundaries.
+                first, last = np.interp([lo, hi], elapsed, values)
+                print(f"    {name}: max heading-change error {abs(np.r_[v, last]-first).max():.2f}°")
             elif name.startswith("PF"):
                 print(f"    {name}: median/max abs error {np.median(abs(v)):.2f}/{abs(v).max():.2f}°")
             elif name.startswith("fraction"):
