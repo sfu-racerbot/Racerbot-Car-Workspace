@@ -20,8 +20,13 @@ python3 tools/run_analysis/race_segments.py data/rb1/racerbot_runs/20261111-* \
 ```
 
 Times in it are seconds from the recording's first `/scan`. Add `first_scan_epoch` to
-get the time the bag uses. `clock` is the same stretch on the cars' own clocks
-(Pacific, UTC-8). Don't edit the file by hand: change the tool and run it again.
+get the time the bag uses. `clock` is the same stretch in real local time at UVic (UTC-7).
+Don't edit the file by hand: change the tool and run it again.
+
+**The cars' clocks read an hour behind on race day.** British Columbia stayed on UTC-7
+when daylight time ended on 2026-11-01, but the cars' time zone data still switched them
+to UTC-8. So a run folder named `20261111-154204` started at 4:42 p.m. real time, not 3:42.
+Every time below is real local time.
 
 ## How a stretch is judged, in plain words
 
@@ -47,34 +52,37 @@ these cars, so they are close, not exact.
 
 ## The races
 
-The races were run from about 3:44 p.m. These two recordings hold them:
+The racing ran from about 4:30 p.m. The race stretches are in these two recordings:
 car 2's `rb2/racerbot_runs/20261111-154204` and car 1's `rb1/racerbot_runs/20261111-155542`.
-The timing agrees with the club Discord: "WERE WINNING" was posted at 3:53 p.m.,
-during car 2's 3:52 race, and "WE WON" at 4:02 p.m. The announcement says the win was
+The timing agrees with the club Discord: "WERE WINNING" was posted at 4:53 p.m.,
+during car 2's 4:52 race, and "WE WON" at 5:02 p.m. The announcement says the win was
 over 5 laps, which matches the length of most stretches here.
 
 | Car | Clock | Recording time | Wheel distance | About |
 |---|---|---|---|---|
-| car 2 | 15:44:57 to 15:45:56 | 171.0 to 230.5 s | 150 m | 5.3 laps |
-| car 2 | 15:52:33 to 15:54:06 | 627.5 to 720.5 s | 231 m | 8.2 laps |
-| car 1 | 15:56:02 to 15:56:58 | 16.5 to 72.0 s | 143 m | 5.1 laps |
-| car 1 | 15:57:01 to 15:57:12 | 75.0 to 86.5 s | 28 m | 1.0 lap, then stuck against a wall until 15:57:20 |
-| car 2 | 15:56:13 to 15:57:13 | 847.0 to 907.5 s | 149 m | 5.3 laps |
-| car 2 | 15:57:16 to 15:58:18 | 910.0 to 972.5 s | 155 m | 5.5 laps |
-| car 1 | 15:57:20 to 15:58:24 | 94.5 to 158.0 s | 158 m | 5.6 laps |
+| car 2 | 16:44:57 to 16:45:56 | 171.0 to 230.5 s | 150 m | 5.3 laps |
+| car 2 | 16:52:33 to 16:54:06 | 627.5 to 720.5 s | 231 m | 8.2 laps |
+| car 1 | 16:56:02 to 16:56:58 | 16.5 to 72.0 s | 143 m | 5.1 laps |
+| car 1 | 16:57:01 to 16:57:12 | 75.0 to 86.5 s | 28 m | 1.0 lap, then stuck against a wall until 16:57:20 |
+| car 2 | 16:56:13 to 16:57:13 | 847.0 to 907.5 s | 149 m | 5.3 laps |
+| car 2 | 16:57:16 to 16:58:18 | 910.0 to 972.5 s | 155 m | 5.5 laps |
+| car 1 | 16:57:20 to 16:58:24 | 94.5 to 158.0 s | 158 m | 5.6 laps |
 
-From 15:56 both of our cars were on the track at the same time.
+From 4:56 p.m. both of our cars were on the track at the same time.
 
 Everything else in those two recordings is not racing: car 2 sat parked or was carried
 for about 16 of its 21 minutes, and car 1 was parked or carried for its last four and a half.
 
 ## Before the races
 
-The other recordings, 13:54 to 15:41, are testing and practice with several
+The other recordings, 2:54 to 4:41 p.m., are testing and practice with several
 algorithms (our gap follow and pure pursuit, team A's ftg and disparity extender).
 Their race stretches in `segments.yaml` are real driving at race speed and are good
 data for the simulator. The recordings cannot tell whether any of them were the
-official timed laps, so don't call them races.
+official timed laps, so don't call them races. The closest to 4:30 are car 2 at
+4:29 p.m. (`20261111-152844`, one 12 s stretch, then carried) and car 1 from 4:34 to
+4:41 p.m. (`20261111-153436` and `-153721`, four stretches of one to five laps, alone on
+the track).
 
 ## Using it
 
