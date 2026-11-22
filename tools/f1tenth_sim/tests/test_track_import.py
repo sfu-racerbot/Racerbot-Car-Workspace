@@ -6,6 +6,7 @@ or follows directly from map_server conventions / the formulas in the module.
 import math
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -48,24 +49,122 @@ def write_map(tmp_path, image_uint8, resolution, origin=(0.0, 0.0), free_thresh=
 
 
 def test_load_map_thresholds(tmp_path):
-    """oracle: closed form from occupancy = (255-v)/255 (negate=0), free if occupancy < min(free_thresh, free_below)."""
+    """Oracle: map_server p=(255-v)/255; free iff p < YAML free_thresh."""
     # 1x5 image with pixel values [0, 205, 214, 250, 254]
     img = np.array([[0, 205, 214, 250, 254]], dtype=np.uint8)
     yaml_path = write_map(tmp_path, img, resolution=0.05, origin=(0.0, 0.0), free_thresh=0.196, negate=0)
-    spec = load_map(yaml_path)  # default free_below (track_import.FREE_BELOW)
-    # 214 gives occupancy 41/255~0.1608, min(0.196,0.10)=0.10, 0.1608 < 0.10 is False
-    # 250 gives occupancy 5/255~0.0196 < 0.10 is True
-    assert spec.free[0].tolist() == [False, False, False, True, True]
-
-    # Same image with free_below=0.2 -> min(0.196,0.2)=0.196, 214 becomes free
-    spec2 = load_map(yaml_path, free_below=0.2)
-    assert spec2.free[0].tolist() == [False, False, True, True, True]
+    spec = load_map(yaml_path)
+    assert spec.free[0].tolist() == [False, False, True, True, True]
 
     # negate: 1 case: value 0 is free (occupancy = image/255 = 0)
     img_neg = np.array([[0]], dtype=np.uint8)
     yaml_path_neg = write_map(tmp_path, img_neg, resolution=0.05, origin=(0.0, 0.0), free_thresh=0.196, negate=1, name="map_neg")
     spec_neg = load_map(yaml_path_neg)
     assert bool(spec_neg.free[0, 0]) is True
+
+
+@pytest.mark.parametrize("negate", [0, 1])
+def test_load_map_strict_boundaries(tmp_path, negate):
+    """Oracle: requested strict ROS thresholds; equality remains unknown/blocked."""
+    probabilities = np.array([[0, 50, 51, 52, 152, 153, 154, 255]], dtype=np.uint8)
+    pixels = probabilities if negate else 255 - probabilities
+    path = write_map(tmp_path, pixels, 0.05, free_thresh=51 / 255, negate=negate)
+    meta = yaml.safe_load(path.read_text())
+    meta['occupied_thresh'] = 153 / 255
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == [[0, 0, -1, -1, -1, -1, 100, 100]]
+    assert spec.free.tolist() == [[True, True, False, False, False, False, False, False]]
+
+
+@pytest.mark.parametrize("mode", ['scale', 'raw'])
+@pytest.mark.parametrize("negate", [0, 1])
+def test_load_map_cost_modes(tmp_path, mode, negate):
+    """Oracle: map_server raw 0..100 or scaled costs; live ROS grid blocks >=50."""
+    costs = np.array([[0, 1, 49, 50, 51, 99, 100]], dtype=np.uint8)
+    if mode == 'raw':
+        pixels = np.concatenate([costs, [[101, 255]]], axis=1).astype(np.uint8)
+        expected = [[0, 1, 49, 50, 51, 99, 100, -1, -1]]
+    else:
+        # Thresholds 0..1 make p*100 the decoded cost, rounded to nearest integer.
+        pixels = np.rint(costs.astype(float) * 255 / 100).astype(np.uint8)
+        pixels = pixels if negate else 255 - pixels
+        expected = costs.tolist()
+    path = write_map(tmp_path, pixels, .05, free_thresh=0, negate=negate)
+    meta = yaml.safe_load(path.read_text())
+    meta.update(mode=mode, occupied_thresh=1)
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == expected
+    assert spec.free.tolist() == [[v >= 0 and v < 50 for v in expected[0]]]
+
+
+@pytest.mark.parametrize('negate', [0, 1])
+def test_load_map_scale_uses_yaml_interval(tmp_path, negate):
+    """Oracle: scale maps [free_thresh, occupied_thresh] linearly to [0,100]."""
+    levels = np.array([[0, 51, 102, 153, 255]], dtype=np.uint8)
+    path = write_map(tmp_path, levels if negate else 255 - levels, .05,
+                     free_thresh=.2, negate=negate)
+    meta = yaml.safe_load(path.read_text())
+    meta.update(mode='scale', occupied_thresh=.6)
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == [[0, 0, 50, 100, 100]]
+    assert spec.free.tolist() == [[True, True, False, False, False]]
+
+
+@pytest.mark.parametrize('mode', ['trinary', 'scale'])
+def test_load_map_transparency_is_unknown(tmp_path, mode):
+    """Oracle: map_server marks nonopaque pixels unknown, including white."""
+    path = write_map(tmp_path, np.array([[255, 255, 0]]), .05)
+    Image.fromarray(np.array([[[255, 255, 255, 0], [255, 255, 255, 254],
+                               [0, 0, 0, 255]]], dtype=np.uint8), 'RGBA').save(path.with_suffix('.png'))
+    meta = yaml.safe_load(path.read_text())
+    meta['mode'] = mode
+    path.write_text(yaml.safe_dump(meta))
+    spec = load_map(path)
+    assert spec.occupancy.tolist() == [[-1, -1, 100]]
+    assert not spec.free.any()
+
+
+@pytest.mark.parametrize('key,value,error', [
+    ('mode', 'typo', 'unsupported map mode'),
+    ('negate', 2, 'negate must be'),
+    ('negate', -1, 'negate must be'),
+    ('free_thresh', -0.1, 'require 0 <='),
+    ('free_thresh', .65, 'require 0 <='),
+    ('free_thresh', float('nan'), 'require 0 <='),
+    ('occupied_thresh', float('inf'), 'require 0 <='),
+    ('occupied_thresh', 1.01, 'require 0 <='),
+])
+def test_load_map_invalid_semantics(tmp_path, key, value, error):
+    """Oracle: malformed metadata must not silently invent drivable cells."""
+    path = write_map(tmp_path, np.array([[255]]), .05)
+    meta = yaml.safe_load(path.read_text())
+    meta[key] = value
+    path.write_text(yaml.safe_dump(meta))
+    with pytest.raises(ValueError, match=error):
+        load_map(path)
+
+
+def test_nov9_map_gray_free_cells(tmp_path):
+    """Measurement: Nov 9 rb2 /map in runs 190202 and 190837 is 0 in both 3x3s.
+
+    The rebuilt map's YAML free_thresh=.25 classifies 205 (p=50/255) as free.
+    Exercise the exported Gym image too, not just the parser's internal mask.
+    """
+    source = Path(__file__).resolve().parents[3] / 'data/rb2/racerbot_auto/20261109-185146-rebuilt/map.yaml'
+    spec = load_map(source)
+    # The rebuilt YAML also frees the gray background; use the recorded map
+    # for loop extraction, without changing the map Gym will drive on.
+    line_map = source.parent.parent / '20261109-185306/map.yaml'
+    track = extract_track(spec, centerline_from=load_map(line_map))
+    target = write_gym_track(track, tmp_path, 'nov9')
+    with Image.open(target.with_suffix('.png')) as handle:
+        exported = np.array(handle)
+    for row, col in [(207, 188), (307, 116)]:
+        assert spec.free[row-1:row+2, col-1:col+2].all()
+        assert (exported[row-1:row+2, col-1:col+2] == 255).all()
 
 
 def test_pixel_to_world_world_to_pixel_roundtrip(tmp_path):

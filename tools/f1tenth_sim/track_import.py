@@ -10,10 +10,10 @@ The simulators drive F1TENTH Gym, which needs three files per track:
 
 A SLAM map (slam_toolbox's map.pgm + map.yaml) or a map from another team's
 repo has the first two, in its own conventions, and never the third. This
-module writes all three: it re-thresholds the image so *unknown* space counts
-as wall (gym treats any pixel above 128 as free, and slam_toolbox writes
-unknown as 205, so a raw SLAM map would let the car drive into unexplored
-space), and it finds the loop's centreline itself.
+module writes all three: it decodes the image using its map_server YAML
+before making Gym's binary image, and it finds the loop's centreline itself.
+Unknown cells remain blocked; a gray pixel can be free under the map's own
+thresholds and must not automatically become a wall.
 
 How the centreline is found. A driveable loop is a ring of free space around
 an *island* -- the block of wall the car drives round. The centreline is the
@@ -55,39 +55,55 @@ class MapSpec:
     origin_x: float
     origin_y: float
     free: np.ndarray          # bool, row 0 = top of the image (largest y)
+    occupancy: np.ndarray | None = None  # map_server values: -1 unknown, 0..100
 
 
-# Occupancy below which a pixel counts as free. Stricter than the usual
-# map_server free_thresh (0.196): hand-drawn maps paint "outside the track"
-# light grey (levine: 214, circularTrack: 207, i.e. occupancy 0.16-0.19),
-# which passes 0.196 and would make the whole background driveable. SLAM's
-# free (254) and drawn white (255) are both far below this.
-FREE_BELOW = 0.10
 # Enclosed wall blobs smaller than this are noise for centreline-finding.
 SPECK_AREA_M2 = 0.01
 
 
-def load_map(yaml_path: Path, free_below: float = FREE_BELOW) -> MapSpec:
-    """Read a map_server yaml + image; return which pixels are known-free.
+def load_map(yaml_path: Path) -> MapSpec:
+    """Decode map_server trinary/scale/raw pixels, then binarize for Gym.
 
-    A pixel is free when its occupancy probability is below both the map's
-    ``free_thresh`` and ``free_below``. Everything else -- occupied *and*
-    unknown -- is wall: unexplored space is not somewhere the simulated car
-    may go.
+    Unknown stays blocked, as in pure_pursuit.occupancy_map.OccupancyMap.
+    Scale/raw costs use that stack's live-grid occupied threshold (50).
     """
     from PIL import Image  # local: keeps the module importable without Pillow
 
     yaml_path = Path(yaml_path)
     spec = yaml.safe_load(yaml_path.read_text())
-    image = np.asarray(Image.open(yaml_path.parent / spec["image"]).convert("L"),
-                       dtype=np.float64)
+    with Image.open(yaml_path.parent / spec["image"]) as handle:
+        image = np.asarray(handle.convert("L"), dtype=np.float64)
+        alpha = np.asarray(handle.convert("RGBA"))[:, :, 3]
     if image.ndim != 2 or image.size == 0:
         raise ValueError(f"{yaml_path}: map image is empty or not 2-D")
-    negate = int(spec.get("negate", 0))
-    occupancy = image / 255.0 if negate else (255.0 - image) / 255.0
-    free = occupancy < min(float(spec["free_thresh"]), free_below)
+    mode = spec.get("mode", "trinary")
+    if mode not in ("trinary", "scale", "raw"):
+        raise ValueError(f"{yaml_path}: unsupported map mode {mode!r}")
+    negate = spec.get("negate", 0)
+    if negate not in (0, 1):
+        raise ValueError(f"{yaml_path}: negate must be 0 or 1")
+    free_thresh = float(spec["free_thresh"])
+    occupied_thresh = float(spec["occupied_thresh"])
+    if not 0 <= free_thresh < occupied_thresh <= 1:
+        raise ValueError(f"{yaml_path}: require 0 <= free_thresh < occupied_thresh <= 1")
+    if mode == "raw":
+        # Raw map_server pixels already encode 0..100; negate is not applied.
+        occupancy = np.where(image <= 100, image, -1).astype(np.int8)
+    else:
+        p = image / 255.0 if negate else (255.0 - image) / 255.0
+        occupancy = np.full(image.shape, -1, dtype=np.int8)
+        occupancy[p > occupied_thresh] = 100
+        occupancy[p < free_thresh] = 0
+        if mode == "scale":
+            middle = (p >= free_thresh) & (p <= occupied_thresh)
+            occupancy[middle] = np.floor(
+                100 * (p[middle] - free_thresh) / (occupied_thresh - free_thresh) + 0.5
+            ).astype(np.int8)
+        occupancy[alpha < 255] = -1
+    free = (occupancy >= 0) & (occupancy < 50)
     origin = spec["origin"]
-    return MapSpec(float(spec["resolution"]), float(origin[0]), float(origin[1]), free)
+    return MapSpec(float(spec["resolution"]), float(origin[0]), float(origin[1]), free, occupancy)
 
 
 def pixel_to_world(spec: MapSpec, rows, cols):
