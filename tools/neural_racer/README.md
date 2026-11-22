@@ -6,6 +6,8 @@
 
 This folder trains the policy that `src/neural_racer` runs on the car. Nothing here is built by `colcon`, and nothing here can move the car.
 
+For laptop-only evaluation on recorded commands, see [Score Neural Racer on recorded drives](../../docs/neural-racer-real-runs.md).
+
 ## Highlights
 
 - **A batched simulator that matches the referee.** `gpu_sim/` runs about 16k races at once in PyTorch. Over 10 s of driving it matches the calibrated CPU simulator (`FidelityPlant`, `car` profile) to within 2 cm and 0.5°. Its dynamics match gym's own functions to 1e-9.
