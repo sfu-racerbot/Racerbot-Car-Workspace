@@ -477,6 +477,10 @@ class FidelityPlant:
             self.calibration.body_width,
         )
 
+    def wall_contacts(self) -> set[int]:
+        """Agents whose real chassis touches a wall now, judged on the contact walls when the track has them."""
+        return self._wall_contact()
+
     def _wall_contact(self) -> set[int]:
         """Agents whose chassis has reached occupied space on the map.
 
