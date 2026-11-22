@@ -14,8 +14,10 @@ from racerbot_car.layers import effective_config
 # achieves at hard asks (cars/rb2/calibration/pure_pursuit.yaml).
 # 2026-11-14 (user ruling on PR #63): rb1's planning physics 2.5/6.0/0.10 -> its measured
 # 3.2/5.0/0.35 (cars/rb1/calibration/auto_map_race.yaml gives the runs).
+# 2026-11-10 (PR #47): rb2 planning grip 3.2 -> 2.8 (cars/rb2/calibration/auto_map_race.yaml: the
+# 2026-11-09 runs ran wide at 2.6-2.8 achieved; course suite 2.8 has no contact, 3.2 had one).
 @pytest.mark.parametrize('car,angle,grip,accel,gain,delay,online', [
-    ('rb1', 0.30, 3.2, 5.0, 1.0, 0.35, None), ('rb2', 0.38, 3.2, 4.0, 0.99, 0.22, 3.1)])
+    ('rb1', 0.30, 3.2, 5.0, 1.0, 0.35, None), ('rb2', 0.38, 2.8, 4.0, 0.99, 0.22, 3.1)])
 def test_effective_line_physics(car, angle, grip, accel, gain, delay, online):
     values = effective_config('auto_map_race.yaml', 'auto_map_race_node', car)
     # oracle: measured runs above (each car's calibration overlay).

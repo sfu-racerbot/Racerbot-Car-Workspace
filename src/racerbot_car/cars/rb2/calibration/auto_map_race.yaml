@@ -9,9 +9,14 @@ auto_map_race_node:
     # grip x1.05, PR #32), on which 3.2 was fastest with no contact (06a/06b,
     # 9 seeds each); tight corners are held lower by pure_pursuit's
     # max_lateral_accel (2.7). Floor test: watch /imu slip on fast sweepers.
-    profile_max_lateral_accel: 3.2
+    # 2.8 since 2026-11-10: on 2026-11-09 (20261109-190202/190356/190617/
+    # 190837) car 2 braked at ~4.4 m/s^2 into turn-in and reached only
+    # 2.6-2.8 m/s^2 of cornering, running 0.45-0.8 m wide. Pit PC course
+    # suite, 24 tracks x 3 seeds: 3.2 gave +4.7% mean vs best gap_follow with
+    # 1 contact (mini_IMS); 2.8 gave +4.2% with none.
+    profile_max_lateral_accel: 2.8
     # Same, right turns.
-    profile_max_lateral_accel_right: 3.2
+    profile_max_lateral_accel_right: 2.8
     # Same runs, fitted speed loop: accel 4.0, brake 3.0 m/s^2.
     profile_max_accel: 4.0
     # Same runs: 0.349 rad commanded gave 0.345 at the wheels (0.99 ratio).

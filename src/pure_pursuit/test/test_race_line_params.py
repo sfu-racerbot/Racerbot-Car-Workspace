@@ -11,8 +11,10 @@ from pure_pursuit.race_line import RaceLineConfig, load_params
 # (auto_map_race.yaml comment: the line must cover the controller's tracking error).
 # 2026-11-14 (user ruling on PR #63): rb1 2.5/6.0/0.10 -> its own measurements 3.2/5.0/0.35
 # (cars/rb1/calibration/auto_map_race.yaml; results/2026-11-14-rb1-speed-loop.md).
+# 2026-11-10 (PR #47): rb2 planning grip 3.2 -> 2.8 (cars/rb2/calibration/auto_map_race.yaml: the
+# 2026-11-09 runs ran wide at 2.6-2.8 achieved; course suite 2.8 has no contact, 3.2 had one).
 @pytest.mark.parametrize('car,angle,grip,accel,gain,delay', [
-    ('rb1', .30, 3.2, 5., 1., .35), ('rb2', .38, 3.2, 4., .99, .22)])
+    ('rb1', .30, 3.2, 5., 1., .35), ('rb2', .38, 2.8, 4., .99, .22)])
 def test_car_physics_and_controller_stop(car, angle, grip, accel, gain, delay, monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', car)
     values = load_params()
