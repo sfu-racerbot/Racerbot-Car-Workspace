@@ -27,6 +27,7 @@ import sys
 import numpy as np
 from racerbot_car import identity
 from racerbot_car.profile import load_profile
+from racerbot_sim.lidar_geometry import measured_st_lidar
 
 
 def add_sim_python_path(workspace_root=None) -> None:
@@ -111,6 +112,7 @@ class SimConfig:
     controlled_cars: int = 1
     controlled_start_offsets_m: tuple = ()
     car: str = ''
+    measured_lidar_mount: bool = False
 
     def __post_init__(self):
         if type(self.controlled_cars) is not int or self.controlled_cars < 1:
@@ -290,6 +292,13 @@ class SimBridge:
         )
         params = F1TENTH_VEHICLE_PARAMETERS.with_updates(
             **vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad))
+        model = DynamicModel.ST
+        self._odom_origin_offset = 0.0
+        if config.measured_lidar_mount:
+            self.lidar_config = measured_st_lidar(self.lidar_config, car_id=profile.id, model=model, lr=params.lr)
+            # ROS publishes the physical base_link -> laser TF. Initialize the
+            # dead-reckoned base_link at the rear axle, not at Gym's ST state.
+            self._odom_origin_offset = -params.lr
         env_config = EnvConfig(
             seed=config.seed,
             map_name=str(config.track_path),
@@ -300,7 +309,7 @@ class SimBridge:
                 timestep=config.control_dt,
                 integrator_timestep=INTEGRATOR_DT,
                 integrator=IntegratorType.RK4,
-                dynamics_model=DynamicModel.ST,
+                dynamics_model=model,
                 max_laps=10_000,
             ),
             observation_config=ObservationConfig(type=ObservationType.DIRECT),
@@ -376,7 +385,9 @@ class SimBridge:
         for i in range(self.config.controlled_cars):
             state = self.agent_state(i)
             self._odometry.append(DeadReckonedOdometry(
-                state.x, state.y, state.yaw, self.config, self._rng))
+                state.x + self._odom_origin_offset * math.cos(state.yaw),
+                state.y + self._odom_origin_offset * math.sin(state.yaw),
+                state.yaw, self.config, self._rng))
         self.odom = self._odometry[0]
         return self._obs
 

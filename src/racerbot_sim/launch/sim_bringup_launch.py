@@ -74,6 +74,8 @@ def generate_launch_description():
             'car', default_value='',
             description='Car whose physics the simulator models (rb1, rb2); empty = this machine\'s car.'),
         DeclareLaunchArgument('publish_imu', default_value='true'),
+        DeclareLaunchArgument('measured_lidar_mount', default_value='false',
+                              description='Car 2 only: cast from its measured rear-axle-relative mount.'),
         DeclareLaunchArgument('imu_fault', default_value='none'),
         DeclareLaunchArgument('car2_imu_fault', default_value='none'),
         DeclareLaunchArgument('drive_topic_prefix', default_value='',
@@ -123,6 +125,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'car': ParameterValue(LaunchConfiguration('car'), value_type=str),
+            'measured_lidar_mount': ParameterValue(LaunchConfiguration('measured_lidar_mount'), value_type=bool),
             'publish_imu': ParameterValue(LaunchConfiguration('publish_imu'), value_type=bool),
             'imu_fault': ParameterValue(LaunchConfiguration('imu_fault'), value_type=str),
             'car2_imu_fault': ParameterValue(LaunchConfiguration('car2_imu_fault'), value_type=str),

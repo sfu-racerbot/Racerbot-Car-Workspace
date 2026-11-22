@@ -86,6 +86,7 @@ class GymBridgeNode(Node):
         self.declare_parameter('odom_speed_noise_std', 0.01)
         self.declare_parameter('odom_yaw_rate_scale', 1.0)
         self.declare_parameter('publish_ground_truth', True)
+        self.declare_parameter('measured_lidar_mount', False)
         self.declare_parameter('publish_imu', True)
         self.declare_parameter('imu_fault', 'none')
         self.declare_parameter('car2_imu_fault', 'none')
@@ -128,6 +129,7 @@ class GymBridgeNode(Node):
 
         self.bridge = SimBridge(SimConfig(
             car=car_profile.id,
+            measured_lidar_mount=bool(value('measured_lidar_mount')),
             track_path=str(track_path),
             centerline=centerline,
             control_dt=1.0 / self.rate_hz,
