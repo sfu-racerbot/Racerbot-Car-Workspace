@@ -1,4 +1,10 @@
-"""Read-only check linking the November 11 Car 2 rebuild to the gap-follow benchmark."""
+"""Read-only check linking the November 11 Car 2 rebuild to the gap-follow benchmark.
+
+Run from workspace revision 76db7abe, where the benchmark was measured. PR #107
+changed track_import.py afterwards, so on later revisions the regenerated raster
+and centerline no longer match the tracked asset byte for byte; see
+tools/run_analysis/results/2026-11-22-gap-follow-line-choice.md.
+"""
 import json
 from pathlib import Path
 import sys

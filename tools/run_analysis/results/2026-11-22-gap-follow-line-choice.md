@@ -46,6 +46,8 @@ From the workspace root, using the simulator dependencies and the uploaded mappi
 PYTHONPATH=.sim/python python3 tools/run_analysis/verify_november_gap_map.py
 ```
 
+Run it from a checkout of workspace revision `76db7abecd8c66ca14bbc56d77e82331a08e3cb6`, the revision the experiment used (for example `git worktree add /tmp/gap-check 76db7abe`). On that revision it prints `Matched 141,696 cells and 293 centerline points.` PR #107 later changed `track_import.py` to honour ROS map semantics, so on current `main` the regenerated raster differs from the tracked simulator asset in 19 cells and the centerline has 292 points, and the script reports a mismatch. That is expected: the tracked asset was built by the older importer, and the findings above were measured on it.
+
 This read-only check regenerates the raster, map YAML and scoring centerline in a temporary directory and compares them to the tracked simulator assets. It also checks the pure-pursuit run's recorded map and line paths. It does not run a controller. Per-tick simulation traces and the offline verdict checker are in the separately delivered experiment evidence; no raw or generated run data is added to this repository.
 
 Simulation controller: [accepted workspace revision](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/commit/691b427f4316d0e64490cca1ba9d4c3fd476b8de); pinned Gym revision: `bdaec1420c3b0f103858d289866d0d4e2e597c30`. [Implementation PR](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/95) and [benchmark guide](https://github.com/sfu-racerbot/racerbot-docs/pull/53) are unchanged. No real-car test or safety certification.
