@@ -22,6 +22,7 @@ Older runs may still be under `~/.ros/racerbot_{runs,auto,sim}/`, which git neve
 | `<car>/racerbot_auto/<timestamp>/` | `auto_map_race_node` (via `map_course` or `auto_map_race_launch.py`) on the real car | map, pose graph, racing lines, `commands.txt` |
 | `<car>/racerbot_sim/auto/<timestamp>/` | `sim_auto_map_race_launch.py` | the same output from simulator runs |
 | `<car>/racerbot_sim/races/<timestamp>/` | `sim_race_launch.py`'s race referee | `race.json`: standings, finish times, contacts |
+| `race_days/<date>-<place>/` | `tools/run_analysis/race_segments.py`, by hand | which stretches of a race day's recordings, both cars, were real racing (`segments.yaml`) and which were stalls, moves and pickups; the README says which were the races |
 
 Folder names are the run's start time, `YYYYMMDD-HHMMSS`. Any tool still takes
 `output_directory:=<somewhere else>` if you want a run kept out of git.

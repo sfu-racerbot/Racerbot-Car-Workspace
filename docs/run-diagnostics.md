@@ -666,6 +666,37 @@ A map that passes gets `raceline_profiled.csv`, capped at 1.5 m/s (`--max-speed`
 
 The check starts from SLAM's own pose when that fits as well as the best place a search of the whole map finds. On a course that looks the same turned round, like the simulator's oval, the search alone can land on the mirror-image spot and call a good map NO-GO. `rebuild.json`'s `start_from` says which it used.
 
+## Finding the racing in a long recording
+
+At a race or a test day the recorder runs the whole time an algorithm is up. A
+20-minute recording can hold four minutes of racing; the rest is the car parked,
+moved to the start line, stuck against a wall, or carried by hand. Fitting the
+simulator or measuring grip on that mix gives wrong answers, because while a car is
+carried its wheels and its real motion disagree.
+
+**Terminal: any, from the workspace root. No ROS needed (numpy, PyYAML and `rosbags`). It never moves the car.**
+
+```bash
+python3 tools/run_analysis/race_segments.py data/<id>/racerbot_runs/<time> [more runs]
+python3 tools/run_analysis/race_segments.py data/<id>/racerbot_runs/<date>-* --yaml segments.yaml
+```
+
+**Working when:** each run prints its `race` and `short` stretches with start and end
+times (seconds from the first `/scan`), the wheel distance, and how many course lengths
+that is, then any times the car was `stalled with lb`, `handled` or `spinning`.
+
+It looks at every half second and asks: are the wheels turning at 0.5 m/s or more, is
+what the LiDAR sees changing, is LB held, and, if the wheels are still, is the car
+moving or tilting anyway (someone handling it). Wheels turning with an unchanged view
+is a car held in the air. Driving half-seconds are joined into stretches; a pause of
+up to 3 s stays in, a longer one or any handling ends it. A stretch of at least 10 s,
+one course length (`--course-m`, 28.17 m by default, the UVic course) and 1.5 m/s on
+average is a **race** stretch; the rest are **short** moves. The full reasoning is in
+the tool's header.
+
+The UVic race day is already done: [`data/race_days/2026-11-11-uvic/`](../data/race_days/2026-11-11-uvic/README.md)
+says which stretches were the races and which were testing.
+
 ## When mapping fails: the tools, in order
 
 These are the tools that found what was wrong on car 2 on 2026-10-30 and 31 ([the spec](superpowers/specs/2026-10-30-slam-reliability.md)). Use them in this order: each one answers the question the next one assumes.
