@@ -19,7 +19,7 @@ Closed as duplicates: workspace #92 and #106, docs 51 to 55.
 
 - [#91](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/91) Neural Racer shadow model, swept-path braking cap and flank creep. Needs its own review because it changes the safety wrapper.
 - [#93](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/93), [#94](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/94) and [#95](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/95), and the docs that describe them: [60](https://github.com/sfu-racerbot/racerbot-docs/pull/60) (#93), [61](https://github.com/sfu-racerbot/racerbot-docs/pull/61) (#91 and #94) and [62](https://github.com/sfu-racerbot/racerbot-docs/pull/62) (#95). Merge each doc after its workspace PR.
-- Done on branch `claude/project-thread-tb4rc9`: `slam_replay.py` writes `free_thresh` 0.196.
+- `slam_replay.py` writes `free_thresh` 0.196 in [#113](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/pull/113) (not merged yet).
 - Older open PRs not reviewed in this batch: workspace #46, #47, #55, #84, #96, #97, #98, #99; docs #40, #63.
 
 The sections below are the coordinator's earlier snapshot, kept for its evidence notes.
