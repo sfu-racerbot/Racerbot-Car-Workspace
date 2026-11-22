@@ -530,6 +530,10 @@ so "the map looks glitchy" can be attributed to the view moving, to SLAM
 genuinely smearing, or to two stacks running at once -- see
 [web-dashboard.md](../src/web_dashboards/car/docs/web-dashboard.md#the-map-looks-glitchy).
 
+### Watching it live in Lichtblick Desktop
+
+To watch a headless two-car race instead of capturing stills, run the read-only viewer in [tools/racerbot_sim/lichtblick/README.md](../tools/racerbot_sim/lichtblick/README.md): a loopback-only `foxglove_bridge` on port 8766 that clients can publish nothing through, plus a stock Lichtblick layout for the track, both cars' poses, car 1's scan and its speed.
+
 ## Automated validation
 
 ```bash

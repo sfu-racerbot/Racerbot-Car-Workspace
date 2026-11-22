@@ -1,0 +1,142 @@
+{
+  "configById": {
+    "3D!track": {
+      "lichtblickPanelTitle": "Simulated track and car poses · sim_world",
+      "followTf": "sim_world",
+      "followMode": "follow-none",
+      "cameraState": {
+        "perspective": false,
+        "distance": 17,
+        "phi": 0,
+        "thetaOffset": 0,
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fovy": 45,
+        "near": 0.1,
+        "far": 1000
+      },
+      "topics": {
+        "/sim/track_map": {
+          "visible": true
+        },
+        "/sim/ground_truth_pose": {
+          "visible": true,
+          "color": "#e84335",
+          "shaftLength": 0.8,
+          "shaftDiameter": 0.2,
+          "headDiameter": 0.4
+        },
+        "/sim/car2/ground_truth_pose": {
+          "visible": true,
+          "color": "#3899e8",
+          "shaftLength": 0.8,
+          "shaftDiameter": 0.2,
+          "headDiameter": 0.4
+        }
+      }
+    },
+    "3D!lidar": {
+      "lichtblickPanelTitle": "Car 1 · simulated LiDAR · laser frame",
+      "followTf": "laser",
+      "followMode": "follow-pose",
+      "cameraState": {
+        "perspective": false,
+        "distance": 14,
+        "phi": 0,
+        "thetaOffset": 0,
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fovy": 45,
+        "near": 0.1,
+        "far": 1000
+      },
+      "topics": {
+        "/scan": {
+          "visible": true,
+          "pointSize": 4,
+          "colorMode": "flat",
+          "flatColor": "#4bd5ed"
+        }
+      }
+    },
+    "Plot!speed": {
+      "lichtblickPanelTitle": "Car 1 · commanded and odometry speed (m/s)",
+      "paths": [
+        {
+          "value": "/odom.twist.twist.linear.x",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "Wheel odometry (m/s)"
+        },
+        {
+          "value": "/sim_only/ackermann_cmd.drive.speed",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "Command (m/s)"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10
+    },
+    "RawMessages!simtime": {
+      "lichtblickPanelTitle": "Simulation status · sim_time_s = physics seconds",
+      "topicPath": "/sim/status",
+      "diffEnabled": false
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "splitPercentage": 55,
+    "first": {
+      "direction": "column",
+      "splitPercentage": 76,
+      "first": "3D!track",
+      "second": "RawMessages!simtime"
+    },
+    "second": {
+      "direction": "column",
+      "splitPercentage": 58,
+      "first": "3D!lidar",
+      "second": "Plot!speed"
+    }
+  }
+}
