@@ -63,9 +63,10 @@ SPECK_AREA_M2 = 0.01
 
 
 def load_map(yaml_path: Path) -> MapSpec:
-    """Decode map_server trinary/scale/raw pixels, then binarize for Gym.
+    """Decode Nav2 Jazzy map_server pixels, then binarize for Gym.
 
     Unknown stays blocked, as in pure_pursuit.occupancy_map.OccupancyMap.
+    Jazzy includes threshold equality in the free/occupied classes.
     Scale/raw costs use that stack's live-grid occupied threshold (50).
     """
     from PIL import Image  # local: keeps the module importable without Pillow
@@ -93,10 +94,10 @@ def load_map(yaml_path: Path) -> MapSpec:
     else:
         p = image / 255.0 if negate else (255.0 - image) / 255.0
         occupancy = np.full(image.shape, -1, dtype=np.int8)
-        occupancy[p > occupied_thresh] = 100
-        occupancy[p < free_thresh] = 0
+        occupancy[p >= occupied_thresh] = 100
+        occupancy[p <= free_thresh] = 0
         if mode == "scale":
-            middle = (p >= free_thresh) & (p <= occupied_thresh)
+            middle = (p > free_thresh) & (p < occupied_thresh)
             occupancy[middle] = np.floor(
                 100 * (p[middle] - free_thresh) / (occupied_thresh - free_thresh) + 0.5
             ).astype(np.int8)

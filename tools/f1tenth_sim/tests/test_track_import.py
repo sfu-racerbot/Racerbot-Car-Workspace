@@ -51,7 +51,7 @@ def write_map(tmp_path, image_uint8, resolution, origin=(0.0, 0.0), free_thresh=
 
 
 def test_load_map_thresholds(tmp_path):
-    """Oracle: map_server p=(255-v)/255; free iff p < YAML free_thresh."""
+    """Oracle: Nav2 Jazzy p=(255-v)/255; free iff p <= YAML free_thresh."""
     # 1x5 image with pixel values [0, 205, 214, 250, 254]
     img = np.array([[0, 205, 214, 250, 254]], dtype=np.uint8)
     yaml_path = write_map(tmp_path, img, resolution=0.05, origin=(0.0, 0.0), free_thresh=0.196, negate=0)
@@ -66,8 +66,11 @@ def test_load_map_thresholds(tmp_path):
 
 
 @pytest.mark.parametrize("negate", [0, 1])
-def test_load_map_strict_boundaries(tmp_path, negate):
-    """Oracle: requested strict ROS thresholds; equality remains unknown/blocked."""
+def test_load_map_jazzy_boundaries(tmp_path, negate):
+    """Oracle: navigation2/jazzy/nav2_map_server/src/map_io.cpp loadMapFromFile.
+
+    The occupied/free masks use >= occupied_thresh and <= free_thresh.
+    """
     probabilities = np.array([[0, 50, 51, 52, 152, 153, 154, 255]], dtype=np.uint8)
     pixels = probabilities if negate else 255 - probabilities
     path = write_map(tmp_path, pixels, 0.05, free_thresh=51 / 255, negate=negate)
@@ -75,8 +78,8 @@ def test_load_map_strict_boundaries(tmp_path, negate):
     meta['occupied_thresh'] = 153 / 255
     path.write_text(yaml.safe_dump(meta))
     spec = load_map(path)
-    assert spec.occupancy.tolist() == [[0, 0, -1, -1, -1, -1, 100, 100]]
-    assert spec.free.tolist() == [[True, True, False, False, False, False, False, False]]
+    assert spec.occupancy.tolist() == [[0, 0, 0, -1, -1, 100, 100, 100]]
+    assert spec.free.tolist() == [[True, True, True, False, False, False, False, False]]
 
 
 @pytest.mark.parametrize("mode", ['scale', 'raw'])
