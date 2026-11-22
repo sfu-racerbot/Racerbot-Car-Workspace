@@ -298,6 +298,21 @@ Two cautions about reading this scenario at all:
   2 m/s and now brakes for what is in front of it, but it does not steer,
   race, or defend.
 
+### Empty Levine course: wheel-speed filter rejected
+
+Keep the [tested gap-follow controller](https://github.com/sfu-racerbot/Racerbot-Car-Workspace/commit/691b427f4316d0e64490cca1ba9d4c3fd476b8de)
+unchanged. In 104 held-out pairs, the unchanged controller and the filter each
+hit the wall 33 times. Stalls fell from 34 to 17, but **six two-lap passes
+became wall contacts**. No pass became a stall. Each pair used the same noise
+draws and scanner position; all six new contacts on previously passing runs
+occurred with the scanner aligned to car 2's collision body.
+
+The filter cleared the original stall with the stock scanner position but did
+not prevent the known contact with the aligned scanner. It preserved every
+stop command checked at identical inputs. That did not make the changed
+trajectory safe: reject any candidate that turns a pass into a contact or
+stall, even if it finishes more runs overall. This was simulation only.
+
 ## What the overtake investigation found
 
 Two defects, both in `pure_pursuit_node.py` itself rather than in the harness's
