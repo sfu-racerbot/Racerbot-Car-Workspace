@@ -2,7 +2,7 @@
 
 **Use this for ROS integration and inspecting sensors, not as a validated replacement for the Racerbot plant.**
 The car, tires, drive system, LiDAR, renderer, ROS bridge and controller below are upstream software.
-The two Python tools only assemble assets and feed actions to the actual Gazebo server. No network training,
+The benchmark tools assemble assets, feed actions and read state from the actual Gazebo server. No network training,
 model weight changes, hardware launches or new run data.
 
 ## Install once (Ubuntu 24.04 / ROS 2 Jazzy)
@@ -111,6 +111,39 @@ Do not treat stock yaw odometry as ground truth. The trace includes Gazebo chass
 separately. No VESC/servo/IMU model, measured steering feedback, delay/noise fit or Racerbot deadman/mux
 is supplied by this model. Its instantaneous 1,080-beam ±2.35 rad, 10 m GPU LiDAR is **not** the
 recordings' 1,081-beam physical scanner. A policy expecting the latter cannot just be loaded unchanged.
+
+## Replay one shared November turning/braking block
+
+Unlike the rest-start diagnostic above, this runner requires the frozen block's initial wheel-speed
+proxy in m/s and exactly 480 mux commands. It writes one **post-step** body-forward speed and body yaw
+rate per command, including the 80 warm-up ticks. Each block gets a new seed-0 server. Use a fresh
+output filename for each block and retain its car, run and integer nanosecond block start when joining
+the output to the independent masks. Never use Gazebo wheel speed or odometry yaw in place of a missing
+physical reference.
+
+In the isolated shell above, build the two missing native bindings (requires a compiler, CMake,
+pybind11-dev and Jazzy's gz-sim development headers). Generate the open floor with
+`prepare_world.py` as above; do not supply a map.
+
+```bash
+GZBENCH="$RB/tools/run_analysis/gazebo"
+export CMAKE_PREFIX_PATH="$(find /opt/ros/jazzy/opt -mindepth 1 -maxdepth 1 | paste -sd :):$CMAKE_PREFIX_PATH"
+cmake -S "$GZBENCH/moving_reset" -B "$OUT/bridge-build"
+cmake --build "$OUT/bridge-build" -j2
+export PYTHONPATH="$OUT/bridge-build:$PYTHONPATH"
+# ACTIONS: frozen speed_mps,steer_rad CSV; V0: initial speed at block start
+python3 "$GZBENCH/rollout.py" "$OUT/open.sdf" "$ACTIONS" "$V0" "$OUT/block-trace.csv"
+```
+
+The runner settles the vehicle, primes the stock actuator at the given speed, then sets pose, body
+velocity and joint state with physics paused. It checks readback before the first action and releases
+the one-shot velocity commands. Synthetic checks passed at 0, −1 and +2.5 m/s; three fresh positive-start
+traces were byte-identical on this build. This is reset and repeatability evidence, not a November score.
+
+For a separate input-clock audit, run `python3 "$GZBENCH/command_coverage.py" "$RB/data"` in the
+analysis environment with NumPy and MCAP installed. Of 428 complete blocks, 415 passed the 100 ms command
+age check. Missing initial wheel speed can reject additional blocks; this count does not measure
+turning/braking coverage and does not use simulator outputs.
 
 ## Measurements (Gazebo 8.15.0, DART, Jazzy, x86-64 VM, 8 vCPUs, CPU rendering)
 

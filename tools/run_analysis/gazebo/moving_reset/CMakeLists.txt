@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(fixture_bridge LANGUAGES CXX)
+find_package(pybind11 REQUIRED)
+find_package(gz-sim8 REQUIRED)
+pybind11_add_module(fixture_bridge fixture_bridge.cc)
+target_link_libraries(fixture_bridge PRIVATE gz-sim8::gz-sim8)

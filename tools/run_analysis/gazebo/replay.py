@@ -12,6 +12,29 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 
+def command_yaw_rate(v, steer, wheelbase):
+    return v * math.tan(steer) / wheelbase
+
+
+def read_actions(stream):
+    reader = csv.DictReader(stream)
+    fields = ("speed_mps", "steer_rad")
+    if not reader.fieldnames or not all(k in reader.fieldnames for k in fields):
+        raise ValueError("CSV needs speed_mps and steer_rad columns")
+    actions = []
+    for row in reader:
+        try:
+            pair = tuple(float(row[k]) for k in fields)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid numeric command on CSV line {reader.line_num}") from exc
+        if not all(math.isfinite(x) for x in pair):
+            raise ValueError(f"nonfinite command on CSV line {reader.line_num}")
+        actions.append(pair)
+    if not actions:
+        raise ValueError("empty command stream")
+    return actions
+
+
 def run(world, actions, seed):
     # Never deliver replay commands to another Gazebo instance.
     os.environ["GZ_PARTITION"] = f"racerbot_bench_{uuid.uuid4().hex}"
@@ -79,7 +102,7 @@ def run(world, actions, seed):
     ready = time.perf_counter()
     for i, (v, steer) in enumerate(actions):
         msg = Twist()
-        msg.linear.x, msg.angular.z = v, v * math.tan(steer) / wheelbase
+        msg.linear.x, msg.angular.z = v, command_yaw_rate(v, steer, wheelbase)
         if not publisher.publish(msg) or not server.run(True, 25, False):
             raise RuntimeError(f"command/step failed at tick {i}")
         rows.append(dict(t_s=(i + 1) * 0.025, **sample))
@@ -94,10 +117,11 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--seed", type=int, default=13)
     args = parser.parse_args()
-    with args.actions.open() as f:
-        actions = [(float(r["speed_mps"]), float(r["steer_rad"])) for r in csv.DictReader(f)]
-    if not actions or not all(math.isfinite(x) for pair in actions for x in pair):
-        parser.error("a nonempty finite command stream is required")
+    try:
+        with args.actions.open(encoding="utf-8", newline="") as f:
+            actions = read_actions(f)
+    except (ValueError, csv.Error) as exc:
+        parser.error(str(exc))
     rows, stats = run(args.world.resolve(), actions, args.seed)
     with args.output.open("x") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
