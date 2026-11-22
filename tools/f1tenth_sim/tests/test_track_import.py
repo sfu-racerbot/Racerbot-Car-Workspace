@@ -344,6 +344,31 @@ def test_clipped_corner_seed_ignores_distant_detached_room(tmp_path):
     np.testing.assert_array_equal(track.region, image == 255)
 
 
+def test_clipped_seed_follows_corridor_instead_of_crossing_wall(tmp_path):
+    """Oracle: seed corridor leads to the lower loop; the upper loop is across a wall."""
+    image = np.zeros((220, 220), np.uint8)
+    image[10:90, 10:100] = 255
+    image[30:70, 30:80] = 0
+    image[120:210, 10:100] = 255
+    image[140:190, 30:80] = 0
+    image[50:163, 2:5] = 255
+    image[50:53, 2:11] = 255
+    image[160:163, 2:11] = 255
+    image[91:94, 50:110] = 255
+    image[91:130, 107:110] = 255
+    image[127:130, 95:110] = 255
+    spec = load_map(write_map(tmp_path, image, .05))
+    narrowed = drop_narrow_gaps(spec.free, .05, .155)
+    assert spec.free[92, 50] and not narrowed[92, 50]
+    assert not spec.free[90, 50]
+    assert narrowed[80, 50] and narrowed[130, 50]
+    track = extract_track(spec, seed_xy=pixel_to_world(spec, 92, 50), centerline_from=spec)
+    rows, cols = world_to_pixel(spec, *track.centerline.T)
+    assert ((rows >= 120) & (rows < 210) & (cols >= 10) & (cols < 100)).all()
+    assert track.region[rows, cols].all()
+    np.testing.assert_array_equal(track.region, image == 255)
+
+
 def test_reference_centerline_selects_blocked_corridor(tmp_path, blocked_loop_maps):
     """Oracle: export the rectangular corridor, retaining the real barrier as wall."""
     driving, line, expected = blocked_loop_maps

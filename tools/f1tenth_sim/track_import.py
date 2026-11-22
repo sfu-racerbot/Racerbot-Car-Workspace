@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -294,28 +295,49 @@ class ImportedTrack:
     region: np.ndarray          # bool driveable free space
 
 
-def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
+def _project_seed(region, narrowed, seed_rc, radius):
+    """Nearest survivor in four-neighbour free-space steps, rejecting competing fronts."""
     import cv2
 
+    count, labels = cv2.connectedComponents((narrowed & region).astype(np.uint8), connectivity=4)
+    if count < 2:
+        raise ValueError("seed component has no free space after narrowing")
+    visited = np.zeros(region.shape, bool)
+    visited[seed_rc] = True
+    queue = deque([(seed_rc[0], seed_rc[1], 0)])
+    height, width = region.shape
+    nearest, nearest_label, reach = None, 0, None
+    while queue:
+        row, col, distance = queue.popleft()
+        if reach is not None and distance > reach:
+            break
+        label = labels[row, col]
+        if label:
+            if nearest is None:
+                nearest, nearest_label = (row, col), label
+                reach = distance + radius + 1
+            elif label != nearest_label:
+                raise ValueError("seed lies on a pinch between connected regions; "
+                                 "move it into the intended loop")
+        for nr, nc in ((row - 1, col), (row, col - 1), (row, col + 1), (row + 1, col)):
+            if (0 <= nr < height and 0 <= nc < width
+                    and region[nr, nc] and not visited[nr, nc]):
+                visited[nr, nc] = True
+                queue.append((nr, nc, distance + 1))
+    if nearest is None:
+        raise ValueError("seed component has no reachable free space after narrowing")
+    return nearest
+
+
+def _race_loop(spec: MapSpec, seed_rc, car_half_width: float):
     last_error = None
     for region in _free_regions(spec.free, seed_rc):
         try:
             narrowed = drop_narrow_gaps(region, spec.resolution, car_half_width)
             narrowed_seed = seed_rc
             if seed_rc is not None and not narrowed[seed_rc]:
-                survivors = np.argwhere(narrowed & region)
-                if not len(survivors):
-                    raise ValueError("seed component has no free space after narrowing")
-                distances = ((survivors - seed_rc) ** 2).sum(axis=1)
-                nearest = np.argmin(distances)
-                # Competing fronts within one opening radius make projection ambiguous.
-                reach = math.sqrt(float(distances[nearest])) + math.ceil(car_half_width / spec.resolution) + 1
-                nearby = survivors[distances <= reach ** 2]
-                _, labels = cv2.connectedComponents((narrowed & region).astype(np.uint8), connectivity=4)
-                if len(np.unique(labels[nearby[:, 0], nearby[:, 1]])) > 1:
-                    raise ValueError("seed lies on a pinch between connected regions; "
-                                     "move it into the intended loop")
-                narrowed_seed = tuple(survivors[nearest])
+                narrowed_seed = _project_seed(
+                    region, narrowed, seed_rc, int(math.ceil(car_half_width / spec.resolution)))
             for candidate in _free_regions(narrowed, narrowed_seed):
                 try:
                     island = find_island(candidate)
