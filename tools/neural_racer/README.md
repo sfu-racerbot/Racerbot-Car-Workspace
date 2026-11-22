@@ -46,7 +46,7 @@ PYTHONPATH=.torchenv python3 -m pytest tools/neural_racer/tests/ -v
 
 ## Club-map diagnosis and the calibrated retraining setup
 
-**Where the current model (`a0eef2af0a3757b6`) loses time or fails.** `neural_racer_train.diagnose` races it and `gap_follow` solo on the club's SLAM courses, each on the profile of the car that mapped it, and records what the safety wrapper did every tick. Measured 2026-11-22 (3 laps, seeds 0-2, cap 5.05 m/s, mean lap):
+**Where the current model loses time or fails.** `neural_racer_train.diagnose` races an exported model and `gap_follow` solo on the club's SLAM courses, each on the profile of the car that mapped it, and records what the safety wrapper did every tick. Measured 2026-11-22 for the shadow model `a0eef2af0a3757b6` with its own wrapper, including the swept-path braking cap (both are on the `neural-racer/model-a0eef2af0a3757b6` branch, not yet on main); 3 laps, seeds 0-2, cap 5.05 m/s, mean lap:
 
 | Course | Car | Neural | gap_follow | What limits the model |
 |---|---|---|---|---|
@@ -61,7 +61,7 @@ Where it finishes it is faster than `gap_follow`; most remaining loss is the net
 
 ```bash
 RACERBOT_CAR=rb1 python3 -m neural_racer_train.diagnose \
-    --model ../../src/neural_racer/models/a0eef2af0a3757b6 --out /tmp/nr_diag   # report.md, summary.json, runs.json
+    --model <exported model dir> --out /tmp/nr_diag   # report.md, summary.json, runs.json
 ```
 
 **The retraining setup** is `retrain_calibrated.yaml` (arXiv 2504.02420's recipe):
