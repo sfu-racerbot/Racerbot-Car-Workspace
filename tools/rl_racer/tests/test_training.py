@@ -106,6 +106,26 @@ def test_smoke_checkpoint_resume(smoke_run):
         train(DEFAULT_CONFIG, smoke=True, run_dir=Path('/approved_models/no'))
 
 
+def test_resume_discards_metrics_after_checkpoint():
+    before_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        directory = train(DEFAULT_CONFIG, smoke=True, stop_after_updates=1)
+        checkpoint = directory / 'iteration-one.pt'
+        checkpoint.write_bytes((directory / 'latest.pt').read_bytes())
+        train(DEFAULT_CONFIG, smoke=True, resume=directory / 'latest.pt')
+        train(DEFAULT_CONFIG, smoke=True, resume=checkpoint)
+        with (directory / 'metrics.csv').open() as stream:
+            csv_rows = list(csv.DictReader(stream))
+        json_rows = [json.loads(line) for line in (directory / 'metrics.jsonl').read_text().splitlines()]
+        assert [int(row['iteration']) for row in csv_rows] == [1, 2, 3, 4]
+        assert [row['iteration'] for row in json_rows] == [1, 2, 3, 4]
+        assert [int(row['steps']) for row in csv_rows] == [64, 128, 192, 256]
+        assert [row['steps'] for row in json_rows] == [64, 128, 192, 256]
+    finally:
+        torch.set_num_threads(before_threads)
+
+
 def test_export_parity_and_integrator(untrained_export):
     path, model, env = untrained_export
     policy = PolicyNumpy(path, 3)

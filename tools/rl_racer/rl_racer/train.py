@@ -67,6 +67,25 @@ def env_state(env):
             ('state', 'steer_cmd', 'wheel_cmd', 'accel_prev', 'steps', 'parameters')}
 
 
+def truncate_metrics(directory, iteration):
+    csv_path = directory / 'metrics.csv'
+    json_path = directory / 'metrics.jsonl'
+    if csv_path.exists():
+        with csv_path.open(newline='') as stream:
+            reader = csv.DictReader(stream)
+            fields = reader.fieldnames
+            rows = [row for row in reader if int(row['iteration']) <= iteration]
+        with csv_path.open('w', newline='') as stream:
+            if fields:
+                writer = csv.DictWriter(stream, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(rows)
+    if json_path.exists():
+        rows = [line for line in json_path.read_text().splitlines()
+                if line.strip() and json.loads(line)['iteration'] <= iteration]
+        json_path.write_text(''.join(line + '\n' for line in rows))
+
+
 def train(config_path=DEFAULT_CONFIG, *, smoke=False, signoff=None, run_dir=None,
           resume=None, stop_after_updates=None):
     config = load_config(config_path, smoke)
@@ -116,6 +135,7 @@ def train(config_path=DEFAULT_CONFIG, *, smoke=False, signoff=None, run_dir=None
             torch.cuda.set_rng_state_all(saved['cuda_rng'])
         np.random.set_state(saved['numpy_rng'])
         completed, iteration = saved['steps'], saved['iteration']
+        truncate_metrics(directory, iteration)
     metadata = {'config_hash': digest, 'config': config, 'assets': assets, 'smoke': is_smoke,
                 'signoff': None if signoff is None else str(Path(signoff).resolve())}
     (directory / 'run.json').write_text(json.dumps(metadata, indent=2) + '\n')
