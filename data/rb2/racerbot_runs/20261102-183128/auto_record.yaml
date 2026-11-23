@@ -1,0 +1,27 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-02T18:31:28-08:00'
+algorithms:
+  /drive:
+  - /gap_follow_node
+nodes:
+- /auto_record
+- /foxglove_bridge
+- /gap_finder_node
+- /gap_follow_node
+- /safety_node
+- /urg_node
+bag_live_sec: 3.8
+stopped: '2026-11-02T18:34:06-08:00'
+stop_reason: no algorithm publishing for 3.2 s
+duration_sec: 158.0
+recorder_exit_code: 0
+bag_exit_code: 0
+recorder_failures: []
+recorder_killed: false
+bag_bytes: 42600382
+activity:
+  first_odom_speed_mps: 0.0
+  max_speed_mps: 3.79
+  moved: true
+  started_late: false
+  lb_held_fraction: 0.01

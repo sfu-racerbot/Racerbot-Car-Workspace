@@ -1,0 +1,27 @@
+/ftg_node:
+  ros__parameters:
+    bubble_half_width: 0.45
+    bubble_lookahead: 3.0
+    car_width: 0.4
+    enable_safety: true
+    fov_half_angle_deg: 100.0
+    lookahead_max: 1.8
+    max_lateral_acc: 3.5
+    max_lidar_range: 10.0
+    max_speed: 4.5
+    min_speed: 0.7
+    minimum_gap_threshold: 1.0
+    prev_angle_adjuster: 0.6
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    safety_bubble_scale: 0.5
+    start_type_description_service: true
+    steering_angle_max: 0.349
+    steering_deadzone: 0.7
+    use_sim_time: false
+    wheelbase: 0.33

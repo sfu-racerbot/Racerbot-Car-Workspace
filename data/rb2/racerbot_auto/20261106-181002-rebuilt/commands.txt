@@ -1,0 +1,10 @@
+========================================================================
+NO RACING FOLDER FROM RUN 20261106-181002.
+========================================================================
+
+  Why: see-through 18% is over 15%: beams pass through mapped walls, so walls are drawn twice
+
+  The map is kept in /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261106-181002-rebuilt to look at. Map again:
+    ros2 run racerbot_launch map_course
+========================================================================
+

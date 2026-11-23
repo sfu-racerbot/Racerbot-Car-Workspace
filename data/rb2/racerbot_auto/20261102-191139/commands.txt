@@ -1,0 +1,35 @@
+========================================================================
+MAPPING FINISHED.  Saved in: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261102-191139
+========================================================================
+  - raceline_profiled.csv (racing line with speeds)
+  - start_pose.yaml (where the car is stopped now; racing starts there)
+
+  !! The map did NOT save (see the errors above). The race
+  !! commands below will not work for this run. Map again.
+
+BEFORE RACING: leave the car exactly where it stopped. If you move
+it, put it back on that spot, facing the same way. The race launch
+tells the localizer the car starts there (there is no RViz on the
+car to click a start pose), and it only searches about 0.5 m and
+20 deg around it. Mark the spot (tape on the floor) before you move
+the car, and you can race this map again on any later day.
+
+Terminal 1 -- hardware: the bringup you mapped with, still running.
+If you closed it, start it again:
+  ros2 launch f1tenth_stack bringup_launch.py
+
+Terminal 2 -- check the car is on the spot. This must print GO:
+  ros2 run pure_pursuit check_start --ros-args -p run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261102-191139
+
+Terminal 2 -- pick ONE, then hold LB to drive:
+  # pure pursuit (the default racing controller)
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261102-191139
+  # Stanley
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261102-191139 steering_law:=stanley
+  # LQR
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261102-191139 steering_law:=lqr
+  # MPC
+  ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261102-191139 steering_law:=mpc
+
+These commands are also in /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261102-191139/commands.txt
+========================================================================

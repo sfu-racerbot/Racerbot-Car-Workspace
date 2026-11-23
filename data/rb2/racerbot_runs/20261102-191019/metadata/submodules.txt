@@ -1,0 +1,8 @@
+src/particle_filter  checked_out=ec599a1c4f3d4edc5f7d356e2f2990839e56bb7d  recorded=ec599a1c4f3d4edc5f7d356e2f2990839e56bb7d  initialised=yes  dirty=no
+src/range_libc  checked_out=f55480a7044367c219745480b436b8b7117f8282  recorded=f55480a7044367c219745480b436b8b7117f8282  initialised=yes  dirty=no
+src/transport_drivers  checked_out=d3f510ce1b4be12967064d8251ebcac530921a04  recorded=d3f510ce1b4be12967064d8251ebcac530921a04  initialised=yes  dirty=no
+src/realsense-ros  checked_out=775b167c0dbcfe00a012e248c66a7c8379ef9fbb  recorded=775b167c0dbcfe00a012e248c66a7c8379ef9fbb  initialised=yes  dirty=no
+src/racerbot_a  checked_out=2a82b09f7a65c66bc35edc5b84ae4499bdf95468  recorded=8ef1d8c3b0152259adce70cd8a6164625acc3916  initialised=yes  dirty=no
+src/racerbot_b  checked_out=31ae4ef071401045bb0beb6d0bb63befa87293df  recorded=31ae4ef071401045bb0beb6d0bb63befa87293df  initialised=yes  dirty=yes
+src/web_dashboards  checked_out=836a00415bdd5caf3497dd91df332f6673dcd1c0  recorded=836a00415bdd5caf3497dd91df332f6673dcd1c0  initialised=yes  dirty=no
+MOVED: src/racerbot_a

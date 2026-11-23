@@ -1,0 +1,10 @@
+========================================================================
+NO RACING FOLDER FROM RUN 20261116-105215.
+========================================================================
+
+  Why: no acceptable racing line: recorded: body 0.2500, limit 0.3000, shortfall 0.0500; curvature 1.3212, limit 1.1173, excess 0.2039; min_curvature: forward cone 0.3500, limit 0.4500, shortfall 0.1000; body 0.0500, limit 0.3000, shortfall 0.2500; min_time: curvature 1.2655, limit 1.1173, excess 0.1482; start min_curvature of: min_curvature 10.305 s (failed), recorded 20.023 s (failed), shortest 11.188 s (failed)
+
+  The map is kept in /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261116-105215-rebuilt to look at. Map again:
+    ros2 run racerbot_launch map_course
+========================================================================
+

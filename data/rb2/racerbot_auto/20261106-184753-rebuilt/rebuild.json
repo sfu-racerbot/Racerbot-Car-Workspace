@@ -1,0 +1,28 @@
+{
+  "run": "/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261106-184753",
+  "odom_source": "/odom/imu",
+  "scans": 1579,
+  "start_from": "SLAM pose",
+  "tracked_path_m": 71.41980615907222,
+  "lap_lengths_m": [
+    22.488650095997084,
+    21.694160142892866,
+    21.913612419671743
+  ],
+  "speeds": {
+    "raceline_profiled.csv": 1.5,
+    "raceline_2p5.csv": 2.5,
+    "raceline_4p0.csv": 4.0
+  },
+  "start_off_line_m": 0.5273040262321416,
+  "verdict": {
+    "ok": true,
+    "reason": "clean",
+    "mean_fit": 0.9989534346996104,
+    "worst_window_fit": 0.9932518655680468,
+    "see_through": 0.03553134833476657
+  },
+  "laps": 3,
+  "raceline_ok": true,
+  "message": "map OK (fit 1.00, see-through 4%), 3 lap(s). The car stopped 0.5 m off the line: start it nearer the line."
+}

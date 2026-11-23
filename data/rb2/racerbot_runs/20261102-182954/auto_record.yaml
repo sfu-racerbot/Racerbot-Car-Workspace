@@ -1,0 +1,33 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-02T18:29:54-08:00'
+algorithms:
+  /drive:
+  - /gap_follow_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /foxglove_bridge
+- /gap_finder_node
+- /gap_follow_node
+- /joy
+- /static_baselink_to_laser
+- /urg_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+bag_live_sec: 3.8
+stopped: '2026-11-02T18:31:22-08:00'
+stop_reason: bringup shut down
+duration_sec: 88.1
+recorder_exit_code: 0
+bag_exit_code: 0
+recorder_failures: []
+recorder_killed: false
+bag_bytes: 23703945
+activity:
+  first_odom_speed_mps: 0.0
+  max_speed_mps: 0.0
+  moved: false
+  started_late: false
+  lb_held_fraction: 0.0

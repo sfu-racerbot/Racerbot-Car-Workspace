@@ -1,0 +1,22 @@
+/gap_follow_node:
+  ros__parameters:
+    degree: 2
+    enable_safety: true
+    hysteresis_alpha: 0.3
+    k_samples: 200
+    max_slew_rate: 170.0
+    max_speed: 4.0
+    max_steering_angle: 45.0
+    min_speed: 0.5
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    speed_curve_scale: 1.0
+    start_type_description_service: true
+    steering_gain: 1.0
+    use_fallback_method: false
+    use_sim_time: false

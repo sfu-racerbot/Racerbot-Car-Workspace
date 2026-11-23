@@ -1,0 +1,10 @@
+========================================================================
+NO RACING FOLDER FROM RUN 20261109-184810.
+========================================================================
+
+  Why: mean fit 0.69 is under 0.90: scans do not match this map; worst stretch fit 0.15 is under 0.70: the car got lost on this map; see-through 32% is over 15%: beams pass through mapped walls, so walls are drawn twice
+
+  The map is kept in /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261109-184810-rebuilt to look at. Map again:
+    ros2 run racerbot_launch map_course
+========================================================================
+

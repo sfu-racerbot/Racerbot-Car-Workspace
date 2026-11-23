@@ -1,0 +1,35 @@
+{
+  "choice": "min_time",
+  "ok": true,
+  "est_lap_s": 12.347554417518914,
+  "reason": "chosen min_time: 12.348 s",
+  "candidates": [
+    {
+      "source": "recorded",
+      "ok": true,
+      "est_lap_s": 14.35921498759654,
+      "min_cone_m": 0.8581138957953123,
+      "min_body_m": 0.26925824436898566,
+      "max_curvature": 1.0808325297340973,
+      "reason": "forward cone 0.8581 m, body 0.2693 m, curvature 1.0808/m"
+    },
+    {
+      "source": "min_curvature",
+      "ok": false,
+      "est_lap_s": 12.890824987891286,
+      "min_cone_m": 0.3622582782589887,
+      "min_body_m": 0.05000000074505806,
+      "max_curvature": 0.7653787269631404,
+      "reason": "forward cone 0.3623, limit 0.4500, shortfall 0.0877; body 0.0500, limit 0.2442, shortfall 0.1942"
+    },
+    {
+      "source": "min_time",
+      "ok": true,
+      "est_lap_s": 12.347554417518914,
+      "min_cone_m": 0.6838311011486717,
+      "min_body_m": 0.22360680108197992,
+      "max_curvature": 1.0946948325381918,
+      "reason": "forward cone 0.6838 m, body 0.2236 m, curvature 1.0947/m; start shortest of: min_curvature 12.635 s, recorded 14.454 s, shortest 12.348 s"
+    }
+  ]
+}

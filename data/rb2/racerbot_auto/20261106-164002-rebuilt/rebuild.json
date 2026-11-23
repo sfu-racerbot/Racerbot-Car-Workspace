@@ -1,0 +1,28 @@
+{
+  "run": "/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261106-164002",
+  "odom_source": "/odom/imu",
+  "scans": 2298,
+  "start_from": "SLAM pose",
+  "tracked_path_m": 101.7715031834256,
+  "lap_lengths_m": [
+    32.5518175932522,
+    32.58526909404707,
+    32.258807373213756
+  ],
+  "speeds": {
+    "raceline_profiled.csv": 1.5,
+    "raceline_2p5.csv": 2.5,
+    "raceline_4p0.csv": 4.0
+  },
+  "start_off_line_m": 0.11912451235684578,
+  "verdict": {
+    "ok": true,
+    "reason": "clean",
+    "mean_fit": 0.996034671227059,
+    "worst_window_fit": 0.9851559606855119,
+    "see_through": 0.030800379592758213
+  },
+  "laps": 3,
+  "raceline_ok": true,
+  "message": "map OK (fit 1.00, see-through 3%), 3 lap(s)."
+}

@@ -1,0 +1,17 @@
+{
+  "run": "/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261106-181002",
+  "odom_source": "/odom/imu",
+  "scans": 2674,
+  "start_from": "SLAM pose",
+  "tracked_path_m": 104.86553525581593,
+  "verdict": {
+    "ok": false,
+    "reason": "see-through 18% is over 15%: beams pass through mapped walls, so walls are drawn twice",
+    "mean_fit": 0.9549506731266948,
+    "worst_window_fit": 0.7762534640825722,
+    "see_through": 0.17929080046645873
+  },
+  "laps": 0,
+  "raceline_ok": false,
+  "message": "see-through 18% is over 15%: beams pass through mapped walls, so walls are drawn twice"
+}
