@@ -1,0 +1,42 @@
+[INFO] [launch]: All log files can be found below /home/racerbotcar-2/.ros/log/2026-11-16-19-01-27-470590-localhost.localdomain-7845
+[INFO] [launch]: Default logging verbosity is set to INFO
+[WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+stdin is not a terminal device. Keyboard handling disabled.[INFO] [1794884487.704119410] [auto_rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1794884487.704139090] [auto_rosbag2_recorder]: Event publisher thread: Started
+[INFO] [1794884487.715849932] [auto_rosbag2_recorder]: Starting recording to '/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261116-190126/bag'
+[INFO] [1794884487.726032636] [auto_rosbag2_recorder]: Subscribed to topic '/rosout'
+[INFO] [1794884487.726322404] [auto_rosbag2_recorder]: Listening for topics...
+[INFO] [1794884487.726378373] [auto_rosbag2_recorder]: Wait for recording: Press SPACE to start.
+[INFO] [1794884487.726637420] [auto_rosbag2_recorder]: Topics discovery started.
+[INFO] [1794884487.811545771] [auto_rosbag2_recorder]: Subscribed to topic '/parameter_events'
+[INFO] [1794884487.943887104] [auto_rosbag2_recorder]: Subscribed to topic '/tf_static'
+[INFO] [1794884488.079690080] [auto_rosbag2_recorder]: Subscribed to topic '/odom'
+[INFO] [1794884488.085188912] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/core'
+[INFO] [1794884488.092346315] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/imu/raw'
+[INFO] [1794884488.096801344] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/servo_position_command'
+[INFO] [1794884488.100249018] [auto_rosbag2_recorder]: Subscribed to topic '/tf'
+[INFO] [1794884488.422676358] [auto_rosbag2_recorder]: Subscribed to topic '/scan'
+[INFO] [launch.user]: Recording run to: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261116-190126
+[INFO] [1794884488.433642660] [auto_rosbag2_recorder]: Subscribed to topic '/diagnostics'
+[INFO] [race_diag_node-1]: process started with pid [8039]
+[INFO] [1794884488.486002589] [auto_rosbag2_recorder]: Subscribed to topic '/commands/motor/speed'
+[INFO] [1794884488.487837101] [auto_rosbag2_recorder]: Subscribed to topic '/commands/servo/position'
+[INFO] [1794884488.808853172] [auto_rosbag2_recorder]: Subscribed to topic '/joy'
+[INFO] [1794884488.814822864] [auto_rosbag2_recorder]: Subscribed to topic '/ackermann_cmd'
+[INFO] [1794884506.009488037] [auto_rosbag2_recorder]: Subscribed to topic '/teleop'
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [1794885042.300889292] [auto_rosbag2_recorder]: Topics discovery stopped.
+[INFO] [1794885042.302069644] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT) again, ignoring...
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT) again, ignoring...
+[INFO] [race_diag_node-1]: sending signal 'SIGINT' to process[race_diag_node-1]
+[INFO] [1794885042.330783476] [auto_rosbag2_recorder]: Recording stopped
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT) again, ignoring...
+[INFO] [1794885042.396002549] [auto_rosbag2_recorder]: Event publisher thread: Exited
+Exception ignored in: <module 'threading' from '/usr/lib/python3.12/threading.py'>
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/threading.py", line 1573, in _shutdown
+    def _shutdown():
+    
+KeyboardInterrupt: 
+[INFO] [race_diag_node-1]: process has finished cleanly [pid 8039]

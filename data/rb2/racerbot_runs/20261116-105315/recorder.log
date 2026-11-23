@@ -1,0 +1,25 @@
+[INFO] [launch]: All log files can be found below /home/racerbotcar-2/.ros/log/2026-11-16-10-53-15-940733-localhost.localdomain-60198
+[INFO] [launch]: Default logging verbosity is set to INFO
+[WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+stdin is not a terminal device. Keyboard handling disabled.[INFO] [1794855196.227869485] [auto_rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1794855196.227881997] [auto_rosbag2_recorder]: Event publisher thread: Started
+[INFO] [1794855196.238749684] [auto_rosbag2_recorder]: Starting recording to '/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261116-105315/bag'
+[INFO] [1794855196.246649285] [auto_rosbag2_recorder]: Subscribed to topic '/rosout'
+[INFO] [1794855196.247006231] [auto_rosbag2_recorder]: Listening for topics...
+[INFO] [1794855196.247088827] [auto_rosbag2_recorder]: Wait for recording: Press SPACE to start.
+[INFO] [1794855196.247039609] [auto_rosbag2_recorder]: Topics discovery started.
+[INFO] [1794855196.313781137] [auto_rosbag2_recorder]: Subscribed to topic '/parameter_events'
+[INFO] [1794855196.323255218] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/core'
+[INFO] [1794855196.329112059] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/imu/raw'
+[INFO] [1794855196.332103666] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/servo_position_command'
+[INFO] [1794855196.338528472] [auto_rosbag2_recorder]: Subscribed to topic '/tf_static'
+[INFO] [launch.user]: Recording run to: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261116-105315
+[INFO] [race_diag_node-1]: process started with pid [60394]
+[INFO] [1794855197.651466099] [auto_rosbag2_recorder]: Subscribed to topic '/scan'
+[INFO] [1794855197.664614477] [auto_rosbag2_recorder]: Subscribed to topic '/diagnostics'
+[INFO] [1794855197.677999380] [auto_rosbag2_recorder]: Subscribed to topic '/joy'
+[INFO] [1794855197.749381365] [auto_rosbag2_recorder]: Subscribed to topic '/commands/motor/speed'
+[INFO] [1794855197.754816840] [auto_rosbag2_recorder]: Subscribed to topic '/commands/servo/position'
+[INFO] [1794855198.100764095] [auto_rosbag2_recorder]: Subscribed to topic '/tf'
+[INFO] [1794855198.120648205] [auto_rosbag2_recorder]: Subscribed to topic '/odom'
+[INFO] [1794855198.127831481] [auto_rosbag2_recorder]: Subscribed to topic '/ackermann_cmd'

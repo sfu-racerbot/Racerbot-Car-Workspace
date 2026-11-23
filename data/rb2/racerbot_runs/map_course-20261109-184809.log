@@ -1,0 +1,392 @@
+[INFO] [launch]: All log files can be found below /home/racerbotcar-2/.ros/log/2026-11-09-18-48-09-979211-localhost.localdomain-90548
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 
+========================================================================
+Recording run to: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810
+Start the driving stack in another terminal, ideally WITH tee
+so its terminal output is captured directly:
+
+  ros2 launch racerbot_launch auto_map_race_launch.py \
+    2>&1 | tee /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810/launch.log
+
+`| tee` is optional, not required: if you forget it, summarize_run
+reconstructs an equivalent log from each node's own ~/.ros/log/
+file instead -- see docs/run-diagnostics.md.
+
+Afterwards:
+  ros2 run race_diagnostics summarize_run /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810
+========================================================================
+[INFO] [race_diag_node-1]: process started with pid [90770]
+[INFO] [snapshot_params-2]: process started with pid [90771]
+[INFO] [ros2-3]: process started with pid [90772]
+[INFO] [system_log-4]: process started with pid [90773]
+[INFO] [async_slam_toolbox_node-5]: process started with pid [90774]
+[INFO] [bno_i2c_bridge-6]: process started with pid [90775]
+[INFO] [imu_bridge_node-7]: process started with pid [90776]
+[INFO] [vehicle_state_node-8]: process started with pid [90777]
+[INFO] [gap_follow_node-9]: process started with pid [90780]
+[INFO] [auto_map_race_node-10]: process started with pid [90781]
+[async_slam_toolbox_node-5] [INFO] [1794278891.547576686] [slam_toolbox]: Node using stack size 40000000
+[async_slam_toolbox_node-5] [INFO] [1794278891.862623458] [slam_toolbox]: Configuring
+[async_slam_toolbox_node-5] [INFO] [1794278891.889138102] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[async_slam_toolbox_node-5] [INFO] [1794278891.892497205] [slam_toolbox]: CeresSolver: Using HuberLoss loss function.
+[async_slam_toolbox_node-5] [INFO] [1794278891.892613655] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[INFO] [launch.user]: [LifecycleLaunch] slam_toolbox configured; activating.
+[async_slam_toolbox_node-5] [INFO] [1794278892.007130214] [slam_toolbox]: Activating
+[bno_i2c_bridge-6] # dynamic calibration before {'accel': 1, 'gyro': 0, 'mag': 1, 'planar': 0, 'on_table': 0}
+[bno_i2c_bridge-6] # dynamic calibration now    {'accel': 0, 'gyro': 0, 'mag': 1, 'planar': 0, 'on_table': 0}
+[bno_i2c_bridge-6] # virtual serial port /tmp/bno085 -> /dev/pts/5
+[async_slam_toolbox_node-5] [INFO] [1794278892.809475088] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278892.790 for reason 'discarding message because the queue is full'
+[ros2-3] [WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+[ros2-3] stdin is not a terminal device. Keyboard handling disabled.[INFO] [1794278894.274693286] [rosbag2_recorder]: Press SPACE for pausing/resuming
+[ros2-3] [INFO] [1794278894.276732780] [rosbag2_recorder]: Event publisher thread: Started
+[race_diag_node-1] [18:48:14] ARMED: probe armed (subscribe-only); waiting for the stack
+[ros2-3] [INFO] [1794278894.397831665] [rosbag2_recorder]: Starting recording to '/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810/bag'
+[race_diag_node-1] [18:48:14] FIRST_MESSAGE: first scan: 1081 beams, frame_id=laser
+[ros2-3] [INFO] [1794278894.461100886] [rosbag2_recorder]: Subscribed to topic '/tf_static'
+[ros2-3] [INFO] [1794278894.478237401] [rosbag2_recorder]: Subscribed to topic '/scan'
+[ros2-3] [INFO] [1794278894.502250716] [rosbag2_recorder]: Subscribed to topic '/rosout'
+[vehicle_state_node-8] [INFO] [1794278894.516935888] [vehicle_state_node]: vehicle_state up: /odom -> /odom/fused, /steering/measured at 50 Hz, /odom/imu in odom_imu; accel from bno, heading from ['bno', 'vesc'], gyro weights {'bno': 1.0, 'vesc': 1.0}, wheelbase 0.36 m; publishing odom_imu -> odom
+[ros2-3] [INFO] [1794278894.531821352] [rosbag2_recorder]: Subscribed to topic '/joy'
+[ros2-3] [INFO] [1794278894.559010375] [rosbag2_recorder]: Subscribed to topic '/parameter_events'
+[ros2-3] [INFO] [1794278894.572142814] [rosbag2_recorder]: Subscribed to topic '/diagnostics'
+[ros2-3] [INFO] [1794278894.588386032] [rosbag2_recorder]: Subscribed to topic '/ackermann_cmd'
+[ros2-3] [INFO] [1794278894.589006875] [rosbag2_recorder]: Listening for topics...
+[ros2-3] [INFO] [1794278894.589339618] [rosbag2_recorder]: Recording...
+[ros2-3] [INFO] [1794278894.590008174] [rosbag2_recorder]: Topics discovery started.
+[ros2-3] [INFO] [1794278894.776768582] [rosbag2_recorder]: Subscribed to topic '/tf'
+[ros2-3] [INFO] [1794278894.885947371] [rosbag2_recorder]: Subscribed to topic '/odom/fused'
+[ros2-3] [INFO] [1794278894.898173809] [rosbag2_recorder]: Subscribed to topic '/odom/imu'
+[ros2-3] [INFO] [1794278894.913360206] [rosbag2_recorder]: Subscribed to topic '/steering/measured'
+[imu_bridge_node-7] [INFO] [1794278895.119016807] [imu_bridge_node]: vesc: mount rpy_deg=[-0.35, -0.07, -84.69], calibration: /home/racerbotcar-2/racerbot-ws/src/racerbot_car/cars/rb2/imu/calib/vesc_calib.json
+[async_slam_toolbox_node-5] [INFO] [1794278895.320446735] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278895.290 for reason 'discarding message because the queue is full'
+[race_diag_node-1] [18:48:15] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=NEVER +0.00m/s | drive=NEVER cmd=0.00m/s | LB=released
+[ros2-3] [INFO] [1794278895.385378899] [rosbag2_recorder]: Subscribed to topic '/map'
+[ros2-3] [INFO] [1794278895.405528653] [rosbag2_recorder]: Subscribed to topic '/imu/vesc/data'
+[imu_bridge_node-7] [INFO] [1794278895.517909324] [imu_bridge_node]: bno: mount rpy_deg=[90.8, 0.24, 0.24], calibration: /home/racerbotcar-2/racerbot-ws/src/racerbot_car/cars/rb2/imu/calib/bno_calib.json
+[ros2-3] [INFO] [1794278895.531769937] [rosbag2_recorder]: Subscribed to topic '/map_metadata'
+[ros2-3] [INFO] [1794278895.561920967] [rosbag2_recorder]: Subscribed to topic '/pose'
+[imu_bridge_node-7] [INFO] [1794278895.583479132] [imu_bridge_node]: imu_bridge up: primary=bno, frame_id=base_link, startup bias 3.0 s (keep the car still), BNO on /tmp/bno085
+[imu_bridge_node-7] [WARN] [1794278895.616166498] [imu_bridge_node]: /imu/status: fault: no IMU samples yet
+[ros2-3] [INFO] [1794278895.649242608] [rosbag2_recorder]: Subscribed to topic '/imu/data'
+[imu_bridge_node-7] [INFO] [1794278895.705303565] [imu_bridge_node]: /imu/status: waiting: startup gyro bias not removed yet (keep the car still)
+[race_diag_node-1] [18:48:15] FIRST_MESSAGE: first joy: 11 buttons
+[ros2-3] [INFO] [1794278895.817232163] [rosbag2_recorder]: Subscribed to topic '/slam_toolbox/graph_visualization'
+[ros2-3] [INFO] [1794278895.923648850] [rosbag2_recorder]: Subscribed to topic '/imu_bridge/wheel_odom'
+[race_diag_node-1] [18:48:15] FIRST_MESSAGE: first odom: linear.x=+0.00m/s
+[ros2-3] [INFO] [1794278896.016184317] [rosbag2_recorder]: Subscribed to topic '/odom'
+[ros2-3] [INFO] [1794278896.066690384] [rosbag2_recorder]: Subscribed to topic '/sensors/core'
+[ros2-3] [INFO] [1794278896.084743395] [rosbag2_recorder]: Subscribed to topic '/sensors/imu/raw'
+[ros2-3] [INFO] [1794278896.099506072] [rosbag2_recorder]: Subscribed to topic '/sensors/servo_position_command'
+[ros2-3] [INFO] [1794278896.158944724] [rosbag2_recorder]: Subscribed to topic '/commands/servo/position'
+[ros2-3] [INFO] [1794278896.181204374] [rosbag2_recorder]: Subscribed to topic '/commands/motor/speed'
+[ros2-3] [INFO] [1794278896.381384067] [rosbag2_recorder]: Subscribed to topic '/drive_intent'
+[ros2-3] [INFO] [1794278896.403471393] [rosbag2_recorder]: Subscribed to topic '/auto_map/drive'
+[ros2-3] [INFO] [1794278896.572092702] [rosbag2_recorder]: Subscribed to topic '/imu/bno/raw'
+[ros2-3] [INFO] [1794278896.585654173] [rosbag2_recorder]: Subscribed to topic '/imu/bno/data'
+[auto_map_race_node-10] [INFO] [1794278896.603467947] [auto_map_race_node]: Automatic mapping started: gap follow will map 3 lap(s), then the generated profile will be loaded and pure pursuit will race. Deadman ENABLED (hold LB); mapping source='/auto_map/drive', racing source='/auto_race/drive', output='/drive'; decision logs every 1.0s (plus immediate state changes).
+[auto_map_race_node-10] [WARN] [1794278896.608084706] [auto_map_race_node]: Waiting for map->base_link from SLAM: "map" passed to lookupTransform argument target_frame does not exist. 
+[auto_map_race_node-10] [WARN] [1794278896.609422971] [auto_map_race_node]: STOP [waiting_for_joy] no Joy messages received on '/joy'; LB cannot be verified; output command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-10] [WARN] [1794278896.634481841] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [INFO] [1794278896.967185141] [gap_follow_node]: gap_follow_node ready: scan='/scan' -> drive='/auto_map/drive', speed=1.43-3.50m/s, deadman ENABLED (LB must be held), decision logs every 1.0s (plus immediate state changes).
+[gap_follow_node-9] [WARN] [1794278896.977869534] [gap_follow_node]: STOP [waiting_for_joy] no Joy messages received on '/joy'; LB cannot be verified; command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278897.001065137] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[race_diag_node-1] [18:48:17] FIRST_MESSAGE: first drive: speed=0.00m/s
+[auto_map_race_node-10] [WARN] [1794278897.662887244] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[async_slam_toolbox_node-5] Registering sensor: [Custom Described Lidar]
+[async_slam_toolbox_node-5] [INFO] [1794278897.830709078] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278897.801 for reason 'discarding message because the queue is full'
+[race_diag_node-1] [18:48:17] DEADMAN: LB held
+[gap_follow_node-9] [INFO] [1794278897.939094535] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -27.0deg to +72.7deg; target=6.24m at +22.7deg, curvature=+1.165/m, closest=0.72m, odom=+0.00m/s; curve cap=1.47m/s, clearance cap=2.41m/s, swept clearance 1.69m, adaptive width 0.34 (margin 0.180m of 0.18m, corner cap 1.64m/s, left 1.10m, right 0.71m), steering_damping_off: imu waiting, steering shaped from +0.397rad (slew-limited from basis +0.000rad over 0.046s at 2.00rad/s), acceleration-shaped from 1.47m/s; command: steering=+0.092rad, speed=0.23m/s
+[ros2-3] [INFO] [1794278897.983150945] [rosbag2_recorder]: Subscribed to topic '/slam_pose'
+[auto_map_race_node-10] [WARN] [1794278897.986050583] [auto_map_race_node]: STOP [waiting_for_start_pose] holding the car still until SLAM reports its pose, so the start pose can be recorded; output command: steering=+0.000rad, speed=0.00m/s
+[ros2-3] [INFO] [1794278898.001265141] [rosbag2_recorder]: Subscribed to topic '/drive'
+[ros2-3] [INFO] [1794278898.106965745] [rosbag2_recorder]: Subscribed to topic '/initialpose'
+[auto_map_race_node-10] [WARN] [1794278898.628902563] [auto_map_race_node]: Waiting for map->base_link from SLAM: Lookup would require extrapolation into the past.  Requested time 1794278898.242177 but the earliest data is at time 1794278898.752002, when looking up transform from frame [base_link] to frame [map]
+[race_diag_node-1] [18:48:18] DEADMAN: LB released
+[auto_map_race_node-10] [INFO] [1794278898.830206815] [auto_map_race_node]: Start pose recorded: x=6.98 y=-0.27 yaw=-68deg (map frame). Racing on this map starts from here.
+[race_diag_node-1] [18:48:18] FIRST_MESSAGE: first pose: map-frame (+6.98, -0.27)
+[gap_follow_node-9] [WARN] [1794278898.831154384] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.397rad, speed=0.00m/s
+[auto_map_race_node-10] [WARN] [1794278898.838258773] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[race_diag_node-1] [18:48:18] DEADMAN: LB held
+[auto_map_race_node-10] [WARN] [1794278898.982481667] [auto_map_race_node]: STOP [mapping_controller_stop] selected 'gap_follow' command is fresh (age=0.01s); gap follow requested a neutral command; lap 1/3: ~0% round, samples=1, distance=0.0/5.0m, turn=0/300deg, elapsed=0.0/4.0s, departed=no, start distance=0.00/1.50m, heading error=0.0/30.0deg, SLAM corrections absorbed=0; output command: steering=+0.397rad, speed=0.00m/s
+[gap_follow_node-9] [INFO] [1794278898.982822538] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -27.0deg to +72.7deg; target=6.25m at +22.7deg, curvature=+1.165/m, closest=0.71m, odom=+0.00m/s; curve cap=1.47m/s, clearance cap=2.41m/s, swept clearance 1.69m, adaptive width 0.34 (margin 0.180m of 0.18m, corner cap 1.63m/s, left 1.10m, right 0.71m), steering_damping_off: imu waiting, acceleration-shaped from 1.47m/s; command: steering=+0.397rad, speed=0.05m/s
+[auto_map_race_node-10] [INFO] [1794278899.009764066] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~0% round, samples=1, distance=0.0/5.0m, turn=0/300deg, elapsed=0.0/4.0s, departed=no, start distance=0.00/1.50m, heading error=0.0/30.0deg, SLAM corrections absorbed=0; output command: steering=+0.397rad, speed=0.05m/s
+[snapshot_params-2] /opt/ros/jazzy/lib/python3.12/site-packages/rclpy/service.py:78: RuntimeWarning: failed to send response (timeout): client will not receive response, at ./src/rmw_response.cpp:153, at ./src/rcl/service.c:400
+[snapshot_params-2]   self.__service.service_send_response(response, header.request_id)
+[race_diag_node-1] [18:48:19] TF_UP: map->base_link available; SLAM is localizing
+[vehicle_state_node-8] [INFO] [1794278899.430476741] [vehicle_state_node]: rates: bno 60 Hz, vesc 0 Hz | speed: fused 134, wheel_only 2 | accel bias bno -0.059 m/s^2 | steering valid 1/217 | heading: model 141
+[vehicle_state_node-8] [WARN] [1794278899.431563194] [vehicle_state_node]: every /odom/imu step used the steering model: no usable gyro, so /odom/imu is exactly /odom
+[vehicle_state_node-8] [WARN] [1794278899.432649262] [vehicle_state_node]: vesc: averaged z acceleration +9.91 m/s^2, not ~+9.8: mounted wrong (upside down, or wrong rpy_deg in car.yaml)? Its gyro and accelerometer are not used.
+[gap_follow_node-9] [INFO] [1794278900.015365705] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -55.8deg to +23.5deg; target=5.45m at -16.3deg, curvature=-0.810/m, closest=1.26m, odom=+2.44m/s; curve cap=1.76m/s, clearance cap=2.53m/s, swept clearance 1.82m, adaptive width 0.90 (margin 0.180m of 0.18m, corner cap 1.86m/s, left 1.24m, right 1.24m), steering_damping_off: imu waiting; command: steering=-0.284rad, speed=1.76m/s
+[auto_map_race_node-10] [INFO] [1794278900.017916888] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.05s); forwarding gap follow; lap 1/3: ~5% round, samples=5, distance=0.7/5.0m, turn=18/300deg, elapsed=1.0/4.0s, departed=no, start distance=0.80/1.50m, heading error=18.4/30.0deg, SLAM corrections absorbed=0; output command: steering=-0.257rad, speed=1.85m/s
+[async_slam_toolbox_node-5] [INFO] [1794278900.398533318] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278900.386 for reason 'discarding message because the queue is full'
+[imu_bridge_node-7] [INFO] [1794278900.586246045] [imu_bridge_node]: rates: vesc 6.6 Hz, odom 5.8 Hz, bno 249.0 Hz
+[auto_map_race_node-10] [INFO] [1794278901.030692628] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~2% round, samples=18, distance=3.6/5.0m, turn=-9/300deg, elapsed=2.1/4.0s, departed=yes, start distance=3.55/1.50m, heading error=8.6/30.0deg, SLAM corrections absorbed=1; output command: steering=+0.056rad, speed=2.92m/s
+[gap_follow_node-9] [INFO] [1794278901.045742061] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -20.5deg to +27.0deg; target=2.67m at +3.2deg, curvature=+0.110/m, closest=0.89m, odom=+3.23m/s; curve cap=3.50m/s, clearance cap=2.94m/s, swept clearance 2.29m, adaptive width 0.43 (margin 0.180m of 0.18m, corner cap 1.67m/s, left 0.89m, right 1.03m), centering -0.017rad at weight 1.00 (left 0.89m, right 1.03m), steering_damping_off: imu waiting; command: steering=+0.040rad, speed=2.94m/s
+[race_diag_node-1] [18:48:21] POSE_LAG_HIGH: /slam_pose stamp is 0.30s behind now; localization is not keeping up (dashboard overlay error ~= speed x lag)
+[auto_map_race_node-10] [INFO] [1794278902.032886360] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~16% round, samples=28, distance=5.7/5.0m, turn=-58/300deg, elapsed=3.1/4.0s, departed=yes, start distance=5.42/1.50m, heading error=57.4/30.0deg, SLAM corrections absorbed=2; output command: steering=+0.101rad, speed=1.79m/s
+[race_diag_node-1] [18:48:22] FIRST_MESSAGE: first map: 107x252 @ 0.050m/cell, 1049 occupied cells
+[gap_follow_node-9] [INFO] [1794278902.058644409] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -6.3deg to +31.2deg; target=4.20m at +12.5deg, curvature=+0.505/m, closest=0.74m, odom=+1.82m/s; curve cap=2.22m/s, clearance cap=1.84m/s, swept clearance 1.14m, adaptive width 0.17 (margin 0.180m of 0.18m, corner cap 1.57m/s, left 0.74m, right 0.86m), centering -0.003rad at weight 0.23 (left 0.74m, right 0.86m), steering_damping_off: imu waiting, arc guard +0.215->+0.180rad (requested arc blocked), steering shaped from +0.180rad (slew-limited from basis +0.101rad over 0.028s at 2.00rad/s); command: steering=+0.156rad, speed=1.84m/s
+[async_slam_toolbox_node-5] [INFO] [1794278902.945771881] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278902.920 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278903.070251292] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -5.5deg to +28.0deg; target=3.58m at +11.2deg, curvature=+0.550/m, closest=0.61m, odom=+2.39m/s; curve cap=2.13m/s, clearance cap=2.26m/s, swept clearance 1.54m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.61m, right 0.62m), centering -0.001rad at weight 0.34 (left 0.61m, right 0.62m), steering_damping_off: imu waiting; command: steering=+0.196rad, speed=2.13m/s
+[auto_map_race_node-10] [INFO] [1794278903.071031498] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.03s); forwarding gap follow; lap 1/3: ~17% round, samples=36, distance=8.1/5.0m, turn=-61/300deg, elapsed=4.1/4.0s, departed=yes, start distance=6.99/1.50m, heading error=61.2/30.0deg, SLAM corrections absorbed=2; output command: steering=+0.204rad, speed=2.09m/s
+[gap_follow_node-9] [INFO] [1794278904.073231469] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap +0.7deg to +57.5deg; target=2.87m at +29.0deg, curvature=+1.240/m, closest=0.84m, odom=+2.00m/s; curve cap=1.42m/s, clearance cap=2.02m/s, swept clearance 1.31m, adaptive width 0.38 (margin 0.180m of 0.18m, corner cap 1.65m/s, left 0.83m, right 1.03m), steering_damping_off: imu waiting; command: steering=+0.420rad, speed=1.43m/s
+[auto_map_race_node-10] [INFO] [1794278904.084033174] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~0% round, samples=48, distance=10.6/5.0m, turn=-2/300deg, elapsed=5.1/4.0s, departed=yes, start distance=9.40/1.50m, heading error=1.4/30.0deg, SLAM corrections absorbed=3; output command: steering=+0.420rad, speed=1.43m/s
+[vehicle_state_node-8] [INFO] [1794278904.437193483] [vehicle_state_node]: rates: bno 181 Hz, vesc 36 Hz | speed: fused 235, slip 15 | accel bias bno +0.010 m/s^2 | steering valid 229/242 | heading: bno 174, model 77
+[vehicle_state_node-8] [WARN] [1794278904.442537966] [vehicle_state_node]: wheels rejected as slipping on 15 of 250 /odom messages
+[gap_follow_node-9] [INFO] [1794278905.095788793] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -9.3deg to +32.7deg; target=2.71m at +11.7deg, curvature=+0.510/m, closest=0.62m, odom=+2.09m/s; curve cap=2.21m/s, clearance cap=3.50m/s, adaptive width 0.41 (margin 0.180m of 0.18m, corner cap 1.66m/s, left 0.62m, right 1.27m), centering -0.024rad at weight 0.30 (left 0.62m, right 1.27m), steering_damping_off: imu waiting; command: steering=+0.181rad, speed=2.21m/s
+[auto_map_race_node-10] [INFO] [1794278905.105951094] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~26% round, samples=59, distance=12.7/5.0m, turn=93/300deg, elapsed=6.1/4.0s, departed=yes, start distance=9.90/1.50m, heading error=93.7/30.0deg, SLAM corrections absorbed=4; output command: steering=+0.181rad, speed=2.21m/s
+[async_slam_toolbox_node-5] [INFO] [1794278905.593253510] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278905.561 for reason 'discarding message because the queue is full'
+[imu_bridge_node-7] [INFO] [1794278905.606231608] [imu_bridge_node]: rates: vesc 42.6 Hz, odom 42.6 Hz, bno 241.6 Hz
+[gap_follow_node-9] [INFO] [1794278906.107526731] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -17.0deg to +38.0deg; target=3.09m at +10.5deg, curvature=+0.464/m, closest=0.80m, odom=+2.61m/s; curve cap=2.32m/s, clearance cap=3.02m/s, swept clearance 2.39m, adaptive width 0.40 (margin 0.180m of 0.18m, corner cap 1.66m/s, left 0.76m, right 1.11m), centering -0.018rad at weight 0.41 (left 0.76m, right 1.11m), steering_damping_off: imu waiting, steering shaped from +0.165rad (slew-limited from basis +0.086rad over 0.011s at 2.00rad/s); command: steering=+0.108rad, speed=2.32m/s
+[auto_map_race_node-10] [INFO] [1794278906.109789685] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~39% round, samples=69, distance=14.6/5.0m, turn=140/300deg, elapsed=7.1/4.0s, departed=yes, start distance=8.55/1.50m, heading error=139.9/30.0deg, SLAM corrections absorbed=5; output command: steering=+0.086rad, speed=2.70m/s
+[gap_follow_node-9] [INFO] [1794278907.107435664] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -33.5deg to +16.2deg; target=3.77m at -8.8deg, curvature=-0.418/m, closest=0.83m, odom=+2.03m/s; curve cap=2.45m/s, clearance cap=3.01m/s, swept clearance 2.38m, adaptive width 0.26 (margin 0.180m of 0.18m, corner cap 1.60m/s, left 0.88m, right 0.83m), centering +0.003rad at weight 0.57 (left 0.88m, right 0.83m), steering_damping_off: imu waiting, acceleration-shaped from 2.45m/s; command: steering=-0.149rad, speed=2.42m/s
+[auto_map_race_node-10] [INFO] [1794278907.130798690] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.02s); forwarding gap follow; lap 1/3: ~53% round, samples=81, distance=16.9/5.0m, turn=190/300deg, elapsed=8.1/4.0s, departed=yes, start distance=6.49/1.50m, heading error=169.6/30.0deg, SLAM corrections absorbed=5; output command: steering=-0.149rad, speed=2.42m/s
+[async_slam_toolbox_node-5] [INFO] [1794278908.122789571] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278908.090 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278908.135385965] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -20.8deg to +18.2deg; target=5.00m at -1.3deg, curvature=-0.083/m, closest=0.52m, odom=+3.36m/s; curve cap=3.50m/s, clearance cap=3.40m/s, swept clearance 2.90m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.52m, right 0.87m), centering -0.044rad at weight 1.00 (left 0.52m, right 0.87m), steering_damping_off: imu waiting, arc guard -0.066->-0.030rad (requested arc blocked); command: steering=-0.030rad, speed=3.40m/s
+[auto_map_race_node-10] [INFO] [1794278908.136223388] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.02s); forwarding gap follow; lap 1/3: ~50% round, samples=95, distance=19.9/5.0m, turn=182/300deg, elapsed=9.2/4.0s, departed=yes, start distance=3.70/1.50m, heading error=177.8/30.0deg, SLAM corrections absorbed=6; output command: steering=-0.030rad, speed=3.44m/s
+[gap_follow_node-9] [INFO] [1794278909.147785496] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -16.5deg to +65.7deg; target=3.15m at +24.5deg, curvature=+1.240/m, closest=0.58m, odom=+2.63m/s; curve cap=1.42m/s, clearance cap=2.03m/s, swept clearance 1.32m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.79m, right 0.58m), steering_damping_off: imu waiting; command: steering=+0.420rad, speed=1.43m/s
+[auto_map_race_node-10] [INFO] [1794278909.154549077] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.00s); forwarding gap follow; lap 1/3: ~49% round, samples=101, distance=21.4/5.0m, turn=176/300deg, elapsed=10.2/4.0s, departed=yes, start distance=2.29/1.50m, heading error=176.9/30.0deg, SLAM corrections absorbed=6; output command: steering=+0.420rad, speed=1.43m/s
+[vehicle_state_node-8] [INFO] [1794278909.436111836] [vehicle_state_node]: rates: bno 182 Hz, vesc 41 Hz | speed: fused 206, slip 43, wheel_only 1 | accel bias bno -0.089 m/s^2 | steering valid 242/242 | heading: bno 215, model 31
+[vehicle_state_node-8] [WARN] [1794278909.439459610] [vehicle_state_node]: wheels rejected as slipping on 43 of 250 /odom messages
+[gap_follow_node-9] [INFO] [1794278910.161284358] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -51.0deg to +12.0deg; target=3.10m at -19.5deg, curvature=-0.984/m, closest=1.27m, odom=+2.66m/s; curve cap=1.59m/s, clearance cap=2.13m/s, swept clearance 1.41m, adaptive width 0.96 (margin 0.180m of 0.18m, corner cap 1.89m/s, left 1.19m, right 1.37m), steering_damping_off: imu waiting, steering shaped from -0.340rad (slew-limited from basis -0.173rad over 0.029s at 2.00rad/s); command: steering=-0.230rad, speed=1.59m/s
+[auto_map_race_node-10] [INFO] [1794278910.175688497] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.02s); forwarding gap follow; lap 1/3: ~71% round, samples=116, distance=25.0/5.0m, turn=254/300deg, elapsed=11.2/4.0s, departed=yes, start distance=2.83/1.50m, heading error=105.3/30.0deg, SLAM corrections absorbed=6; output command: steering=-0.173rad, speed=2.27m/s
+[imu_bridge_node-7] [INFO] [1794278910.612571570] [imu_bridge_node]: rates: vesc 37.0 Hz, odom 36.8 Hz, bno 245.0 Hz
+[async_slam_toolbox_node-5] [INFO] [1794278910.622882897] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278910.600 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278911.167242712] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -18.8deg to +23.0deg; target=4.64m at +2.0deg, curvature=+0.259/m, closest=0.67m, odom=+2.02m/s; curve cap=3.11m/s, clearance cap=2.47m/s, swept clearance 1.75m, adaptive width 0.34 (margin 0.180m of 0.18m, corner cap 1.64m/s, left 1.14m, right 0.67m), centering +0.058rad at weight 1.00 (left 1.14m, right 0.67m), steering_damping_off: imu waiting; command: steering=+0.093rad, speed=2.47m/s
+[auto_map_race_node-10] [INFO] [1794278911.189318768] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~51% round, samples=129, distance=27.5/5.0m, turn=184/300deg, elapsed=12.2/4.0s, departed=yes, start distance=4.80/1.50m, heading error=175.4/30.0deg, SLAM corrections absorbed=7; output command: steering=+0.093rad, speed=2.47m/s
+[gap_follow_node-9] [INFO] [1794278912.170357348] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -42.3deg to +15.2deg; target=4.00m at -13.5deg, curvature=-0.669/m, closest=0.68m, odom=+3.05m/s; curve cap=1.93m/s, clearance cap=2.70m/s, swept clearance 2.02m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.68m, right 0.71m), centering -0.001rad at weight 0.14 (left 0.68m, right 0.71m), steering_damping_off: imu waiting; command: steering=-0.236rad, speed=1.93m/s
+[auto_map_race_node-10] [INFO] [1794278912.185362330] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~50% round, samples=142, distance=29.9/5.0m, turn=181/300deg, elapsed=13.2/4.0s, departed=yes, start distance=6.46/1.50m, heading error=178.4/30.0deg, SLAM corrections absorbed=7; output command: steering=-0.236rad, speed=1.93m/s
+[gap_follow_node-9] [INFO] [1794278913.188126735] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -23.0deg to +47.0deg; target=2.90m at +12.0deg, curvature=+0.558/m, closest=0.88m, odom=+1.67m/s; curve cap=2.12m/s, clearance cap=3.50m/s, swept clearance 3.06m, adaptive width 0.56 (margin 0.180m of 0.18m, corner cap 1.73m/s, left 0.88m, right 1.20m), centering -0.011rad at weight 0.27 (left 0.88m, right 1.20m), steering_damping_off: imu waiting, acceleration-shaped from 2.12m/s; command: steering=+0.198rad, speed=1.98m/s
+[auto_map_race_node-10] [INFO] [1794278913.206277502] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~55% round, samples=155, distance=32.2/5.0m, turn=197/300deg, elapsed=14.2/4.0s, departed=yes, start distance=7.83/1.50m, heading error=161.9/30.0deg, SLAM corrections absorbed=7; output command: steering=+0.198rad, speed=1.98m/s
+[async_slam_toolbox_node-5] [INFO] [1794278913.340180329] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278913.303 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278914.196582364] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap +34.2deg to +67.5deg; target=2.59m at +50.7deg, curvature=+1.240/m, closest=0.83m, odom=+1.51m/s; curve cap=1.42m/s, clearance cap=3.50m/s, adaptive width 0.77 (margin 0.180m of 0.18m, corner cap 1.81m/s, left 0.75m, right 1.58m), steering_damping_off: imu waiting; command: steering=+0.420rad, speed=1.43m/s
+[auto_map_race_node-10] [INFO] [1794278914.212113563] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~76% round, samples=166, distance=34.0/5.0m, turn=272/300deg, elapsed=15.2/4.0s, departed=yes, start distance=9.48/1.50m, heading error=87.0/30.0deg, SLAM corrections absorbed=7; output command: steering=+0.420rad, speed=1.43m/s
+[vehicle_state_node-8] [INFO] [1794278914.433660535] [vehicle_state_node]: rates: bno 197 Hz, vesc 47 Hz | speed: fused 195, slip 54 | accel bias bno -0.464 m/s^2 | steering valid 249/249 | heading: bno 242, vesc 1, model 11
+[vehicle_state_node-8] [WARN] [1794278914.438215115] [vehicle_state_node]: wheels rejected as slipping on 54 of 249 /odom messages
+[gap_follow_node-9] [INFO] [1794278915.210616192] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -31.3deg to +17.7deg; target=8.86m at -6.8deg, curvature=-0.418/m, closest=0.67m, odom=+2.03m/s; curve cap=2.44m/s, clearance cap=2.32m/s, swept clearance 1.60m, adaptive width 0.10 (margin 0.180m of 0.18m, corner cap 1.54m/s, left 0.59m, right 0.93m), centering -0.032rad at weight 0.75 (left 0.59m, right 0.93m), steering_damping_off: imu waiting; command: steering=-0.149rad, speed=2.32m/s
+[auto_map_race_node-10] [INFO] [1794278915.229989830] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~100% round, samples=175, distance=35.6/5.0m, turn=360/300deg, elapsed=16.2/4.0s, departed=yes, start distance=9.15/1.50m, heading error=1.2/30.0deg, SLAM corrections absorbed=7; output command: steering=-0.149rad, speed=2.32m/s
+[race_diag_node-1] [18:48:35] STATUS: scan=ok | map=284x377@0.050 28%known 3415occ | map->base_link=OK | pose=ok lag=0.02s(max 0.64) | odom=ok +2.33m/s | drive=ok cmd=2.56m/s | LB=held
+[imu_bridge_node-7] [INFO] [1794278915.587323527] [imu_bridge_node]: rates: vesc 50.4 Hz, odom 50.4 Hz, bno 239.8 Hz
+[async_slam_toolbox_node-5] [INFO] [1794278915.848027761] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278915.832 for reason 'discarding message because the queue is full'
+[auto_map_race_node-10] [INFO] [1794278916.232342785] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.02s); forwarding gap follow; lap 1/3: ~100% round, samples=190, distance=38.2/5.0m, turn=359/300deg, elapsed=17.3/4.0s, departed=yes, start distance=7.51/1.50m, heading error=0.2/30.0deg, SLAM corrections absorbed=7; output command: steering=-0.090rad, speed=2.62m/s
+[gap_follow_node-9] [INFO] [1794278916.239506885] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -24.5deg to +14.0deg; target=6.33m at -5.3deg, curvature=-0.281/m, closest=0.69m, odom=+3.12m/s; curve cap=2.98m/s, clearance cap=2.47m/s, swept clearance 1.76m, adaptive width 0.05 (margin 0.180m of 0.18m, corner cap 1.52m/s, left 0.69m, right 0.77m), centering -0.009rad at weight 0.89 (left 0.69m, right 0.77m), steering_damping_off: imu waiting; command: steering=-0.101rad, speed=2.47m/s
+[gap_follow_node-9] [INFO] [1794278917.242247575] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -26.0deg to +53.2deg; target=7.44m at +13.5deg, curvature=+0.505/m, closest=0.66m, odom=+3.48m/s; curve cap=2.22m/s, clearance cap=3.07m/s, swept clearance 2.46m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.62m, right 0.67m), centering -0.001rad at weight 0.14 (left 0.62m, right 0.67m), steering_damping_off: imu waiting, arc guard +0.235->+0.180rad (requested arc blocked); command: steering=+0.180rad, speed=2.22m/s
+[auto_map_race_node-10] [INFO] [1794278917.253257858] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~100% round, samples=205, distance=41.5/5.0m, turn=365/300deg, elapsed=18.3/4.0s, departed=yes, start distance=6.63/1.50m, heading error=6.4/30.0deg, SLAM corrections absorbed=7; output command: steering=+0.180rad, speed=2.22m/s
+[gap_follow_node-9] [INFO] [1794278918.250424892] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -26.5deg to +33.5deg; target=4.31m at +3.5deg, curvature=+0.223/m, closest=1.19m, odom=+3.20m/s; curve cap=3.35m/s, clearance cap=3.35m/s, swept clearance 2.82m, adaptive width 0.94 (margin 0.180m of 0.18m, corner cap 1.87m/s, left 1.34m, right 1.19m), centering +0.019rad at weight 1.00 (left 1.34m, right 1.19m), steering_damping_off: imu waiting, acceleration-shaped from 3.35m/s; command: steering=+0.080rad, speed=3.30m/s
+[auto_map_race_node-10] [INFO] [1794278918.258799383] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~100% round, samples=220, distance=44.7/5.0m, turn=379/300deg, elapsed=19.3/4.0s, departed=yes, start distance=6.05/1.50m, heading error=19.5/30.0deg, SLAM corrections absorbed=7; output command: steering=+0.080rad, speed=3.30m/s
+[async_slam_toolbox_node-5] [INFO] [1794278918.350082118] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278918.311 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278919.249703534] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -39.0deg to -0.0deg; target=4.19m at -19.5deg, curvature=-0.984/m, closest=0.81m, odom=+1.87m/s; curve cap=1.59m/s, clearance cap=2.01m/s, swept clearance 1.30m, adaptive width 0.37 (margin 0.180m of 0.18m, corner cap 1.65m/s, left 1.03m, right 0.81m), steering_damping_off: imu waiting; command: steering=-0.340rad, speed=1.59m/s
+[auto_map_race_node-10] [INFO] [1794278919.278638082] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.03s); forwarding gap follow; lap 1/3: ~100% round, samples=234, distance=47.7/5.0m, turn=363/300deg, elapsed=20.3/4.0s, departed=yes, start distance=6.71/1.50m, heading error=4.2/30.0deg, SLAM corrections absorbed=7; output command: steering=-0.340rad, speed=1.59m/s
+[vehicle_state_node-8] [INFO] [1794278919.429509848] [vehicle_state_node]: rates: bno 206 Hz, vesc 50 Hz | speed: fused 229, slip 22 | accel bias bno -0.286 m/s^2 | steering valid 250/250 | heading: bno 245, vesc 2, model 3
+[vehicle_state_node-8] [WARN] [1794278919.431615615] [vehicle_state_node]: wheels rejected as slipping on 22 of 251 /odom messages
+[gap_follow_node-9] [INFO] [1794278920.252221419] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -9.5deg to +20.5deg; target=3.55m at +5.5deg, curvature=+0.203/m, closest=0.52m, odom=+2.50m/s; curve cap=3.50m/s, clearance cap=3.50m/s, swept clearance 4.81m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.50m, right 0.72m), centering -0.023rad at weight 0.86 (left 0.50m, right 0.72m), steering_damping_off: imu waiting, steering shaped from +0.073rad (slew-limited from basis +0.011rad over 0.031s at 2.00rad/s), acceleration-shaped from 3.50m/s; command: steering=+0.073rad, speed=2.86m/s
+[auto_map_race_node-10] [INFO] [1794278920.285714450] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.02s); forwarding gap follow; lap 1/3: ~97% round, samples=245, distance=49.7/5.0m, turn=348/300deg, elapsed=21.3/4.0s, departed=yes, start distance=8.55/1.50m, heading error=10.3/30.0deg, SLAM corrections absorbed=7; output command: steering=+0.073rad, speed=2.86m/s
+[imu_bridge_node-7] [INFO] [1794278920.581414282] [imu_bridge_node]: rates: vesc 49.8 Hz, odom 49.6 Hz, bno 246.6 Hz
+[async_slam_toolbox_node-5] WARNING: Logging before InitGoogleLogging() is written to STDERR
+[async_slam_toolbox_node-5] W20261109 18:48:40.774700 90804 preprocessor.cc:67] Specified options.num_threads: 50 exceeds maximum available from the threading model Ceres was compiled with: 6.  Bounding to maximum number available.
+[async_slam_toolbox_node-5] [INFO] [1794278920.914154506] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278920.891 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278921.276041886] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap +3.2deg to +55.7deg; target=3.10m at +29.5deg, curvature=+1.142/m, closest=0.81m, odom=+2.79m/s; curve cap=1.48m/s, clearance cap=2.31m/s, swept clearance 1.59m, adaptive width 0.16 (margin 0.180m of 0.18m, corner cap 1.57m/s, left 0.73m, right 0.87m), steering_damping_off: imu waiting, arc guard +0.420->+0.390rad (requested arc blocked); command: steering=+0.390rad, speed=1.48m/s
+[auto_map_race_node-10] [INFO] [1794278921.308509778] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~100% round, samples=259, distance=52.5/5.0m, turn=386/300deg, elapsed=22.3/4.0s, departed=yes, start distance=10.76/1.50m, heading error=27.0/30.0deg, SLAM corrections absorbed=7; output command: steering=+0.390rad, speed=1.48m/s
+[gap_follow_node-9] [INFO] [1794278922.297215024] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap +0.2deg to +41.7deg; target=2.80m at +21.0deg, curvature=+0.951/m, closest=0.78m, odom=+2.32m/s; curve cap=1.62m/s, clearance cap=1.81m/s, swept clearance 1.12m, adaptive width 0.54 (margin 0.180m of 0.18m, corner cap 1.72m/s, left 0.78m, right 1.27m), steering_damping_off: imu waiting, arc guard +0.367->+0.330rad (requested arc blocked); command: steering=+0.330rad, speed=1.62m/s
+[auto_map_race_node-10] [INFO] [1794278922.313548987] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.04s); forwarding gap follow; lap 1/3: ~100% round, samples=269, distance=54.3/5.0m, turn=455/300deg, elapsed=23.3/4.0s, departed=yes, start distance=10.92/1.52m, heading error=96.3/30.0deg, SLAM corrections absorbed=8; output command: steering=+0.330rad, speed=1.62m/s
+[async_slam_toolbox_node-5] W20261109 18:48:43.155493 90804 preprocessor.cc:67] Specified options.num_threads: 50 exceeds maximum available from the threading model Ceres was compiled with: 6.  Bounding to maximum number available.
+[gap_follow_node-9] [INFO] [1794278923.302408652] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -22.0deg to +39.0deg; target=3.53m at +8.5deg, curvature=+0.290/m, closest=0.69m, odom=+2.99m/s; curve cap=2.93m/s, clearance cap=3.50m/s, swept clearance 3.34m, adaptive width 0.40 (margin 0.180m of 0.18m, corner cap 1.66m/s, left 0.64m, right 1.24m), centering -0.044rad at weight 0.59 (left 0.64m, right 1.24m), steering_damping_off: imu waiting, steering shaped from +0.104rad (slew-limited from basis +0.053rad over 0.025s at 2.00rad/s); command: steering=+0.103rad, speed=2.93m/s
+[auto_map_race_node-10] [INFO] [1794278923.330967127] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.03s); forwarding gap follow; lap 1/3: ~100% round, samples=282, distance=56.7/5.0m, turn=532/300deg, elapsed=24.3/4.0s, departed=yes, start distance=8.85/1.84m, heading error=173.8/30.0deg, SLAM corrections absorbed=8; output command: steering=+0.103rad, speed=2.93m/s
+[async_slam_toolbox_node-5] [INFO] [1794278923.472648123] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278923.440 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278924.323387001] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -29.8deg to +23.5deg; target=7.88m at -3.3deg, curvature=-0.135/m, closest=0.80m, odom=+2.61m/s; curve cap=3.50m/s, clearance cap=3.23m/s, swept clearance 2.67m, adaptive width 0.22 (margin 0.180m of 0.18m, corner cap 1.59m/s, left 0.87m, right 0.80m), centering +0.008rad at weight 1.00 (left 0.87m, right 0.80m), steering_damping_off: imu waiting, steering shaped from -0.048rad (slew-limited from basis -0.134rad over 0.026s at 2.00rad/s), acceleration-shaped from 3.23m/s; command: steering=-0.083rad, speed=2.74m/s
+[auto_map_race_node-10] [INFO] [1794278924.330867746] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.03s); forwarding gap follow; lap 1/3: ~100% round, samples=299, distance=60.1/5.0m, turn=556/300deg, elapsed=25.4/4.0s, departed=yes, start distance=6.08/1.94m, heading error=159.8/30.0deg, SLAM corrections absorbed=11; output command: steering=-0.134rad, speed=2.25m/s
+[vehicle_state_node-8] [INFO] [1794278924.430323231] [vehicle_state_node]: rates: bno 215 Hz, vesc 47 Hz | speed: fused 194, slip 56 | accel bias bno -0.050 m/s^2 | steering valid 250/250 | heading: bno 229, vesc 2, model 19
+[vehicle_state_node-8] [WARN] [1794278924.431425427] [vehicle_state_node]: wheels rejected as slipping on 56 of 250 /odom messages
+[gap_follow_node-9] [INFO] [1794278925.330300404] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -22.8deg to +5.2deg; target=3.96m at -8.8deg, curvature=-0.167/m, closest=0.54m, odom=+3.59m/s; curve cap=3.50m/s, clearance cap=2.91m/s, swept clearance 2.26m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.54m, right 0.78m), centering -0.017rad at weight 0.57 (left 0.54m, right 0.78m), steering_damping_off: imu waiting, arc guard -0.170->-0.060rad (requested arc blocked); command: steering=-0.060rad, speed=2.91m/s
+[auto_map_race_node-10] [INFO] [1794278925.365145329] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.03s); forwarding gap follow; lap 1/3: ~100% round, samples=315, distance=63.2/5.0m, turn=556/300deg, elapsed=26.4/4.0s, departed=yes, start distance=3.95/1.94m, heading error=159.9/30.0deg, SLAM corrections absorbed=11; output command: steering=-0.060rad, speed=2.91m/s
+[imu_bridge_node-7] [INFO] [1794278925.594285840] [imu_bridge_node]: rates: vesc 47.2 Hz, odom 47.2 Hz, bno 245.0 Hz
+[async_slam_toolbox_node-5] [INFO] [1794278925.973351237] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278925.951 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278926.334580622] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -43.5deg to +66.2deg; target=5.12m at +11.2deg, curvature=+0.536/m, closest=0.78m, odom=+2.14m/s; curve cap=2.16m/s, clearance cap=3.47m/s, swept clearance 2.99m, adaptive width 0.23 (margin 0.180m of 0.18m, corner cap 1.59m/s, left 0.77m, right 0.91m), centering -0.006rad at weight 0.34 (left 0.77m, right 0.91m), steering_damping_off: imu waiting; command: steering=+0.190rad, speed=2.16m/s
+[auto_map_race_node-10] [INFO] [1794278926.382302454] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.02s); forwarding gap follow; lap 1/3: ~100% round, samples=329, distance=66.3/5.0m, turn=590/300deg, elapsed=27.4/4.0s, departed=yes, start distance=4.21/2.08m, heading error=126.5/30.0deg, SLAM corrections absorbed=11; output command: steering=+0.146rad, speed=2.33m/s
+[gap_follow_node-9] [INFO] [1794278927.339564006] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -33.3deg to +28.7deg; target=2.55m at -2.3deg, curvature=-0.074/m, closest=1.24m, odom=+2.11m/s; curve cap=3.50m/s, clearance cap=2.93m/s, swept clearance 2.28m, adaptive width 0.98 (margin 0.180m of 0.18m, corner cap 1.89m/s, left 1.34m, right 1.24m), centering +0.013rad at weight 1.00 (left 1.34m, right 1.24m), steering_damping_off: imu waiting, steering shaped from -0.027rad (slew-limited from basis -0.098rad over 0.005s at 2.00rad/s), acceleration-shaped from 2.93m/s; command: steering=-0.089rad, speed=2.62m/s
+[auto_map_race_node-10] [INFO] [1794278927.403104462] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.03s); forwarding gap follow; lap 1/3: ~100% round, samples=340, distance=68.5/5.0m, turn=599/300deg, elapsed=28.4/4.0s, departed=yes, start distance=6.32/2.12m, heading error=117.2/30.0deg, SLAM corrections absorbed=11; output command: steering=-0.006rad, speed=2.67m/s
+[gap_follow_node-9] [INFO] [1794278928.335859118] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -22.5deg to +18.2deg; target=4.30m at -2.3deg, curvature=+0.071/m, closest=0.56m, odom=+2.33m/s; curve cap=3.50m/s, clearance cap=3.01m/s, swept clearance 2.39m, adaptive width 0.19 (margin 0.180m of 0.18m, corner cap 1.58m/s, left 1.08m, right 0.56m), centering +0.065rad at weight 1.00 (left 1.08m, right 0.56m), steering_damping_off: imu waiting, acceleration-shaped from 3.01m/s; command: steering=+0.025rad, speed=2.84m/s
+[auto_map_race_node-10] [INFO] [1794278928.408996836] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~100% round, samples=351, distance=70.4/5.0m, turn=561/300deg, elapsed=29.4/4.0s, departed=yes, start distance=7.89/1.96m, heading error=154.6/30.0deg, SLAM corrections absorbed=11; output command: steering=-0.032rad, speed=3.08m/s
+[async_slam_toolbox_node-5] [INFO] [1794278928.500758062] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278928.483 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278929.344063808] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -48.8deg to +15.5deg; target=3.04m at -16.8deg, curvature=-0.836/m, closest=0.68m, odom=+3.00m/s; curve cap=1.73m/s, clearance cap=2.38m/s, swept clearance 1.66m, adaptive width 0.00 (margin 0.180m of 0.18m, corner cap 1.50m/s, left 0.68m, right 0.72m), steering_damping_off: imu waiting; command: steering=-0.292rad, speed=1.73m/s
+[auto_map_race_node-10] [INFO] [1794278929.428622917] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.02s); forwarding gap follow; lap 1/3: ~100% round, samples=366, distance=73.3/5.0m, turn=536/300deg, elapsed=30.4/4.0s, departed=yes, start distance=9.70/1.86m, heading error=179.4/30.0deg, SLAM corrections absorbed=11; output command: steering=-0.167rad, speed=2.39m/s
+[vehicle_state_node-8] [INFO] [1794278929.432131653] [vehicle_state_node]: rates: bno 215 Hz, vesc 50 Hz | speed: fused 225, slip 25 | accel bias bno -0.249 m/s^2 | steering valid 250/250 | heading: bno 244, vesc 4, model 2
+[vehicle_state_node-8] [WARN] [1794278929.434206027] [vehicle_state_node]: wheels rejected as slipping on 25 of 250 /odom messages
+[gap_follow_node-9] [INFO] [1794278930.349652722] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap -27.8deg to +44.2deg; target=2.87m at +8.2deg, curvature=+0.314/m, closest=0.81m, odom=+1.54m/s; curve cap=2.82m/s, clearance cap=3.42m/s, swept clearance 2.93m, adaptive width 0.52 (margin 0.180m of 0.18m, corner cap 1.71m/s, left 0.81m, right 1.22m), centering -0.031rad at weight 0.61 (left 0.81m, right 1.22m), steering_damping_off: imu waiting, steering shaped from +0.113rad (slew-limited from basis +0.164rad over 0.015s at 2.00rad/s), acceleration-shaped from 2.82m/s; command: steering=+0.134rad, speed=2.31m/s
+[auto_map_race_node-10] [INFO] [1794278930.451944568] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.01s); forwarding gap follow; lap 1/3: ~100% round, samples=374, distance=74.8/5.0m, turn=568/300deg, elapsed=31.5/4.0s, departed=yes, start distance=10.52/1.99m, heading error=147.9/30.0deg, SLAM corrections absorbed=11; output command: steering=+0.123rad, speed=2.55m/s
+[imu_bridge_node-7] [INFO] [1794278930.587345946] [imu_bridge_node]: rates: vesc 43.6 Hz, odom 43.6 Hz, bno 246.6 Hz
+[async_slam_toolbox_node-5] [INFO] [1794278931.032886379] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278931.003 for reason 'discarding message because the queue is full'
+[gap_follow_node-9] [INFO] [1794278931.348952769] [gap_follow_node]: DRIVE [gap_follow] selected preferred depth 2.00m gap +37.2deg to +88.7deg; target=6.39m at +63.0deg, curvature=+1.240/m, closest=1.16m, odom=+1.56m/s; curve cap=1.42m/s, clearance cap=3.50m/s, adaptive width 0.86 (margin 0.180m of 0.18m, corner cap 1.84m/s, left 0.85m, right 1.58m), steering_damping_off: imu waiting; command: steering=+0.420rad, speed=1.43m/s
+[auto_map_race_node-10] [INFO] [1794278931.455074700] [auto_map_race_node]: FORWARD [forwarding_mapping] selected 'gap_follow' command is fresh (age=0.00s); forwarding gap follow; lap 1/3: ~100% round, samples=386, distance=77.3/5.0m, turn=670/300deg, elapsed=32.5/4.0s, departed=yes, start distance=12.59/2.42m, heading error=45.9/30.0deg, SLAM corrections absorbed=11 -- WARNING: 1.9 laps of turning with no closure. Closest the car has come back to where the recorder started is 1.13m, against a gate now at 2.42m (widened from 1.50m and still opening, up to 4.00m). Heading error there must also be within 30deg. The recording will be trimmed back to its final revolution when it does close.; output command: steering=+0.420rad, speed=1.43m/s
+[race_diag_node-1] [18:48:51] DEADMAN: LB released
+[auto_map_race_node-10] [WARN] [1794278931.952146080] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278931.963938294] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[auto_map_race_node-10] [WARN] [1794278932.953841953] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278932.988592089] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[auto_map_race_node-10] [WARN] [1794278933.960577166] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278934.002225987] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[async_slam_toolbox_node-5] [INFO] [1794278934.030408802] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278934.008 for reason 'discarding message because the queue is full'
+[vehicle_state_node-8] [INFO] [1794278934.435052753] [vehicle_state_node]: rates: bno 206 Hz, vesc 44 Hz | speed: fused 212, slip 38 | accel bias bno +0.369 m/s^2 | steering valid 157/249 | heading: bno 247, model 3
+[vehicle_state_node-8] [WARN] [1794278934.443605804] [vehicle_state_node]: wheels rejected as slipping on 38 of 250 /odom messages
+[auto_map_race_node-10] [WARN] [1794278934.980305911] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278935.017054514] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[imu_bridge_node-7] [INFO] [1794278935.589740865] [imu_bridge_node]: rates: vesc 50.6 Hz, odom 50.8 Hz, bno 247.0 Hz
+[imu_bridge_node-7] [INFO] [1794278935.675896411] [imu_bridge_node]: bno: startup gyro bias removed [-0.00124, +0.00143, +0.00020] rad/s ([-0.071, +0.082, +0.011] deg/s)
+[imu_bridge_node-7] [INFO] [1794278935.702565407] [imu_bridge_node]: /imu/status: ok
+[imu_bridge_node-7] [INFO] [1794278935.764315774] [imu_bridge_node]: vesc: startup gyro bias removed [-0.00097, +0.00018, -0.01173] rad/s ([-0.056, +0.010, -0.672] deg/s)
+[auto_map_race_node-10] [WARN] [1794278936.004073945] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278936.046098578] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[race_diag_node-1] [18:48:56] STATUS: scan=ok | map=405x353@0.050 44%known 7464occ | map->base_link=OK | pose=ok lag=0.03s(max 0.64) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[async_slam_toolbox_node-5] [INFO] [1794278936.577890100] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278936.561 for reason 'discarding message because the queue is full'
+[auto_map_race_node-10] [WARN] [1794278937.027520260] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278937.046326681] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[auto_map_race_node-10] [WARN] [1794278938.035461799] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278938.062367725] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[auto_map_race_node-10] [WARN] [1794278939.054677221] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-9] [WARN] [1794278939.063141406] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.371rad, speed=0.00m/s
+[async_slam_toolbox_node-5] [INFO] [1794278939.159214758] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1794278939.142 for reason 'discarding message because the queue is full'
+[vehicle_state_node-8] [INFO] [1794278939.430460042] [vehicle_state_node]: rates: bno 234 Hz, vesc 50 Hz | speed: fused 250 | accel bias bno +0.221 m/s^2 | steering valid 0/249 | heading: bno 250
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT) again, ignoring...
+[race_diag_node-1] [18:48:59] CLOSING: worst pose lag this run: 0.64s
+[INFO] [bno_i2c_bridge-6]: process has finished cleanly [pid 90775]
+[ERROR] [system_log-4]: process has died [pid 90773, exit code -2, cmd '/home/racerbotcar-2/racerbot-ws/install/race_diagnostics/lib/race_diagnostics/system_log --output /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810/system'].
+[async_slam_toolbox_node-5] [INFO] [1794278939.436921887] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[async_slam_toolbox_node-5] terminate called after throwing an instance of 'std::runtime_error'
+[async_slam_toolbox_node-5]   what():  context cannot be slept with because it's invalid
+[ros2-3] [INFO] [1794278939.437098178] [rosbag2_recorder]: Topics discovery stopped.
+[ros2-3] [INFO] [1794278939.444181154] [rosbag2_recorder]: Pausing recording.
+[ros2-3] [INFO] [1794278939.444345125] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[imu_bridge_node-7] Traceback (most recent call last):
+[imu_bridge_node-7]   File "/home/racerbotcar-2/racerbot-ws/install/imu_bridge/lib/imu_bridge/imu_bridge_node", line 33, in <module>
+[imu_bridge_node-7]     sys.exit(load_entry_point('imu-bridge', 'console_scripts', 'imu_bridge_node')())
+[imu_bridge_node-7]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[imu_bridge_node-7]   File "/home/racerbotcar-2/racerbot-ws/build/imu_bridge/imu_bridge/imu_bridge_node.py", line 353, in main
+[imu_bridge_node-7]     node.destroy_node()
+[imu_bridge_node-7]   File "/home/racerbotcar-2/racerbot-ws/build/imu_bridge/imu_bridge/imu_bridge_node.py", line 340, in destroy_node
+[imu_bridge_node-7]     return super().destroy_node()
+[imu_bridge_node-7]            ^^^^^^^^^^^^^^^^^^^^^^
+[imu_bridge_node-7]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1958, in destroy_node
+[imu_bridge_node-7]     self.destroy_subscription(self._subscriptions[0])
+[imu_bridge_node-7]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1854, in destroy_subscription
+[imu_bridge_node-7]     subscription.destroy()
+[imu_bridge_node-7]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/subscription.py", line 101, in destroy
+[imu_bridge_node-7]     self.handle.destroy_when_not_in_use()
+[imu_bridge_node-7] KeyboardInterrupt
+[snapshot_params-2] Traceback (most recent call last):
+[snapshot_params-2]   File "/home/racerbotcar-2/racerbot-ws/install/race_diagnostics/lib/race_diagnostics/snapshot_params", line 33, in <module>
+[snapshot_params-2]     sys.exit(load_entry_point('race-diagnostics', 'console_scripts', 'snapshot_params')())
+[snapshot_params-2]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[snapshot_params-2]   File "/home/racerbotcar-2/racerbot-ws/build/race_diagnostics/race_diagnostics/snapshot_params.py", line 99, in main
+[snapshot_params-2]     node.get_logger().info(f'{count} parameter snapshots written to {out}')
+[snapshot_params-2]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/impl/rcutils_logger.py", line 343, in info
+[snapshot_params-2]     return self.log(message, LoggingSeverity.INFO, **kwargs)
+[snapshot_params-2]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[snapshot_params-2]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/impl/rcutils_logger.py", line 301, in log
+[snapshot_params-2]     caller_id = CallerId()
+[snapshot_params-2]                 ^^^^^^^^^^
+[snapshot_params-2]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/impl/rcutils_logger.py", line 59, in __new__
+[snapshot_params-2]     frame = _find_caller(inspect.currentframe())
+[snapshot_params-2]             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[snapshot_params-2]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/impl/rcutils_logger.py", line 47, in _find_caller
+[snapshot_params-2]     file_path = os.path.realpath(inspect.getframeinfo(frame).filename)
+[snapshot_params-2]                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[snapshot_params-2]   File "/usr/lib/python3.12/inspect.py", line 1707, in getframeinfo
+[auto_map_race_node-10] Traceback (most recent call last):
+[auto_map_race_node-10]   File "/home/racerbotcar-2/racerbot-ws/install/pure_pursuit/lib/pure_pursuit/auto_map_race_node", line 33, in <module>
+[auto_map_race_node-10]     sys.exit(load_entry_point('pure-pursuit', 'console_scripts', 'auto_map_race_node')())
+[auto_map_race_node-10]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[auto_map_race_node-10]   File "/home/racerbotcar-2/racerbot-ws/build/pure_pursuit/pure_pursuit/auto_map_race_node.py", line 2283, in main
+[auto_map_race_node-10]     node.destroy_node()
+[auto_map_race_node-10]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1960, in destroy_node
+[auto_map_race_node-10]     self.destroy_client(self._clients[0])
+[auto_map_race_node-10]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1870, in destroy_client
+[auto_map_race_node-10]     client.destroy()
+[auto_map_race_node-10]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/client.py", line 232, in destroy
+[auto_map_race_node-10]     self.__client.destroy_when_not_in_use()
+[auto_map_race_node-10] KeyboardInterrupt
+[gap_follow_node-9] Traceback (most recent call last):
+[gap_follow_node-9]   File "/home/racerbotcar-2/racerbot-ws/install/gap_follow/lib/gap_follow/gap_follow_node", line 33, in <module>
+[gap_follow_node-9]     sys.exit(load_entry_point('gap-follow', 'console_scripts', 'gap_follow_node')())
+[gap_follow_node-9]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[gap_follow_node-9]   File "/home/racerbotcar-2/racerbot-ws/build/gap_follow/gap_follow/gap_follow_node.py", line 2816, in main
+[gap_follow_node-9]     node.destroy_node()
+[gap_follow_node-9]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1962, in destroy_node
+[gap_follow_node-9]     self.destroy_service(self._services[0])
+[gap_follow_node-9]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1886, in destroy_service
+[gap_follow_node-9]     service.destroy()
+[gap_follow_node-9]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/service.py", line 123, in destroy
+[gap_follow_node-9]     self.__service.destroy_when_not_in_use()
+[gap_follow_node-9] KeyboardInterrupt
+[race_diag_node-1] Traceback (most recent call last):
+[race_diag_node-1]   File "/home/racerbotcar-2/racerbot-ws/install/race_diagnostics/lib/race_diagnostics/race_diag_node", line 33, in <module>
+[race_diag_node-1]     sys.exit(load_entry_point('race-diagnostics', 'console_scripts', 'race_diag_node')())
+[race_diag_node-1]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[race_diag_node-1]   File "/home/racerbotcar-2/racerbot-ws/build/race_diagnostics/race_diagnostics/race_diag_node.py", line 315, in main
+[race_diag_node-1]     node.destroy_node()
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1962, in destroy_node
+[race_diag_node-1]     self.destroy_service(self._services[0])
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1886, in destroy_service
+[race_diag_node-1]     service.destroy()
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/service.py", line 123, in destroy
+[race_diag_node-1]     self.__service.destroy_when_not_in_use()
+[race_diag_node-1] KeyboardInterrupt
+[snapshot_params-2]     lines, lnum = findsource(frame)
+[snapshot_params-2]                   ^^^^^^^^^^^^^^^^^
+[snapshot_params-2]   File "/usr/lib/python3.12/inspect.py", line 1083, in findsource
+[snapshot_params-2]     module = getmodule(object, file)
+[snapshot_params-2]              ^^^^^^^^^^^^^^^^^^^^^^^
+[snapshot_params-2]   File "/usr/lib/python3.12/inspect.py", line 1009, in getmodule
+[ros2-3] [INFO] [1794278939.690106718] [rosbag2_recorder]: Recording stopped
+[snapshot_params-2]     os.path.realpath(f)] = module.__name__
+[snapshot_params-2]     ^^^^^^^^^^^^^^^^^^^
+[snapshot_params-2]   File "<frozen posixpath>", line 432, in realpath
+[snapshot_params-2]   File "<frozen posixpath>", line 474, in _joinrealpath
+[snapshot_params-2]   File "<frozen posixpath>", line 82, in join
+[snapshot_params-2] KeyboardInterrupt
+[vehicle_state_node-8] Traceback (most recent call last):
+[vehicle_state_node-8]   File "/home/racerbotcar-2/racerbot-ws/install/imu_bridge/lib/imu_bridge/vehicle_state_node", line 33, in <module>
+[vehicle_state_node-8]     sys.exit(load_entry_point('imu-bridge', 'console_scripts', 'vehicle_state_node')())
+[vehicle_state_node-8]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[vehicle_state_node-8]   File "/home/racerbotcar-2/racerbot-ws/build/imu_bridge/imu_bridge/vehicle_state_node.py", line 320, in main
+[vehicle_state_node-8]     node.destroy_node()
+[vehicle_state_node-8]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1968, in destroy_node
+[vehicle_state_node-8]     self.__node.destroy_when_not_in_use()
+[vehicle_state_node-8] KeyboardInterrupt
+[ros2-3] [INFO] [1794278939.835112634] [rosbag2_recorder]: Event publisher thread: Exited
+[ERROR] [imu_bridge_node-7]: process has died [pid 90776, exit code -2, cmd '/home/racerbotcar-2/racerbot-ws/install/imu_bridge/lib/imu_bridge/imu_bridge_node --ros-args -r __node:=imu_bridge_node --params-file /home/racerbotcar-2/racerbot-ws/install/imu_bridge/share/imu_bridge/config/imu_bridge.yaml --params-file /tmp/launch_params_v229xstm'].
+[ERROR] [snapshot_params-2]: process has died [pid 90771, exit code -2, cmd '/home/racerbotcar-2/racerbot-ws/install/race_diagnostics/lib/race_diagnostics/snapshot_params --output /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810/metadata/params --ros-args -r __node:=snapshot_params'].
+[ERROR] [gap_follow_node-9]: process has died [pid 90780, exit code -2, cmd '/home/racerbotcar-2/racerbot-ws/install/gap_follow/lib/gap_follow/gap_follow_node --ros-args -r __node:=gap_follow_node --params-file /home/racerbotcar-2/racerbot-ws/install/gap_follow/share/gap_follow/config/gap_follow.yaml --params-file /home/racerbotcar-2/racerbot-ws/src/racerbot_car/cars/rb2/calibration/gap_follow.yaml --params-file /tmp/launch_params_lfktjiv3 --params-file /tmp/launch_params_r9q70_aw'].
+[ERROR] [race_diag_node-1]: process has died [pid 90770, exit code -2, cmd '/home/racerbotcar-2/racerbot-ws/install/race_diagnostics/lib/race_diagnostics/race_diag_node --ros-args -r __node:=race_diag_node --params-file /tmp/launch_params_qyx7p1us --params-file /tmp/launch_params_gvf2g4c_'].
+[ERROR] [auto_map_race_node-10]: process has died [pid 90781, exit code -2, cmd '/home/racerbotcar-2/racerbot-ws/install/pure_pursuit/lib/pure_pursuit/auto_map_race_node --ros-args -r __node:=auto_map_race_node --params-file /home/racerbotcar-2/racerbot-ws/install/pure_pursuit/share/pure_pursuit/config/auto_map_race.yaml --params-file /home/racerbotcar-2/racerbot-ws/src/racerbot_car/cars/rb2/calibration/auto_map_race.yaml --params-file /tmp/launch_params__70lmh77'].
+[ERROR] [launch]: Caught exception in launch (see debug for traceback): Cannot shutdown a ROS adapter that is not running
+[ERROR] [vehicle_state_node-8]: process has died [pid 90777, exit code -2, cmd '/home/racerbotcar-2/racerbot-ws/install/imu_bridge/lib/imu_bridge/vehicle_state_node --ros-args -r __node:=vehicle_state_node --params-file /home/racerbotcar-2/racerbot-ws/install/imu_bridge/share/imu_bridge/config/vehicle_state.yaml --params-file /tmp/launch_params_9rn0almt'].
+[ERROR] [ros2-3]: process has died [pid 90772, exit code 2, cmd 'ros2 bag record --node-name rosbag2_recorder -o /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810/bag --max-bag-size 50000000 /scan /odom /slam_pose /drive /ackermann_cmd /teleop /tf /tf_static /map /joy /auto_map/drive /auto_race/drive /neural_racer/shadow_drive /commands/motor/speed /commands/servo/position /safety/brake /parameter_events /sensors/imu/raw /sensors/core /sensors/servo_position_command /imu/data /imu/vesc/data /imu/bno/raw /imu/bno/data /imu_bridge/wheel_odom /odometry/filtered /pf/viz/inferred_pose /odom/fused /steering/measured /odom/imu /pose /slam_toolbox/graph_visualization /map_metadata /rosout /diagnostics /drive_intent /initialpose'].
+[ERROR] [async_slam_toolbox_node-5]: process[async_slam_toolbox_node-5] failed to terminate '5' seconds after receiving 'SIGINT', escalating to 'SIGTERM'
+[INFO] [async_slam_toolbox_node-5]: sending signal 'SIGTERM' to process[async_slam_toolbox_node-5]
+[ERROR] [async_slam_toolbox_node-5]: process[async_slam_toolbox_node-5] failed to terminate '10.0' seconds after receiving 'SIGTERM', escalating to 'SIGKILL'
+[INFO] [async_slam_toolbox_node-5]: sending signal 'SIGKILL' to process[async_slam_toolbox_node-5]
+[ERROR] [async_slam_toolbox_node-5]: process has died [pid 90774, exit code -9, cmd '/opt/ros/jazzy/lib/slam_toolbox/async_slam_toolbox_node --ros-args -r __node:=slam_toolbox -r __ns:=/ --params-file /home/racerbotcar-2/racerbot-ws/install/f1tenth_stack/share/f1tenth_stack/config/f1tenth_online_async.yaml --params-file /tmp/launch_params_66582hs1 --params-file /tmp/launch_params_meac78nb --params-file /tmp/launch_params_cqjj_e5f'].
+Checking the map against this run's scans and building the racing line (can take minutes; Ctrl+C skips it)...
+Map check interrupted; re-run: /usr/bin/python3 /home/racerbotcar-2/racerbot-ws/tools/run_analysis/rebuild_run.py /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810 --out-root /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto
+
+========================================================================
+RUN STOPPED.
+  Laps closed: 0 of the laps asked for
+  Map: NO-GO: mean fit 0.69 is under 0.90: scans do not match this map; worst stretch fit 0.15 is under 0.70: the car got lost on this map; see-through 32% is over 15%: beams pass through mapped walls, so walls are drawn twice
+  The scans place the car over 75 m on that map, 0 whole lap(s), using /odom/imu.
+  Recording: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810
+  Full reports, when you want them: python3 /home/racerbotcar-2/racerbot-ws/tools/run_analysis/slam_report.py /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184810
+========================================================================
+
+========================================================================
+NO RACING FOLDER FROM RUN 20261109-184810.
+========================================================================
+
+  Why: mean fit 0.69 is under 0.90: scans do not match this map; worst stretch fit 0.15 is under 0.70: the car got lost on this map; see-through 32% is over 15%: beams pass through mapped walls, so walls are drawn twice
+
+  The map is kept in /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261109-184810-rebuilt to look at. Map again:
+    ros2 run racerbot_launch map_course
+========================================================================
+
