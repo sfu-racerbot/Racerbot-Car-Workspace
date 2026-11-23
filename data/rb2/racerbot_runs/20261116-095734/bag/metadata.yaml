@@ -1,0 +1,774 @@
+rosbag2_bagfile_information:
+  version: 9
+  storage_identifier: mcap
+  duration:
+    nanoseconds: 2319999576993
+  starting_time:
+    nanoseconds_since_epoch: 1794852788719258837
+  message_count: 3435190
+  topics_with_message_count:
+    - topic_metadata:
+        name: /drive
+        type: ackermann_msgs/msg/AckermannDriveStamped
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_48ca7612a08d3bb72744fd98b71b7cf2ea24c6ad50fa4e1aa0bbad963c90d8cf
+      message_count: 92472
+    - topic_metadata:
+        name: /steering/measured
+        type: sensor_msgs/msg/JointState
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_a13ee3a330e346c9d87b5aa18d24e11690752bd33a0350f11c5882bc9179260e
+      message_count: 115859
+    - topic_metadata:
+        name: /imu/bno/data
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_7d9a00ff131080897a5ec7e26e315954b8eae3353c3f995c55faf71574000b5b
+      message_count: 583153
+    - topic_metadata:
+        name: /imu/data
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_7d9a00ff131080897a5ec7e26e315954b8eae3353c3f995c55faf71574000b5b
+      message_count: 583153
+    - topic_metadata:
+        name: /imu_bridge/wheel_odom
+        type: nav_msgs/msg/Odometry
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_3cc97dc7fb7502f8714462c526d369e35b603cfc34d946e3f2eda2766dfec6e0
+      message_count: 115845
+    - topic_metadata:
+        name: /commands/motor/speed
+        type: std_msgs/msg/Float64
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_705ba9c3d1a09df43737eb67095534de36fd426c0587779bda2bc51fe790182a
+      message_count: 92509
+    - topic_metadata:
+        name: /odom
+        type: nav_msgs/msg/Odometry
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_3cc97dc7fb7502f8714462c526d369e35b603cfc34d946e3f2eda2766dfec6e0
+      message_count: 116000
+    - topic_metadata:
+        name: /parameter_events
+        type: rcl_interfaces/msg/ParameterEvent
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_043e627780fcad87a22d225bc2a037361dba713fca6a6b9f4b869a5aa0393204
+      message_count: 0
+    - topic_metadata:
+        name: /rosout
+        type: rcl_interfaces/msg/Log
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: transient_local
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 10
+              nsec: 0
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_e28ce254ca8abc06abf92773b74602cdbf116ed34fbaf294fb9f81da9f318eac
+      message_count: 3381
+    - topic_metadata:
+        name: /diagnostics
+        type: diagnostic_msgs/msg/DiagnosticArray
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_5a8a36efb05fb25070fa0fb3810290c0e6cd4862b54a8fb975a1ee8dc55a333e
+      message_count: 9279
+    - topic_metadata:
+        name: /drive_intent
+        type: std_msgs/msg/String
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_df668c740482bbd48fb39d76a70dfd4bd59db1288021743503259e948f6b1a18
+      message_count: 35916
+    - topic_metadata:
+        name: /odom/imu
+        type: nav_msgs/msg/Odometry
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_3cc97dc7fb7502f8714462c526d369e35b603cfc34d946e3f2eda2766dfec6e0
+      message_count: 115859
+    - topic_metadata:
+        name: /imu/bno/raw
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_7d9a00ff131080897a5ec7e26e315954b8eae3353c3f995c55faf71574000b5b
+      message_count: 583154
+    - topic_metadata:
+        name: /joy
+        type: sensor_msgs/msg/Joy
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_0d356c79cad3401e35ffeb75a96a96e08be3ef896b8b83841d73e890989372c5
+      message_count: 38750
+    - topic_metadata:
+        name: /sensors/core
+        type: vesc_msgs/msg/VescStateStamped
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_9a9543e67217b2e85a8fbe0d6b140eafa020d9f4ac08e11bb54cc4ba6d4d444c
+      message_count: 116000
+    - topic_metadata:
+        name: /tf
+        type: tf2_msgs/msg/TFMessage
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_e369d0f05a23ae52508854b66f6aa0437f3449d652e8cbf22d5abe85d020f087
+      message_count: 116000
+    - topic_metadata:
+        name: /imu/vesc/data
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_7d9a00ff131080897a5ec7e26e315954b8eae3353c3f995c55faf71574000b5b
+      message_count: 115852
+    - topic_metadata:
+        name: /ackermann_cmd
+        type: ackermann_msgs/msg/AckermannDriveStamped
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_48ca7612a08d3bb72744fd98b71b7cf2ea24c6ad50fa4e1aa0bbad963c90d8cf
+      message_count: 92509
+    - topic_metadata:
+        name: /sensors/imu/raw
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_7d9a00ff131080897a5ec7e26e315954b8eae3353c3f995c55faf71574000b5b
+      message_count: 116000
+    - topic_metadata:
+        name: /odom/fused
+        type: nav_msgs/msg/Odometry
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_3cc97dc7fb7502f8714462c526d369e35b603cfc34d946e3f2eda2766dfec6e0
+      message_count: 115858
+    - topic_metadata:
+        name: /scan
+        type: sensor_msgs/msg/LaserScan
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_64c191398013af96509d518dac71d5164f9382553fce5c1f8cca5be7924bd828
+      message_count: 92622
+    - topic_metadata:
+        name: /commands/servo/position
+        type: std_msgs/msg/Float64
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_705ba9c3d1a09df43737eb67095534de36fd426c0587779bda2bc51fe790182a
+      message_count: 92509
+    - topic_metadata:
+        name: /sensors/servo_position_command
+        type: std_msgs/msg/Float64
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_705ba9c3d1a09df43737eb67095534de36fd426c0587779bda2bc51fe790182a
+      message_count: 92510
+    - topic_metadata:
+        name: /tf_static
+        type: tf2_msgs/msg/TFMessage
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: unknown
+            depth: 0
+            reliability: reliable
+            durability: transient_local
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_e369d0f05a23ae52508854b66f6aa0437f3449d652e8cbf22d5abe85d020f087
+      message_count: 0
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - bag_0.mcap
+    - bag_1.mcap
+    - bag_2.mcap
+    - bag_3.mcap
+    - bag_4.mcap
+    - bag_5.mcap
+    - bag_6.mcap
+    - bag_7.mcap
+    - bag_8.mcap
+    - bag_9.mcap
+    - bag_10.mcap
+    - bag_11.mcap
+    - bag_12.mcap
+    - bag_13.mcap
+    - bag_14.mcap
+    - bag_15.mcap
+    - bag_16.mcap
+    - bag_17.mcap
+    - bag_18.mcap
+    - bag_19.mcap
+    - bag_20.mcap
+    - bag_21.mcap
+    - bag_22.mcap
+    - bag_23.mcap
+    - bag_24.mcap
+    - bag_25.mcap
+    - bag_26.mcap
+    - bag_27.mcap
+    - bag_28.mcap
+    - bag_29.mcap
+    - bag_30.mcap
+    - bag_31.mcap
+    - bag_32.mcap
+  files:
+    - path: bag_0.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794852788719258837
+      duration:
+        nanoseconds: 70819999527
+      message_count: 104244
+    - path: bag_1.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794852859540288583
+      duration:
+        nanoseconds: 71029104239
+      message_count: 103197
+    - path: bag_2.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794852930570527331
+      duration:
+        nanoseconds: 71090869402
+      message_count: 103414
+    - path: bag_3.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853001663490859
+      duration:
+        nanoseconds: 70912286191
+      message_count: 104549
+    - path: bag_4.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853072577037447
+      duration:
+        nanoseconds: 70811320556
+      message_count: 104414
+    - path: bag_5.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853143388680959
+      duration:
+        nanoseconds: 70687391246
+      message_count: 105157
+    - path: bag_6.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853214078832328
+      duration:
+        nanoseconds: 70699168993
+      message_count: 105145
+    - path: bag_7.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853284779266097
+      duration:
+        nanoseconds: 70694143596
+      message_count: 105155
+    - path: bag_8.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853355473670533
+      duration:
+        nanoseconds: 70698730643
+      message_count: 105160
+    - path: bag_9.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853426173525754
+      duration:
+        nanoseconds: 70695858242
+      message_count: 105141
+    - path: bag_10.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853496870967018
+      duration:
+        nanoseconds: 70720003343
+      message_count: 105020
+    - path: bag_11.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853567592211132
+      duration:
+        nanoseconds: 70676026045
+      message_count: 105118
+    - path: bag_12.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853638269092753
+      duration:
+        nanoseconds: 70745408376
+      message_count: 105160
+    - path: bag_13.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853709015667497
+      duration:
+        nanoseconds: 70707886776
+      message_count: 105162
+    - path: bag_14.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853779725466101
+      duration:
+        nanoseconds: 70758172624
+      message_count: 105176
+    - path: bag_15.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853850486126472
+      duration:
+        nanoseconds: 70743707029
+      message_count: 105168
+    - path: bag_16.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853921231673582
+      duration:
+        nanoseconds: 70695792409
+      message_count: 105126
+    - path: bag_17.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794853991928809098
+      duration:
+        nanoseconds: 70683142804
+      message_count: 105160
+    - path: bag_18.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854062613165374
+      duration:
+        nanoseconds: 70716968344
+      message_count: 104926
+    - path: bag_19.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854133332894974
+      duration:
+        nanoseconds: 70717965182
+      message_count: 105141
+    - path: bag_20.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854204051331464
+      duration:
+        nanoseconds: 70718878509
+      message_count: 105137
+    - path: bag_21.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854274771123948
+      duration:
+        nanoseconds: 70769926255
+      message_count: 105177
+    - path: bag_22.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854345543026925
+      duration:
+        nanoseconds: 70737048722
+      message_count: 105196
+    - path: bag_23.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854416281031735
+      duration:
+        nanoseconds: 70706319510
+      message_count: 105146
+    - path: bag_24.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854486988540331
+      duration:
+        nanoseconds: 70741345514
+      message_count: 105162
+    - path: bag_25.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854557730738698
+      duration:
+        nanoseconds: 70699607771
+      message_count: 105156
+    - path: bag_26.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854628431855626
+      duration:
+        nanoseconds: 70717147924
+      message_count: 105136
+    - path: bag_27.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854699152106346
+      duration:
+        nanoseconds: 70657529423
+      message_count: 105142
+    - path: bag_28.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854769810984218
+      duration:
+        nanoseconds: 70699164501
+      message_count: 105137
+    - path: bag_29.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854840511969852
+      duration:
+        nanoseconds: 70777960296
+      message_count: 104885
+    - path: bag_30.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854911290429701
+      duration:
+        nanoseconds: 70920371114
+      message_count: 104145
+    - path: bag_31.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794854982212055035
+      duration:
+        nanoseconds: 71001564464
+      message_count: 104344
+    - path: bag_32.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1794855053216897829
+      duration:
+        nanoseconds: 55501938001
+      message_count: 78694
+  custom_data: ~
+  ros_distro: jazzy

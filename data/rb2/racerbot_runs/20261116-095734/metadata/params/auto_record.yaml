@@ -1,0 +1,36 @@
+/auto_record:
+  ros__parameters:
+    deadman_button: 4
+    ignore_publishers:
+    - ackermann_mux
+    - ackermann_to_vesc_node
+    - rosbag2_player*
+    joy_timeout_sec: 0.5
+    live_topics:
+    - /scan
+    - /odom
+    - /drive
+    - /joy
+    min_free_gb: 2.0
+    other_recorders:
+    - race_diag_node
+    - rosbag2_recorder*
+    output_directory: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs
+    poll_period_sec: 0.25
+    record_bag: true
+    snapshot_release_sec: 1.0
+    snapshot_wait_after_stop_sec: 30.0
+    start_delay_sec: 1.5
+    start_type_description_service: true
+    stop_delay_sec: 3.0
+    stop_timeout_sec: 15.0
+    topics: ''
+    trigger_topics:
+    - /drive
+    - /auto_map/drive
+    - /auto_race/drive
+    - /neural_racer/shadow_drive
+    - /ackermann_cmd
+    - /commands/motor/speed
+    - /commands/servo/position
+    use_sim_time: false

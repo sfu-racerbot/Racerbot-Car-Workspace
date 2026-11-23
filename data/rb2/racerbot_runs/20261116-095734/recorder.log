@@ -1,0 +1,189 @@
+[INFO] [launch]: All log files can be found below /home/racerbotcar-2/.ros/log/2026-11-16-09-57-35-482460-localhost.localdomain-19419
+[INFO] [launch]: Default logging verbosity is set to INFO
+[WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+stdin is not a terminal device. Keyboard handling disabled.[INFO] [1794851855.674778791] [auto_rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1794851855.674791656] [auto_rosbag2_recorder]: Event publisher thread: Started
+[INFO] [1794851855.690473167] [auto_rosbag2_recorder]: Starting recording to '/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261116-095734/bag'
+[INFO] [1794851855.696989212] [auto_rosbag2_recorder]: Subscribed to topic '/rosout'
+[INFO] [1794851855.697669144] [auto_rosbag2_recorder]: Listening for topics...
+[INFO] [1794851855.697736283] [auto_rosbag2_recorder]: Wait for recording: Press SPACE to start.
+[INFO] [1794851855.697707994] [auto_rosbag2_recorder]: Topics discovery started.
+[INFO] [launch.user]: Recording run to: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261116-095734
+[INFO] [race_diag_node-1]: process started with pid [19612]
+[INFO] [1794851856.239019028] [auto_rosbag2_recorder]: Subscribed to topic '/parameter_events'
+[INFO] [1794851856.256259643] [auto_rosbag2_recorder]: Subscribed to topic '/joy'
+[INFO] [1794851856.267538764] [auto_rosbag2_recorder]: Subscribed to topic '/odom'
+[INFO] [1794851856.277172217] [auto_rosbag2_recorder]: Subscribed to topic '/tf'
+[INFO] [1794851856.882274144] [auto_rosbag2_recorder]: Subscribed to topic '/ackermann_cmd'
+[INFO] [1794851856.890477874] [auto_rosbag2_recorder]: Subscribed to topic '/diagnostics'
+[INFO] [1794851856.910553325] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/imu/raw'
+[INFO] [1794851856.918506613] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/core'
+[INFO] [1794851856.923777582] [auto_rosbag2_recorder]: Subscribed to topic '/scan'
+[INFO] [1794851856.929996751] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/servo_position_command'
+[INFO] [1794851856.934125977] [auto_rosbag2_recorder]: Subscribed to topic '/tf_static'
+[INFO] [1794851856.944220377] [auto_rosbag2_recorder]: Subscribed to topic '/commands/servo/position'
+[INFO] [1794851856.948196221] [auto_rosbag2_recorder]: Subscribed to topic '/commands/motor/speed'
+[INFO] [1794852786.805146651] [auto_rosbag2_recorder]: Subscribed to topic '/imu/vesc/data'
+[INFO] [1794852786.821098016] [auto_rosbag2_recorder]: Subscribed to topic '/imu_bridge/wheel_odom'
+[INFO] [1794852786.830033575] [auto_rosbag2_recorder]: Subscribed to topic '/imu/data'
+[INFO] [1794852786.871103454] [auto_rosbag2_recorder]: Subscribed to topic '/imu/bno/raw'
+[INFO] [1794852786.902312408] [auto_rosbag2_recorder]: Subscribed to topic '/odom/fused'
+[INFO] [1794852786.913450449] [auto_rosbag2_recorder]: Subscribed to topic '/imu/bno/data'
+[INFO] [1794852786.961088155] [auto_rosbag2_recorder]: Subscribed to topic '/odom/imu'
+[INFO] [1794852786.980762227] [auto_rosbag2_recorder]: Subscribed to topic '/steering/measured'
+[race_diag_node-1] [10:13:08] ARMED: probe armed (subscribe-only); waiting for the stack
+[race_diag_node-1] [10:13:08] FIRST_MESSAGE: first odom: linear.x=+0.00m/s
+[race_diag_node-1] [10:13:08] FIRST_MESSAGE: first scan: 1081 beams, frame_id=laser
+[race_diag_node-1] [10:13:08] FIRST_MESSAGE: first drive: speed=0.00m/s
+[race_diag_node-1] [10:13:08] FIRST_MESSAGE: first joy: 11 buttons
+[race_diag_node-1] [10:13:09] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[INFO] [1794852789.622839716] [auto_rosbag2_recorder]: Subscribed to topic '/drive_intent'
+[INFO] [1794852789.632657216] [auto_rosbag2_recorder]: Subscribed to topic '/drive'
+[race_diag_node-1] [10:13:11] DEADMAN: LB held
+[race_diag_node-1] [10:13:12] DEADMAN: LB released
+[race_diag_node-1] [10:13:12] DEADMAN: LB held
+[INFO] [1794852795.000710253] [auto_snapshot_params]: 14 parameter snapshots written to /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261116-095734/metadata/params
+[race_diag_node-1] [10:13:16] DEADMAN: LB released
+[race_diag_node-1] [10:13:16] DEADMAN: LB held
+[race_diag_node-1] [10:13:17] DEADMAN: LB released
+[race_diag_node-1] [10:13:18] DEADMAN: LB held
+[race_diag_node-1] [10:13:19] DEADMAN: LB released
+[race_diag_node-1] [10:13:23] DEADMAN: LB held
+[race_diag_node-1] [10:13:29] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.36m/s | drive=ok cmd=1.43m/s | LB=held
+[race_diag_node-1] [10:13:47] DEADMAN: LB released
+[race_diag_node-1] [10:13:48] DEADMAN: LB held
+[race_diag_node-1] [10:13:49] DEADMAN: LB released
+[race_diag_node-1] [10:13:50] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [10:14:15] DEADMAN: LB held
+[race_diag_node-1] [10:14:16] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.48m/s | drive=ok cmd=0.00m/s | LB=held
+[INFO] [1794852859.540534257] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:14:36] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.43m/s | drive=ok cmd=1.43m/s | LB=held
+[race_diag_node-1] [10:14:57] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +2.50m/s | drive=ok cmd=2.21m/s | LB=held
+[race_diag_node-1] [10:15:19] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.38m/s | drive=ok cmd=1.43m/s | LB=held
+[INFO] [1794852930.570658792] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:15:39] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.79m/s | drive=ok cmd=1.59m/s | LB=held
+[race_diag_node-1] [10:15:42] DEADMAN: LB released
+[race_diag_node-1] [10:15:42] DEADMAN: LB held
+[race_diag_node-1] [10:15:43] DEADMAN: LB released
+[race_diag_node-1] [10:15:43] DEADMAN: LB held
+[race_diag_node-1] [10:15:48] DEADMAN: LB released
+[race_diag_node-1] [10:15:48] DEADMAN: LB held
+[race_diag_node-1] [10:16:00] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.71m/s | drive=ok cmd=1.43m/s | LB=held
+[race_diag_node-1] [10:16:20] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.68m/s | drive=ok cmd=1.74m/s | LB=held
+[race_diag_node-1] [10:16:40] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.90m/s | drive=ok cmd=2.66m/s | LB=held
+[INFO] [1794853001.665944456] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:16:51] DEADMAN: LB released
+[race_diag_node-1] [10:16:52] DEADMAN: LB held
+[race_diag_node-1] [10:16:54] DEADMAN: LB released
+[race_diag_node-1] [10:16:56] DEADMAN: LB held
+[race_diag_node-1] [10:17:01] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +3.98m/s | drive=ok cmd=2.05m/s | LB=held
+[race_diag_node-1] [10:17:06] DEADMAN: LB released
+[race_diag_node-1] [10:17:21] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[INFO] [1794853072.577186604] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:18:18] DEADMAN: LB held
+[race_diag_node-1] [10:18:18] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.56m/s | LB=held
+[race_diag_node-1] [10:18:29] DEADMAN: LB released
+[race_diag_node-1] [10:18:29] DEADMAN: LB held
+[race_diag_node-1] [10:18:38] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.57m/s | drive=ok cmd=0.27m/s | LB=held
+[race_diag_node-1] [10:18:39] DEADMAN: LB released
+[race_diag_node-1] [10:18:41] DEADMAN: LB held
+[race_diag_node-1] [10:18:48] DEADMAN: LB released
+[race_diag_node-1] [10:18:48] DEADMAN: LB held
+[race_diag_node-1] [10:18:48] DEADMAN: LB released
+[race_diag_node-1] [10:18:59] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[INFO] [1794853143.389373206] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853214.079039311] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853284.779445015] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853355.473783689] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853426.173663198] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853496.871131567] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:25:36] DEADMAN: LB held
+[race_diag_node-1] [10:25:37] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.15m/s | drive=ok cmd=1.43m/s | LB=held
+[race_diag_node-1] [10:25:37] DEADMAN: LB released
+[race_diag_node-1] [10:25:37] DEADMAN: LB held
+[race_diag_node-1] [10:25:38] DEADMAN: LB released
+[race_diag_node-1] [10:25:40] DEADMAN: LB held
+[race_diag_node-1] [10:25:41] DEADMAN: LB released
+[race_diag_node-1] [10:25:53] DEADMAN: LB held
+[race_diag_node-1] [10:25:55] DEADMAN: LB released
+[race_diag_node-1] [10:25:57] DEADMAN: LB held
+[race_diag_node-1] [10:25:57] DEADMAN: LB released
+[race_diag_node-1] [10:25:58] DEADMAN: LB held
+[race_diag_node-1] [10:25:58] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.66m/s | drive=ok cmd=0.84m/s | LB=held
+[race_diag_node-1] [10:25:59] DEADMAN: LB released
+[race_diag_node-1] [10:26:01] DEADMAN: LB held
+[race_diag_node-1] [10:26:02] DEADMAN: LB released
+[race_diag_node-1] [10:26:05] DEADMAN: LB held
+[race_diag_node-1] [10:26:06] DEADMAN: LB released
+[INFO] [1794853567.592499653] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:26:18] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[INFO] [1794853638.269253174] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853709.015877423] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853779.725626394] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853850.486250923] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853921.231831506] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794853991.929188628] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854062.613413828] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:35:16] DEADMAN: LB held
+[race_diag_node-1] [10:35:16] DEADMAN: LB released
+[race_diag_node-1] [10:35:16] DEADMAN: LB held
+[race_diag_node-1] [10:35:17] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.76m/s | drive=ok cmd=1.50m/s | LB=held
+[race_diag_node-1] [10:35:18] DEADMAN: LB released
+[race_diag_node-1] [10:35:20] DEADMAN: LB held
+[race_diag_node-1] [10:35:24] DEADMAN: LB released
+[race_diag_node-1] [10:35:31] DEADMAN: LB held
+[race_diag_node-1] [10:35:33] DEADMAN: LB released
+[INFO] [1794854133.333028161] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:35:37] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[INFO] [1794854204.051471147] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854274.771359826] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854345.543195986] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854416.281228540] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854486.988764208] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854557.730867981] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854628.432038351] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854699.152344880] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:45:37] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[INFO] [1794854769.811171903] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794854840.512105407] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:48:22] DEADMAN: LB held
+[race_diag_node-1] [10:48:22] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=1.17m/s | LB=held
+[INFO] [1794854911.290562221] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:48:43] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +3.53m/s | drive=ok cmd=3.12m/s | LB=held
+[race_diag_node-1] [10:49:04] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.63m/s | drive=ok cmd=1.43m/s | LB=held
+[race_diag_node-1] [10:49:05] DEADMAN: LB released
+[race_diag_node-1] [10:49:06] DEADMAN: LB held
+[race_diag_node-1] [10:49:07] DEADMAN: LB released
+[race_diag_node-1] [10:49:09] DEADMAN: LB held
+[race_diag_node-1] [10:49:17] DEADMAN: LB released
+[race_diag_node-1] [10:49:20] DEADMAN: LB held
+[race_diag_node-1] [10:49:24] DEADMAN: LB released
+[race_diag_node-1] [10:49:25] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [10:49:30] DEADMAN: LB held
+[race_diag_node-1] [10:49:30] DEADMAN: LB released
+[INFO] [1794854982.212223717] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:50:20] DEADMAN: LB held
+[race_diag_node-1] [10:50:20] DEADMAN: LB released
+[race_diag_node-1] [10:50:24] DEADMAN: LB held
+[race_diag_node-1] [10:50:25] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.43m/s | drive=ok cmd=1.91m/s | LB=held
+[race_diag_node-1] [10:50:46] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.61m/s | drive=ok cmd=1.43m/s | LB=held
+[INFO] [1794855053.217070223] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[race_diag_node-1] [10:50:56] DEADMAN: LB released
+[race_diag_node-1] [10:50:56] DEADMAN: LB held
+[race_diag_node-1] [10:50:57] DEADMAN: LB released
+[race_diag_node-1] [10:51:00] DEADMAN: LB held
+[race_diag_node-1] [10:51:01] DEADMAN: LB released
+[race_diag_node-1] [10:51:01] DEADMAN: LB held
+[race_diag_node-1] [10:51:07] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=held
+[race_diag_node-1] [10:51:09] DEADMAN: LB released
+[race_diag_node-1] [10:51:16] DEADMAN: LB held
+[race_diag_node-1] [10:51:25] DEADMAN: LB released
+[INFO] [1794855108.718704399] [auto_rosbag2_recorder]: Topics discovery stopped.
+[INFO] [1794855108.719289199] [auto_rosbag2_recorder]: Pausing recording.
+[INFO] [1794855108.719498298] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [race_diag_node-1]: sending signal 'SIGINT' to process[race_diag_node-1]
+[race_diag_node-1] [10:51:48] CLOSING: worst pose lag this run: 0.00s
+[INFO] [1794855108.758880342] [auto_rosbag2_recorder]: Recording stopped
+[INFO] [1794855108.770781213] [auto_rosbag2_recorder]: Event publisher thread: Exited
+[INFO] [race_diag_node-1]: process has finished cleanly [pid 19612]
