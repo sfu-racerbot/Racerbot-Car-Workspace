@@ -1,0 +1,152 @@
+repository: /home/racerbotcar-2/racerbot-ws
+HEAD: fde123f7f6ab895bbe929f964e4cbf2d50e36ba1
+branch: neural-racer/model-a0eef2af0a3757b6
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+ M src/pure_pursuit/pure_pursuit/raceline_optimizer.py
+ M src/racerbot_a
+ M src/racerbot_b
+?? data/rb2/racerbot_auto/20261102-190609-rebuilt/
+?? data/rb2/racerbot_auto/20261102-191019-rebuilt/
+?? data/rb2/racerbot_auto/20261102-191139/
+?? data/rb2/racerbot_auto/20261106-164002-rebuilt/
+?? data/rb2/racerbot_auto/20261106-164051/
+?? data/rb2/racerbot_auto/20261106-175408-rebuilt/
+?? data/rb2/racerbot_auto/20261106-175504/
+?? data/rb2/racerbot_auto/20261106-175837-rebuilt/
+?? data/rb2/racerbot_auto/20261106-175923/
+?? data/rb2/racerbot_auto/20261106-181002-rebuilt/
+?? data/rb2/racerbot_auto/20261106-181100/
+?? data/rb2/racerbot_auto/20261106-184753-rebuilt/
+?? data/rb2/racerbot_auto/20261106-184831/
+?? data/rb2/racerbot_auto/20261109-184640-rebuilt/
+?? data/rb2/racerbot_auto/20261109-184810-rebuilt/
+?? data/rb2/racerbot_auto/20261109-185146-rebuilt/
+?? data/rb2/racerbot_auto/20261109-185306/
+?? data/rb2/racerbot_auto/20261111-143337-rebuilt/
+?? data/rb2/racerbot_auto/20261111-143428/
+?? data/rb2/racerbot_auto/20261111-151026-rebuilt/
+?? data/rb2/racerbot_auto/20261111-151125/
+?? data/rb2/racerbot_runs/20261102-182245/
+?? data/rb2/racerbot_runs/20261102-182954/
+?? data/rb2/racerbot_runs/20261102-183128/
+?? data/rb2/racerbot_runs/20261102-183507/
+?? data/rb2/racerbot_runs/20261102-183837/
+?? data/rb2/racerbot_runs/20261102-184110/
+?? data/rb2/racerbot_runs/20261102-184422/
+?? data/rb2/racerbot_runs/20261102-184924/
+?? data/rb2/racerbot_runs/20261102-185039/
+?? data/rb2/racerbot_runs/20261102-185307/
+?? data/rb2/racerbot_runs/20261102-185635/
+?? data/rb2/racerbot_runs/20261102-185841/
+?? data/rb2/racerbot_runs/20261102-190609/
+?? data/rb2/racerbot_runs/20261102-190940/
+?? data/rb2/racerbot_runs/20261102-191019/
+?? data/rb2/racerbot_runs/20261106-163556/
+?? data/rb2/racerbot_runs/20261106-163633/
+?? data/rb2/racerbot_runs/20261106-164002/
+?? data/rb2/racerbot_runs/20261106-164401/
+?? data/rb2/racerbot_runs/20261106-165112/
+?? data/rb2/racerbot_runs/20261106-165244/
+?? data/rb2/racerbot_runs/20261106-165423/
+?? data/rb2/racerbot_runs/20261106-170130/
+?? data/rb2/racerbot_runs/20261106-170444/
+?? data/rb2/racerbot_runs/20261106-170701/
+?? data/rb2/racerbot_runs/20261106-170803/
+?? data/rb2/racerbot_runs/20261106-171030/
+?? data/rb2/racerbot_runs/20261106-171644/
+?? data/rb2/racerbot_runs/20261106-172406/
+?? data/rb2/racerbot_runs/20261106-173002/
+?? data/rb2/racerbot_runs/20261106-173557/
+?? data/rb2/racerbot_runs/20261106-173721/
+?? data/rb2/racerbot_runs/20261106-173812/
+?? data/rb2/racerbot_runs/20261106-173906/
+?? data/rb2/racerbot_runs/20261106-174028/
+?? data/rb2/racerbot_runs/20261106-174209/
+?? data/rb2/racerbot_runs/20261106-174315/
+?? data/rb2/racerbot_runs/20261106-174600/
+?? data/rb2/racerbot_runs/20261106-174726/
+?? data/rb2/racerbot_runs/20261106-175018/
+?? data/rb2/racerbot_runs/20261106-175224/
+?? data/rb2/racerbot_runs/20261106-175300/
+?? data/rb2/racerbot_runs/20261106-175408/
+?? data/rb2/racerbot_runs/20261106-175837/
+?? data/rb2/racerbot_runs/20261106-180114/
+?? data/rb2/racerbot_runs/20261106-180341/
+?? data/rb2/racerbot_runs/20261106-180723/
+?? data/rb2/racerbot_runs/20261106-180812/
+?? data/rb2/racerbot_runs/20261106-180844/
+?? data/rb2/racerbot_runs/20261106-181002/
+?? data/rb2/racerbot_runs/20261106-184753/
+?? data/rb2/racerbot_runs/20261106-185425/
+?? data/rb2/racerbot_runs/20261109-174222/
+?? data/rb2/racerbot_runs/20261109-174404/
+?? data/rb2/racerbot_runs/20261109-174810/
+?? data/rb2/racerbot_runs/20261109-175013/
+?? data/rb2/racerbot_runs/20261109-175440/
+?? data/rb2/racerbot_runs/20261109-175931/
+?? data/rb2/racerbot_runs/20261109-180254/
+?? data/rb2/racerbot_runs/20261109-180543/
+?? data/rb2/racerbot_runs/20261109-180903/
+?? data/rb2/racerbot_runs/20261109-181431/
+?? data/rb2/racerbot_runs/20261109-181516/
+?? data/rb2/racerbot_runs/20261109-181826/
+?? data/rb2/racerbot_runs/20261109-182029/
+?? data/rb2/racerbot_runs/20261109-182219/
+?? data/rb2/racerbot_runs/20261109-182446/
+?? data/rb2/racerbot_runs/20261109-183131/
+?? data/rb2/racerbot_runs/20261109-183319/
+?? data/rb2/racerbot_runs/20261109-183455/
+?? data/rb2/racerbot_runs/20261109-183910/
+?? data/rb2/racerbot_runs/20261109-184037/
+?? data/rb2/racerbot_runs/20261109-184255/
+?? data/rb2/racerbot_runs/20261109-184640/
+?? data/rb2/racerbot_runs/20261109-184810/
+?? data/rb2/racerbot_runs/20261109-184932/
+?? data/rb2/racerbot_runs/20261109-185146/
+?? data/rb2/racerbot_runs/20261109-190202/
+?? data/rb2/racerbot_runs/20261109-190356/
+?? data/rb2/racerbot_runs/20261109-190617/
+?? data/rb2/racerbot_runs/20261109-190837/
+?? data/rb2/racerbot_runs/20261111-133135/
+?? data/rb2/racerbot_runs/20261111-133944/
+?? data/rb2/racerbot_runs/20261111-134135/
+?? data/rb2/racerbot_runs/20261111-134326/
+?? data/rb2/racerbot_runs/20261111-135453/
+?? data/rb2/racerbot_runs/20261111-135915/
+?? data/rb2/racerbot_runs/20261111-135934/
+?? data/rb2/racerbot_runs/20261111-140322/
+?? data/rb2/racerbot_runs/20261111-140804/
+?? data/rb2/racerbot_runs/20261111-141227/
+?? data/rb2/racerbot_runs/20261111-142036/
+?? data/rb2/racerbot_runs/20261111-142254/
+?? data/rb2/racerbot_runs/20261111-142604/
+?? data/rb2/racerbot_runs/20261111-143337/
+?? data/rb2/racerbot_runs/20261111-151026/
+?? data/rb2/racerbot_runs/20261111-152132/
+?? data/rb2/racerbot_runs/20261111-152844/
+?? data/rb2/racerbot_runs/20261111-154204/
+?? data/rb2/racerbot_runs/auto_record.log
+?? data/rb2/racerbot_runs/map_course-20261102-190608.log
+?? data/rb2/racerbot_runs/map_course-20261102-190938.log
+?? data/rb2/racerbot_runs/map_course-20261102-191018.log
+?? data/rb2/racerbot_runs/map_course-20261106-164001.log
+?? data/rb2/racerbot_runs/map_course-20261106-175407.log
+?? data/rb2/racerbot_runs/map_course-20261106-175836.log
+?? data/rb2/racerbot_runs/map_course-20261106-181001.log
+?? data/rb2/racerbot_runs/map_course-20261106-184752.log
+?? data/rb2/racerbot_runs/map_course-20261109-184639.log
+?? data/rb2/racerbot_runs/map_course-20261109-184809.log
+?? data/rb2/racerbot_runs/map_course-20261109-184931.log
+?? data/rb2/racerbot_runs/map_course-20261109-185145.log
+?? data/rb2/racerbot_runs/map_course-20261111-143336.log
+?? data/rb2/racerbot_runs/map_course-20261111-151025.log
+
+# git submodule status
+ ec599a1c4f3d4edc5f7d356e2f2990839e56bb7d src/particle_filter (heads/foxy-devel)
++b4f6f8eab8e1d3250ea0e0f21424e7d06042593d src/racerbot_a (remotes/origin/HEAD)
+ 31ae4ef071401045bb0beb6d0bb63befa87293df src/racerbot_b (heads/main)
+ f55480a7044367c219745480b436b8b7117f8282 src/range_libc (heads/humble-devel)
+ 775b167c0dbcfe00a012e248c66a7c8379ef9fbb src/realsense-ros (4.58.2-41-g775b167c)
+ d3f510ce1b4be12967064d8251ebcac530921a04 src/transport_drivers (1.2.0)
+ 836a00415bdd5caf3497dd91df332f6673dcd1c0 src/web_dashboards (remotes/origin/multi-file-tuning-save-1-g836a004)
