@@ -1,0 +1,15 @@
+{"t": 1794012006.286484, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1794012006.289301, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1794012006.293187, "category": "first_message", "message": "first odom: linear.x=+0.00m/s", "topic": "odom"}
+{"t": 1794012006.3173878, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1794012007.2445781, "category": "first_message", "message": "first drive: speed=0.00m/s", "topic": "drive"}
+{"t": 1794012007.2902625, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1794012008.1357512, "category": "first_message", "message": "first pose: map-frame (+9.47, +1.35)", "topic": "pose"}
+{"t": 1794012008.5068133, "category": "pose_lag_high", "message": "/slam_pose stamp is 0.33s behind now; localization is not keeping up (dashboard overlay error ~= speed x lag)", "lag_sec": 0.334}
+{"t": 1794012009.287146, "category": "tf_up", "message": "map->base_link available; SLAM is localizing"}
+{"t": 1794012009.4308975, "category": "first_message", "message": "first map: 81x276 @ 0.050m/cell, 244 occupied cells", "topic": "map"}
+{"t": 1794012013.423632, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1794012028.2871044, "category": "status", "message": "scan=ok | map=182x326@0.050 40%known 2382occ | map->base_link=OK | pose=ok lag=0.01s(max 0.55) | odom=ok +3.41m/s | drive=ok cmd=3.28m/s | LB=held", "pose_lag_sec": 0.006, "pose_lag_max_sec": 0.552, "tf_ok": true, "speed": 3.41, "cmd_speed": 3.28, "pose_frozen": false, "occupied_cells": 2382}
+{"t": 1794012048.2873588, "category": "status", "message": "scan=ok | map=182x428@0.050 32%known 2870occ | map->base_link=OK | pose=ok lag=0.01s(max 0.55) | odom=ok +3.49m/s | drive=ok cmd=3.36m/s | LB=held", "pose_lag_sec": 0.009, "pose_lag_max_sec": 0.552, "tf_ok": true, "speed": 3.49, "cmd_speed": 3.36, "pose_frozen": false, "occupied_cells": 2870}
+{"t": 1794012053.7726564, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1794012063.3857908, "category": "closing", "message": "worst pose lag this run: 3.40s"}

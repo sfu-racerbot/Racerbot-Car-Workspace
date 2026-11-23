@@ -1,0 +1,16 @@
+car_id: rb2
+overlays:
+- path: src/racerbot_car/cars/rb2/calibration/gap_follow.yaml
+  sha256: 3d843878c9ff1d9d340a2dc26e55940739056f1a97b9f3d53238400deb46e652
+- path: src/racerbot_car/cars/rb2/calibration/joy_teleop.yaml
+  sha256: 2929e960497be5dee54fa3b1012ac2b7336088d462311549b1ba1c1be2e32933
+- path: src/racerbot_car/cars/rb2/calibration/neural_racer.yaml
+  sha256: d0f24868ce041a1c24b03e4b870fdd1b560b7d9e8c0c5c6c57cebdc87432927e
+- path: src/racerbot_car/cars/rb2/calibration/odom_calibration.yaml
+  sha256: a7b7421370c836482bf2941f37d5eea0fcdf77836f431bc311ddfad2d165d592
+- path: src/racerbot_car/cars/rb2/calibration/pure_pursuit.yaml
+  sha256: 00257cbabd20d9fd5d4183fb3494b99f5c489109193ccffa6dbbd9a5b20eb82f
+- path: src/racerbot_car/cars/rb2/calibration/sensors.yaml
+  sha256: 528f766ddda0f28f3a0a83162732c3774c776e22489d52b3137c5acc23192143
+- path: src/racerbot_car/cars/rb2/calibration/vesc.yaml
+  sha256: d708cb0cc6958d9f1edeb6931ad0488303a7baaef0bd4019e29554518bc3d8d6

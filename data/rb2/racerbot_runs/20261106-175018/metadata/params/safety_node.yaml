@@ -1,0 +1,16 @@
+/safety_node:
+  ros__parameters:
+    deadman_button: 4
+    enable_ttc: false
+    max_ttc_angle_deg: 90.0
+    message_timeout_duration: 50.0
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    start_type_description_service: true
+    ttc_threshold: 0.3
+    use_sim_time: false

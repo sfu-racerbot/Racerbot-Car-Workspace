@@ -1,0 +1,69 @@
+repository: /home/racerbotcar-2/racerbot-ws
+HEAD: 86e9ad8ddfba3fdb76e4a44a0523b835e66924c5
+branch: main
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+ M src/racerbot_a
+ M src/racerbot_b
+?? data/rb2/racerbot_auto/20261102-190609-rebuilt/
+?? data/rb2/racerbot_auto/20261102-191019-rebuilt/
+?? data/rb2/racerbot_auto/20261102-191139/
+?? data/rb2/racerbot_auto/20261106-164002-rebuilt/
+?? data/rb2/racerbot_auto/20261106-164051/
+?? data/rb2/racerbot_runs/20261102-182245/
+?? data/rb2/racerbot_runs/20261102-182954/
+?? data/rb2/racerbot_runs/20261102-183128/
+?? data/rb2/racerbot_runs/20261102-183507/
+?? data/rb2/racerbot_runs/20261102-183837/
+?? data/rb2/racerbot_runs/20261102-184110/
+?? data/rb2/racerbot_runs/20261102-184422/
+?? data/rb2/racerbot_runs/20261102-184924/
+?? data/rb2/racerbot_runs/20261102-185039/
+?? data/rb2/racerbot_runs/20261102-185307/
+?? data/rb2/racerbot_runs/20261102-185635/
+?? data/rb2/racerbot_runs/20261102-185841/
+?? data/rb2/racerbot_runs/20261102-190609/
+?? data/rb2/racerbot_runs/20261102-190940/
+?? data/rb2/racerbot_runs/20261102-191019/
+?? data/rb2/racerbot_runs/20261106-163556/
+?? data/rb2/racerbot_runs/20261106-163633/
+?? data/rb2/racerbot_runs/20261106-164002/
+?? data/rb2/racerbot_runs/20261106-164401/
+?? data/rb2/racerbot_runs/20261106-165112/
+?? data/rb2/racerbot_runs/20261106-165244/
+?? data/rb2/racerbot_runs/20261106-165423/
+?? data/rb2/racerbot_runs/20261106-170130/
+?? data/rb2/racerbot_runs/20261106-170444/
+?? data/rb2/racerbot_runs/20261106-170701/
+?? data/rb2/racerbot_runs/20261106-170803/
+?? data/rb2/racerbot_runs/20261106-171030/
+?? data/rb2/racerbot_runs/20261106-171644/
+?? data/rb2/racerbot_runs/20261106-172406/
+?? data/rb2/racerbot_runs/20261106-173002/
+?? data/rb2/racerbot_runs/20261106-173557/
+?? data/rb2/racerbot_runs/20261106-173721/
+?? data/rb2/racerbot_runs/20261106-173812/
+?? data/rb2/racerbot_runs/20261106-173906/
+?? data/rb2/racerbot_runs/20261106-174028/
+?? data/rb2/racerbot_runs/20261106-174209/
+?? data/rb2/racerbot_runs/20261106-174315/
+?? data/rb2/racerbot_runs/20261106-174600/
+?? data/rb2/racerbot_runs/20261106-174726/
+?? data/rb2/racerbot_runs/20261106-175018/
+?? data/rb2/racerbot_runs/20261106-175224/
+?? data/rb2/racerbot_runs/20261106-175300/
+?? data/rb2/racerbot_runs/auto_record.log
+?? data/rb2/racerbot_runs/map_course-20261102-190608.log
+?? data/rb2/racerbot_runs/map_course-20261102-190938.log
+?? data/rb2/racerbot_runs/map_course-20261102-191018.log
+?? data/rb2/racerbot_runs/map_course-20261106-164001.log
+?? data/rb2/racerbot_runs/map_course-20261106-175407.log
+
+# git submodule status
+ ec599a1c4f3d4edc5f7d356e2f2990839e56bb7d src/particle_filter (heads/foxy-devel)
++874ffb43aafc0268c4f31b0cdaccaaf2cf9efdeb src/racerbot_a (heads/main)
+ 31ae4ef071401045bb0beb6d0bb63befa87293df src/racerbot_b (heads/main)
+ f55480a7044367c219745480b436b8b7117f8282 src/range_libc (heads/humble-devel)
+ 775b167c0dbcfe00a012e248c66a7c8379ef9fbb src/realsense-ros (4.58.2-41-g775b167c)
+ d3f510ce1b4be12967064d8251ebcac530921a04 src/transport_drivers (1.2.0)
+ 836a00415bdd5caf3497dd91df332f6673dcd1c0 src/web_dashboards (remotes/origin/HEAD)

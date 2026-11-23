@@ -1,0 +1,64 @@
+{
+  "A_inv": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "acc_bias": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "gyro_bias": [
+    -2.8422501966955174e-05,
+    -3.1522423288749017e-05,
+    -4.586939417781277e-06
+  ],
+  "units": "SI (m/s^2, rad/s)",
+  "device_offsets": {
+    "accel_g": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "gyro_deg_s": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "note": "offsets the device itself subtracts (VESC App Settings -> IMU); only the remainder of acc_bias/gyro_bias is subtracted in racer_imu"
+  },
+  "meta": {
+    "note": "identity (no calibration file)",
+    "gyro": {
+      "n": 2542,
+      "bias_deg_s": [
+        -0.0016,
+        -0.0018,
+        -0.0003
+      ],
+      "noise_deg_s": [
+        0.0812,
+        0.0699,
+        0.0575
+      ],
+      "time": "2026-10-29 16:58:51"
+    },
+    "imu": "bno",
+    "updated": "2026-10-29 16:58:51",
+    "log": "/home/racerbotcar-2/imu-calibration/logs/20261029_165841_calib_bno",
+    "sim": false
+  }
+}

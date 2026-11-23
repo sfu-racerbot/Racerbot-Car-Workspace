@@ -1,0 +1,35 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-06T18:03:41-08:00'
+algorithms:
+  /drive:
+  - /pure_pursuit_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /foxglove_bridge
+- /joy
+- /lifecycle_manager_pf_localization
+- /map_server
+- /particle_filter
+- /pure_pursuit_node
+- /static_baselink_to_laser
+- /urg_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+bag_live_sec: 3.5
+stopped: '2026-11-06T18:05:20-08:00'
+stop_reason: no algorithm publishing for 3.0 s
+duration_sec: 99.2
+recorder_exit_code: 0
+bag_exit_code: 0
+recorder_failures: []
+recorder_killed: false
+bag_bytes: 30471098
+activity:
+  first_odom_speed_mps: 0.15
+  max_speed_mps: 3.84
+  moved: true
+  started_late: true
+  lb_held_fraction: 0.829
