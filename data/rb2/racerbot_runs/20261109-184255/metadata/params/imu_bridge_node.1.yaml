@@ -1,0 +1,20 @@
+/imu_bridge_node:
+  ros__parameters:
+    accel_sigma: 0.03
+    bno_baud: 921600
+    bno_port: /tmp/bno085
+    car_yaml: /home/racerbotcar-2/racerbot-ws/src/racerbot_car/cars/rb2/imu/car.yaml
+    frame_id: base_link
+    gravity_max_tilt_deg: 10.0
+    gravity_tolerance: 0.5
+    gravity_window_s: 1.0
+    gyro_sigma: 0.0017
+    odom_topic: /odom
+    primary: auto
+    racer_imu_root: /home/racerbotcar-2/racerbot-ws/tools/imu_calibration
+    start_type_description_service: true
+    startup_bias_s: 3.0
+    status_stale_timeout_s: 0.1
+    use_sim_time: false
+    vesc_topic: /sensors/imu/raw
+    wheel_speed_sigma: 0.08

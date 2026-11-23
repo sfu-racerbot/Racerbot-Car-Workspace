@@ -1,0 +1,38 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-09T18:14:31-08:00'
+algorithms:
+  /drive:
+  - /disparity_extender_node
+nodes:
+- /_ros2cli_25741
+- /_ros2cli_daemon_0_38c50d1cedfa47dcaab95fec91aad3bc
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /camera/camera
+- /camera_static_tf
+- /disparity_extender_node
+- /foxglove_bridge
+- /joy
+- /safety_node
+- /static_baselink_to_laser
+- /urg_node
+- /usb_cam_stream_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+bag_live_sec: 5.8
+stopped: '2026-11-09T18:14:54-08:00'
+stop_reason: no algorithm publishing for 3.2 s
+duration_sec: 23.0
+recorder_exit_code: 0
+bag_exit_code: 0
+recorder_failures: []
+recorder_killed: false
+bag_bytes: 5112964
+activity:
+  first_odom_speed_mps: 0.0
+  max_speed_mps: 0.0
+  moved: false
+  started_late: false
+  lb_held_fraction: 0.0

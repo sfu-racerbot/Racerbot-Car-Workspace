@@ -1,0 +1,25 @@
+/seed_start_pose:
+  ros__parameters:
+    agree_position_m: 0.1
+    agree_yaw_deg: 3.0
+    confirm_radius: 0.3
+    confirm_scans: 2
+    give_up_sec: 120.0
+    initialpose_topic: /initialpose
+    laser_offset_x: 0.26
+    laser_offset_y: 0.0
+    map_frame: map
+    map_yaml: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261109-185146-rebuilt/map.yaml
+    max_heading_error_deg: 60.0
+    mode: anywhere
+    period_sec: 0.5
+    pose_topic: /pf/viz/inferred_pose
+    repeats: 3
+    retry_sec: 2.0
+    scan_topic: /scan
+    start_type_description_service: true
+    use_sim_time: false
+    waypoints_file: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261109-185146-rebuilt/raceline_profiled.csv
+    x: 0.0
+    y: 0.0
+    yaw: 0.0

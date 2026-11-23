@@ -1,0 +1,22 @@
+/gap_finder_node:
+  ros__parameters:
+    car_width_extended: 0.55
+    disparity_threshold: 1.5
+    fov_half_angle_deg: 90.0
+    max_lidar_range: 10.0
+    minimum_gap_threshold: 0.1
+    obstacle_detection: true
+    obstacle_distance: 2.0
+    obstacle_edge_jump: 0.5
+    obstacle_hold_frames: 8
+    obstacle_max_width: 0.8
+    obstacle_min_target_angle_deg: 0.0
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    start_type_description_service: true
+    use_sim_time: false

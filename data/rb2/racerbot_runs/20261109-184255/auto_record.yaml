@@ -1,0 +1,24 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-09T18:42:55-08:00'
+algorithms:
+  /drive:
+  - /ftg_node
+nodes:
+- /_ros2cli_25741
+- /_ros2cli_daemon_0_38c50d1cedfa47dcaab95fec91aad3bc
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /camera/camera
+- /camera_static_tf
+- /foxglove_bridge
+- /ftg_node
+- /joy
+- /safety_node
+- /static_baselink_to_laser
+- /urg_node
+- /usb_cam_stream_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+bag_live_sec: 3.8

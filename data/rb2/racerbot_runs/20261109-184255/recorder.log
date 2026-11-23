@@ -1,0 +1,145 @@
+[WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+stdin is not a terminal device. Keyboard handling disabled.[INFO] [1794278576.353317940] [auto_rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1794278576.353716446] [auto_rosbag2_recorder]: Event publisher thread: Started
+[INFO] [1794278576.368623303] [auto_rosbag2_recorder]: Starting recording to '/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184255/bag'
+[INFO] [1794278576.375915815] [auto_rosbag2_recorder]: Subscribed to topic '/rosout'
+[INFO] [1794278576.376273424] [auto_rosbag2_recorder]: Listening for topics...
+[INFO] [1794278576.376329810] [auto_rosbag2_recorder]: Recording...
+[INFO] [1794278576.376540823] [auto_rosbag2_recorder]: Topics discovery started.
+[INFO] [1794278576.495472626] [auto_rosbag2_recorder]: Subscribed to topic '/parameter_events'
+[INFO] [1794278576.532693862] [auto_rosbag2_recorder]: Subscribed to topic '/tf_static'
+[INFO] [1794278576.540809531] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/core'
+[INFO] [1794278576.551610168] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/imu/raw'
+[INFO] [1794278576.561881702] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/servo_position_command'
+[INFO] [1794278576.881855565] [auto_rosbag2_recorder]: Subscribed to topic '/scan'
+[INFO] [1794278576.892765293] [auto_rosbag2_recorder]: Subscribed to topic '/diagnostics'
+[INFO] [1794278576.897229698] [auto_rosbag2_recorder]: Subscribed to topic '/joy'
+[INFO] [1794278576.904528450] [auto_rosbag2_recorder]: Subscribed to topic '/odom'
+[INFO] [1794278576.908042079] [auto_rosbag2_recorder]: Subscribed to topic '/tf'
+[INFO] [1794278577.489223219] [auto_rosbag2_recorder]: Subscribed to topic '/commands/motor/speed'
+[INFO] [1794278577.494712899] [auto_rosbag2_recorder]: Subscribed to topic '/commands/servo/position'
+[INFO] [1794278577.576017181] [auto_rosbag2_recorder]: Subscribed to topic '/drive'
+[INFO] [1794278577.594764074] [auto_rosbag2_recorder]: Subscribed to topic '/safety/brake'
+[INFO] [1794278577.599919249] [auto_rosbag2_recorder]: Subscribed to topic '/ackermann_cmd'
+[INFO] [launch]: All log files can be found below /home/racerbotcar-2/.ros/log/2026-11-09-18-42-58-357740-localhost.localdomain-84975
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: Recording run to: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261109-184255
+[INFO] [race_diag_node-1]: process started with pid [85150]
+[INFO] [snapshot_params-2]: process started with pid [85151]
+[INFO] [auto_system_log-3]: process started with pid [85152]
+[race_diag_node-1] [18:43:00] ARMED: probe armed (subscribe-only); waiting for the stack
+[race_diag_node-1] [18:43:00] FIRST_MESSAGE: first drive: speed=0.00m/s
+[race_diag_node-1] [18:43:00] FIRST_MESSAGE: first scan: 1081 beams, frame_id=laser
+[race_diag_node-1] [18:43:00] FIRST_MESSAGE: first odom: linear.x=+0.00m/s
+[race_diag_node-1] [18:43:00] FIRST_MESSAGE: first joy: 11 buttons
+[race_diag_node-1] [18:43:01] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:43:41] DEADMAN: LB held
+[race_diag_node-1] [18:43:41] DEADMAN: LB released
+[race_diag_node-1] [18:43:41] DEADMAN: LB held
+[race_diag_node-1] [18:43:42] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.80m/s | drive=ok cmd=3.94m/s | LB=held
+[race_diag_node-1] [18:44:03] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +3.66m/s | drive=ok cmd=3.37m/s | LB=held
+[race_diag_node-1] [18:44:15] DEADMAN: LB released
+[race_diag_node-1] [18:44:24] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [1794278664.713764257] [auto_rosbag2_recorder]: Topics discovery stopped.
+[INFO] [1794278664.714159658] [auto_rosbag2_recorder]: Pausing recording.
+[INFO] [1794278664.714249292] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1794278664.729193935] [auto_rosbag2_recorder]: Recording stopped
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT) again, ignoring...
+[INFO] [auto_system_log-3]: sending signal 'SIGINT' to process[auto_system_log-3]
+[INFO] [1794278664.756636155] [auto_rosbag2_recorder]: Event publisher thread: Exited
+[INFO] [auto_system_log-3]: process has finished cleanly [pid 85152]
+[race_diag_node-1] [18:44:44] STATUS: scan=STALE 20s | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=STALE 20s +0.00m/s | drive=STALE 20s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:45:57] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=STALE 93s +0.00m/s | drive=STALE 93s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:46:46] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=STALE 142s +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:46:48] POSE_LAG_HIGH: /slam_pose stamp is 0.51s behind now; localization is not keeping up (dashboard overlay error ~= speed x lag)
+[race_diag_node-1] [18:46:48] FIRST_MESSAGE: first pose: map-frame (+0.00, +0.00)
+[race_diag_node-1] [18:46:48] TF_UP: map->base_link available; SLAM is localizing
+[race_diag_node-1] [18:46:48] FIRST_MESSAGE: first map: 283x83 @ 0.050m/cell, 253 occupied cells
+[race_diag_node-1] [18:46:51] DEADMAN: LB held
+[race_diag_node-1] [18:46:56] DEADMAN: LB released
+[race_diag_node-1] [18:47:04] DEADMAN: LB held
+[race_diag_node-1] [18:47:06] DEADMAN: LB released
+[race_diag_node-1] [18:47:07] DEADMAN: LB held
+[race_diag_node-1] [18:47:07] STATUS: scan=ok | map=420x84@0.050 45%known 1478occ | map->base_link=OK | pose=ok lag=0.04s(max 0.54) | odom=ok +0.00m/s | drive=ok cmd=0.89m/s | LB=held
+[race_diag_node-1] [18:47:28] STATUS: scan=ok | map=430x207@0.050 40%known 4074occ | map->base_link=OK | pose=ok lag=0.02s(max 0.54) | odom=ok +1.78m/s | drive=ok cmd=1.57m/s | LB=held
+[race_diag_node-1] [18:47:34] DEADMAN: LB released
+[race_diag_node-1] [18:47:36] DEADMAN: LB held
+[race_diag_node-1] [18:47:37] DEADMAN: LB released
+[race_diag_node-1] [18:47:48] STATUS: scan=ok | map=430x207@0.050 41%known 4489occ | map->base_link=OK | pose=STALE 7s lag=0.03s(max 0.54) | odom=ok +0.00m/s | drive=STALE 7s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:47:52] TF_LOST: map->base_link lost: Lookup would require extrapolation into the past.  Requested time 1794278861.481174 but the earliest data is at time 179
+[race_diag_node-1] [18:48:09] STATUS: scan=ok | map=430x207@0.050 41%known 4489occ | map->base_link=MISSING | pose=STALE 28s lag=0.03s(max 0.54) | odom=ok +0.00m/s | drive=STALE 28s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:48:09] DEADMAN: LB held
+[race_diag_node-1] [18:48:10] DEADMAN: LB released
+[race_diag_node-1] [18:48:17] DEADMAN: LB held
+[race_diag_node-1] [18:48:18] DEADMAN: LB released
+[race_diag_node-1] [18:48:18] DEADMAN: LB held
+[race_diag_node-1] [18:48:19] TF_UP: map->base_link available; SLAM is localizing
+[race_diag_node-1] [18:48:30] STATUS: scan=ok | map=130x282@0.050 57%known 2338occ | map->base_link=OK | pose=ok lag=0.08s(max 0.63) | odom=ok +2.48m/s | drive=ok cmd=2.83m/s | LB=held
+[race_diag_node-1] [18:48:51] STATUS: scan=ok | map=331x353@0.050 44%known 6392occ | map->base_link=OK | pose=ok lag=0.03s(max 0.63) | odom=ok +1.45m/s | drive=ok cmd=1.43m/s | LB=held
+[race_diag_node-1] [18:48:51] DEADMAN: LB released
+[race_diag_node-1] [18:49:09] TF_LOST: map->base_link lost: Lookup would require extrapolation into the past.  Requested time 1794278939.421103 but the earliest data is at time 179
+[race_diag_node-1] [18:49:12] STATUS: scan=ok | map=405x353@0.050 44%known 7510occ | map->base_link=MISSING | pose=STALE 13s lag=0.03s(max 0.63) | odom=ok +0.00m/s | drive=STALE 13s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:49:38] STATUS: scan=ok | map=405x353@0.050 44%known 7510occ | map->base_link=MISSING | pose=STALE 39s lag=0.03s(max 0.63) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:49:40] DEADMAN: LB held
+[race_diag_node-1] [18:49:42] TF_UP: map->base_link available; SLAM is localizing
+[race_diag_node-1] [18:49:59] STATUS: scan=ok | map=243x418@0.050 30%known 2987occ | map->base_link=OK | pose=ok lag=0.01s(max 0.63) | odom=ok +1.41m/s | drive=ok cmd=1.43m/s | LB=held
+[race_diag_node-1] [18:50:16] DEADMAN: LB released
+[race_diag_node-1] [18:50:20] STATUS: scan=ok | map=250x442@0.050 47%known 6676occ | map->base_link=OK | pose=ok lag=0.02s(max 0.63) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:50:40] STATUS: scan=ok | map=250x442@0.050 47%known 6676occ | map->base_link=OK | pose=STALE 10s lag=0.03s(max 0.63) | odom=ok +0.00m/s | drive=STALE 10s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:51:00] STATUS: scan=STALE 21s | map=250x442@0.050 47%known 6676occ | map->base_link=OK | pose=STALE 30s lag=0.03s(max 0.63) | odom=STALE 21s +0.00m/s | drive=STALE 30s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:51:31] STATUS: scan=ok | map=250x442@0.050 47%known 6676occ | map->base_link=OK | pose=STALE 61s lag=0.03s(max 0.63) | odom=STALE 52s +0.00m/s | drive=STALE 61s cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:51:54] TF_LOST: map->base_link lost: Lookup would require extrapolation into the past.  Requested time 1794279030.441899 but the earliest data is at time 179
+[race_diag_node-1] [18:51:54] STATUS: scan=ok | map=250x442@0.050 47%known 6676occ | map->base_link=MISSING | pose=STALE 84s lag=0.03s(max 0.63) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:51:57] TF_UP: map->base_link available; SLAM is localizing
+[race_diag_node-1] [18:52:13] DEADMAN: LB held
+[race_diag_node-1] [18:52:14] STATUS: scan=ok | map=236x140@0.050 10%known 237occ | map->base_link=OK | pose=ok lag=0.03s(max 0.63) | odom=ok +3.61m/s | drive=ok cmd=2.85m/s | LB=held
+[race_diag_node-1] [18:52:34] STATUS: scan=ok | map=366x300@0.050 32%known 3802occ | map->base_link=OK | pose=ok lag=0.02s(max 0.63) | odom=ok +3.02m/s | drive=ok cmd=3.35m/s | LB=held
+[race_diag_node-1] [18:52:36] DEADMAN: LB released
+[race_diag_node-1] [18:52:37] DEADMAN: LB held
+[race_diag_node-1] [18:52:45] DEADMAN: LB released
+[race_diag_node-1] [18:52:48] DEADMAN: LB held
+[race_diag_node-1] [18:52:54] STATUS: scan=ok | map=366x315@0.050 31%known 4296occ | map->base_link=OK | pose=ok lag=0.03s(max 0.63) | odom=ok +3.24m/s | drive=ok cmd=2.73m/s | LB=held
+[race_diag_node-1] [18:52:57] DEADMAN: LB released
+[race_diag_node-1] [18:52:57] DEADMAN: LB held
+[race_diag_node-1] [18:53:09] DEADMAN: LB released
+[race_diag_node-1] [18:53:15] STATUS: scan=ok | map=420x329@0.050 26%known 4500occ | map->base_link=OK | pose=ok lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [18:53:26] TF_LOST: map->base_link lost: Lookup would require extrapolation into the past.  Requested time 1794279195.763933 but the earliest data is at time 179
+[race_diag_node-1] [18:53:35] STATUS: scan=ok | map=420x329@0.050 26%known 4500occ | map->base_link=MISSING | pose=STALE 22s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=STALE 22s cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:01:49] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 516s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=STALE 516s cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:02:06] DEADMAN: LB held
+[race_diag_node-1] [19:02:09] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 536s lag=0.03s(max 3.80) FROZEN | odom=ok +5.33m/s | drive=ok cmd=5.00m/s | LB=held
+[race_diag_node-1] [19:02:13] DEADMAN: LB released
+[race_diag_node-1] [19:02:30] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 557s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:02:52] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 579s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=STALE 3s cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:03:49] DEADMAN: LB held
+[race_diag_node-1] [19:03:52] DEADMAN: LB released
+[race_diag_node-1] [19:03:52] DEADMAN: LB held
+[race_diag_node-1] [19:03:53] DEADMAN: LB released
+[race_diag_node-1] [19:03:53] DEADMAN: LB held
+[race_diag_node-1] [19:03:55] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 642s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=held
+[race_diag_node-1] [19:04:02] DEADMAN: LB released
+[race_diag_node-1] [19:04:43] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 690s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=STALE 4s cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:06:05] DEADMAN: LB held
+[race_diag_node-1] [19:06:05] DEADMAN: LB released
+[race_diag_node-1] [19:06:05] DEADMAN: LB held
+[race_diag_node-1] [19:06:16] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 783s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=held
+[race_diag_node-1] [19:06:23] DEADMAN: LB released
+[race_diag_node-1] [19:06:23] DEADMAN: LB held
+[race_diag_node-1] [19:06:37] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 804s lag=0.03s(max 3.80) FROZEN | odom=ok +1.88m/s | drive=ok cmd=2.09m/s | LB=held
+[race_diag_node-1] [19:06:39] DEADMAN: LB released
+[race_diag_node-1] [19:06:40] DEADMAN: LB held
+[race_diag_node-1] [19:06:41] DEADMAN: LB released
+[race_diag_node-1] [19:06:57] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 824s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:07:27] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 854s lag=0.03s(max 3.80) FROZEN | odom=ok -0.37m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:07:47] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 874s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:08:07] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 894s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=STALE 19s cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:08:37] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 924s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:08:43] DEADMAN: LB held
+[race_diag_node-1] [19:08:49] DEADMAN: LB released
+[race_diag_node-1] [19:09:53] STATUS: scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 1000s lag=0.03s(max 3.80) | odom=ok +0.00m/s | drive=STALE 4s cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:16:43] DEADMAN: LB held
+[race_diag_node-1] [19:16:45] DEADMAN: LB released
+[race_diag_node-1] [19:16:46] DEADMAN: LB held
+[race_diag_node-1] [19:16:46] DEADMAN: LB released
+[race_diag_node-1] [19:18:56] STATUS: scan=STALE 3s | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=STALE 1543s lag=0.03s(max 3.80) | odom=STALE 3s +0.00m/s | drive=STALE 547s cmd=0.00m/s | LB=released

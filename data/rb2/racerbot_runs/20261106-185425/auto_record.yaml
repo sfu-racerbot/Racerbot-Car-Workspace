@@ -1,0 +1,21 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-06T18:54:25-08:00'
+algorithms:
+  /drive:
+  - /pure_pursuit_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /foxglove_bridge
+- /joy
+- /lifecycle_manager_pf_localization
+- /map_server
+- /particle_filter
+- /pure_pursuit_node
+- /static_baselink_to_laser
+- /urg_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+bag_live_sec: 6.3

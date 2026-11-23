@@ -1,0 +1,24 @@
+/disparity_extender_node:
+  ros__parameters:
+    alpha: 0.8
+    car_width: 0.4
+    car_width_extended: 0.85
+    disparity_threshold: 1.0
+    enable_safety: true
+    fov_half_angle_deg: 90.0
+    max_lateral_acc: 3.5
+    max_lidar_range: 10.0
+    max_speed: 5.5
+    max_steering_angle: 0.349
+    min_speed: 2.0
+    minimum_gap_threshold: 0.1
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    start_type_description_service: true
+    use_sim_time: false
+    wheelbase: 0.33

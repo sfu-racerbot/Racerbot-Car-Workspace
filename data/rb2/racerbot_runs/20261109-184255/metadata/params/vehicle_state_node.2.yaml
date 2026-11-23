@@ -1,0 +1,44 @@
+/vehicle_state_node:
+  ros__parameters:
+    accel_source: bno
+    base_frame: base_link
+    bno_gyro_weight: 1.0
+    bno_topic: /imu/bno/data
+    bno_x_offset: 0.36
+    fused_odom_topic: /odom/fused
+    gyro_disagree_tau: 0.5
+    gyro_disagree_threshold: 0.15
+    heading_sources:
+    - bno
+    - vesc
+    imu_odom_frame: odom_imu
+    imu_odom_topic: /odom/imu
+    imu_timeout: 0.1
+    max_accel_dt: 0.05
+    max_divergence: 0.3
+    max_gyro_gap: 0.05
+    max_heading_extrapolation: 0.05
+    max_slip_time: 0.5
+    min_steering_speed: 0.3
+    odom_frame: odom
+    odom_topic: /odom
+    publish_odom_tf: true
+    reset_divergence: 1.0
+    sigma_accel: 0.15
+    sigma_accel0: 3.0
+    sigma_accel_bno: 1.0
+    sigma_accel_vesc: 1.0
+    sigma_bias0: 0.3
+    sigma_bias_rw: 0.02
+    sigma_jerk: 6.0
+    sigma_wheel: 0.08
+    slip_gate: 4.0
+    start_type_description_service: true
+    steering_rate_hz: 50.0
+    steering_topic: /steering/measured
+    use_sim_time: false
+    vesc_gyro_weight: 1.0
+    vesc_topic: /imu/vesc/data
+    vesc_x_offset: 0.18
+    wheel_timeout: 0.2
+    wheelbase: 0.36

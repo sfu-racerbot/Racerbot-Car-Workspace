@@ -1,0 +1,5 @@
+/check_start:
+  ros__parameters:
+    run_dir: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261109-185146-rebuilt
+    start_type_description_service: true
+    use_sim_time: false

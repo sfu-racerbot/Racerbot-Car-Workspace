@@ -1,0 +1,7 @@
+repository: /home/racerbotcar-2/racerbot-ws/src/racerbot_a
+HEAD: 50bfd133aba5e4968158e34e86981c18128ff943
+branch: HEAD
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+
+# git submodule status

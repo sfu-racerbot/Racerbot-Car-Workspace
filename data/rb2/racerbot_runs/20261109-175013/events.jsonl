@@ -1,0 +1,12 @@
+{"t": 1794275418.565429, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1794275419.5663068, "category": "status", "message": "scan=NEVER | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=NEVER +0.00m/s | drive=NEVER cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1794275419.7556505, "category": "first_message", "message": "first odom: linear.x=+0.00m/s", "topic": "odom"}
+{"t": 1794275419.8547578, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1794275419.902795, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1794275421.369678, "category": "first_message", "message": "first drive: speed=0.00m/s", "topic": "drive"}
+{"t": 1794275440.5662801, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1794275446.8923094, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1794275461.565988, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.99m/s | drive=ok cmd=1.78m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 1.99, "cmd_speed": 1.78, "pose_frozen": false, "occupied_cells": null}
+{"t": 1794275463.4651926, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1794275481.5661588, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1794275500.0923758, "category": "closing", "message": "worst pose lag this run: 0.00s"}

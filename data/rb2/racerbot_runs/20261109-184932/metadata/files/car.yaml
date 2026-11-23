@@ -1,0 +1,61 @@
+# Car 2's IMU calibration: PROVISIONAL. The team lead's call (2026-10-31): car 2's IMU calibration is still to be done. The BNO mount yaw and position are not measured (see the bno block); car 2's IMU features (impact stop, traction, understeer) stay off.
+# Car geometry and IMU mounting. Car frame (ROS): x forward, y left, z up, origin = car center.
+# Tape-measure positions to the IMU chip, not the board edge. Update after tools/calibrate_imu.py --step mount.
+
+car:
+  length: 0.55          # body outline for the GUI [m]
+  width: 0.30
+  wheelbase: 0.36       # front-to-rear axle [m]; car 2, tape-measured 2026-08-24 (docs/hardware-reference.md; team lead, 2026-10-31)
+  track: 0.26           # left-to-right wheel centers [m]
+  wheel_radius: 0.05
+  wheel_width: 0.045
+  speed_to_erpm_gain: 4614.0    # erpm = gain * v[m/s] + offset  (copy from the f1tenth vesc.yaml)
+  speed_to_erpm_offset: 0.0
+
+imus:
+  vesc:                          # VESC built-in IMU
+    position: [-0.01, 0.09, 0.08]     # [m] from car center: 1 cm behind, 9 cm left, 8 cm above axle height (measured 2026-09-30)
+    rpy_deg: [-0.35, -0.07, -84.69]   # sensor -> car mount rotation (roll, pitch, yaw) AFTER the VESC's own rot_*
+                                      # setting. Measured 2026-09-28 (calibrate_imu.py --step mount)
+    weight: 1.0
+    port: /dev/ttyACM0
+    rate_hz: 200
+    can_id: null                 # set if this VESC is reached through another one over CAN
+    calib: calib/vesc_calib.json
+  bno:                           # BNO085, car 2: Jetson I2C bus 7 (0x4A) via tools/bno_i2c_bridge.py
+    position: [0.14, 0.00, 0.06]      # NOT measured on car 2 yet (nominal)
+    rpy_deg: [90.80, 0.24, 0.24]      # car 2, 2026-10-29: roll/pitch from gravity, parked (level_rotation).
+                                      # Yaw 0.24 is NOT measured: redo calibrate_imu.py --imu bno --step mount
+                                      # (push forward) before trusting x/y. z (yaw rate) is right either way.
+    weight: 1.0
+    port: /tmp/bno085            # the bridge's pty (car 2); was /dev/ttyACM1 for a microcontroller
+    baud: 921600
+    calib: calib/bno_calib.json
+
+sync:
+  rate_hz: 200                   # common output timeline
+  delay_s: 0.04                  # wait this long for late samples before interpolating
+  reference: vesc                # other streams are shifted to line up with this one
+  file: calib/sync.json          # written by tools/sync_calibrate.py
+
+fusion:
+  alpha_source: dual_accel       # dual_accel | gyro  (how angular acceleration is obtained)
+  attitude_from: [bno, vesc]     # first IMU with a valid quaternion gives roll/pitch for gravity removal
+
+estimator:
+  sigma_acc: 0.5
+  sigma_yaw_acc: 8.0
+  sigma_gyro: 0.01
+  sigma_wheel: 0.08
+  sigma_nonholo: 0.15
+  nonholo_max_ay: 1.0
+  online_gyro_bias: true         # keep learning the gyro z bias: at every stop, and from lidar heading
+  sigma_bias_rw: 0.0003          # how fast the bias may creep [rad/s/sqrt(s)] (~0.1 deg/s per minute)
+
+drive:                           # keyboard driving in tools/car_view.py --drive
+  max_duty: 0.10                 # full-throttle key = 10 % duty. Start low; raise once it behaves
+  ramp_per_s: 0.25               # throttle ramp [duty/s]
+  brake_current: 5.0             # [A] while Space is held
+  servo_center: 0.5              # steering servo 0..1 (F1TENTH cars are often ~0.53)
+  servo_range: 0.25              # full steer = center +- range
+  steer_invert: false            # set true if Left steers right
