@@ -1,0 +1,61 @@
+[WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+stdin is not a terminal device. Keyboard handling disabled.[INFO] [1794432696.281626222] [auto_rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1794432696.281648909] [auto_rosbag2_recorder]: Event publisher thread: Started
+[INFO] [1794432696.289116486] [auto_rosbag2_recorder]: Starting recording to '/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261111-133135/bag'
+[INFO] [1794432696.299419866] [auto_rosbag2_recorder]: Subscribed to topic '/rosout'
+[INFO] [1794432696.299950503] [auto_rosbag2_recorder]: Listening for topics...
+[INFO] [1794432696.300019301] [auto_rosbag2_recorder]: Recording...
+[INFO] [1794432696.302769092] [auto_rosbag2_recorder]: Topics discovery started.
+[INFO] [1794432696.492934123] [auto_rosbag2_recorder]: Subscribed to topic '/parameter_events'
+[INFO] [1794432698.664262499] [auto_rosbag2_recorder]: Subscribed to topic '/imu/bno/data'
+[INFO] [1794432698.667053733] [auto_rosbag2_recorder]: Subscribed to topic '/imu/bno/raw'
+[INFO] [1794432698.670427444] [auto_rosbag2_recorder]: Subscribed to topic '/imu/data'
+[INFO] [1794432698.673882048] [auto_rosbag2_recorder]: Subscribed to topic '/imu/vesc/data'
+[INFO] [1794432698.682896178] [auto_rosbag2_recorder]: Subscribed to topic '/imu_bridge/wheel_odom'
+[INFO] [1794432698.692076350] [auto_rosbag2_recorder]: Subscribed to topic '/drive'
+[INFO] [1794432698.695164694] [auto_rosbag2_recorder]: Subscribed to topic '/drive_intent'
+[INFO] [1794432698.806743127] [auto_rosbag2_recorder]: Subscribed to topic '/odom/imu'
+[INFO] [1794432698.808853265] [auto_rosbag2_recorder]: Subscribed to topic '/odom/fused'
+[INFO] [1794432698.812694544] [auto_rosbag2_recorder]: Subscribed to topic '/steering/measured'
+[INFO] [1794432699.181211450] [auto_rosbag2_recorder]: Subscribed to topic '/joy'
+[INFO] [1794432699.193656195] [auto_rosbag2_recorder]: Subscribed to topic '/scan'
+[INFO] [1794432699.202242058] [auto_rosbag2_recorder]: Subscribed to topic '/diagnostics'
+[INFO] [1794432699.214449467] [auto_rosbag2_recorder]: Subscribed to topic '/ackermann_cmd'
+[INFO] [1794432699.220982725] [auto_rosbag2_recorder]: Subscribed to topic '/tf_static'
+[INFO] [1794432699.397047238] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/imu/raw'
+[INFO] [1794432699.421031926] [auto_rosbag2_recorder]: Subscribed to topic '/commands/servo/position'
+[INFO] [1794432699.427512386] [auto_rosbag2_recorder]: Subscribed to topic '/commands/motor/speed'
+[INFO] [1794432699.433846835] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/core'
+[INFO] [1794432699.440446427] [auto_rosbag2_recorder]: Subscribed to topic '/sensors/servo_position_command'
+[INFO] [1794432699.551591848] [auto_rosbag2_recorder]: Subscribed to topic '/tf'
+[INFO] [1794432699.592284245] [auto_rosbag2_recorder]: Subscribed to topic '/odom'
+[INFO] [launch]: All log files can be found below /home/racerbotcar-2/.ros/log/2026-11-11-13-31-40-469641-localhost.localdomain-7647
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: Recording run to: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261111-133135
+[INFO] [race_diag_node-1]: process started with pid [7837]
+[INFO] [snapshot_params-2]: process started with pid [7838]
+[INFO] [auto_system_log-3]: process started with pid [7839]
+[race_diag_node-1] [13:31:43] ARMED: probe armed (subscribe-only); waiting for the stack
+[race_diag_node-1] [13:31:43] FIRST_MESSAGE: first scan: 1081 beams, frame_id=laser
+[race_diag_node-1] [13:31:44] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=NEVER +0.00m/s | drive=NEVER cmd=0.00m/s | LB=released
+[race_diag_node-1] [13:31:44] FIRST_MESSAGE: first drive: speed=1.56m/s
+[race_diag_node-1] [13:31:44] DEADMAN: LB held
+[race_diag_node-1] [13:31:44] FIRST_MESSAGE: first joy: 11 buttons
+[race_diag_node-1] [13:31:44] FIRST_MESSAGE: first odom: linear.x=+2.01m/s
+[race_diag_node-1] [13:32:00] DEADMAN: LB released
+[race_diag_node-1] [13:32:04] STATUS: scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[INFO] [1794432727.174968409] [auto_rosbag2_recorder]: Topics discovery stopped.
+[INFO] [1794432727.175451281] [auto_rosbag2_recorder]: Pausing recording.
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [1794432727.176211748] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [auto_system_log-3]: sending signal 'SIGINT' to process[auto_system_log-3]
+[INFO] [snapshot_params-2]: sending signal 'SIGINT' to process[snapshot_params-2]
+[INFO] [race_diag_node-1]: sending signal 'SIGINT' to process[race_diag_node-1]
+[race_diag_node-1] [13:32:07] CLOSING: worst pose lag this run: 0.00s
+[INFO] [1794432727.206114203] [auto_rosbag2_recorder]: Recording stopped
+[INFO] [1794432727.232905865] [auto_rosbag2_recorder]: Event publisher thread: Exited
+[snapshot_params-2] [INFO] [1794432727.242293893] [auto_snapshot_params]: 15 parameter snapshots written to /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_runs/20261111-133135/metadata/params
+[snapshot_params-2] Failed to publish log message to rosout: publisher's context is invalid, at ./src/rcl/publisher.c:423
+[INFO] [auto_system_log-3]: process has finished cleanly [pid 7839]
+[INFO] [race_diag_node-1]: process has finished cleanly [pid 7837]
+[INFO] [snapshot_params-2]: process has finished cleanly [pid 7838]

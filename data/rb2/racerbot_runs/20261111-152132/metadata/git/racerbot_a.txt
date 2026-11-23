@@ -1,0 +1,12 @@
+repository: /home/racerbotcar-2/racerbot-ws/src/racerbot_a
+HEAD: b4f6f8eab8e1d3250ea0e0f21424e7d06042593d
+branch: HEAD
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+?? maps/map.pgm
+?? maps/pgm_to_png.py
+?? maps/slam_1109.png
+?? maps/slam_1109.yaml
+?? src/pure_pursuit_a/waypoints/slam_1109_generated.csv
+
+# git submodule status

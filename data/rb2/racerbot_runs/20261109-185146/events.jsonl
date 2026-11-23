@@ -1,0 +1,22 @@
+{"t": 1794279113.0012693, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1794279113.0042906, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1794279113.0123641, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1794279113.823409, "category": "first_message", "message": "first drive: speed=0.00m/s", "topic": "drive"}
+{"t": 1794279114.0308387, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=NEVER +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1794279114.1650052, "category": "first_message", "message": "first odom: linear.x=+0.00m/s", "topic": "odom"}
+{"t": 1794279116.9818356, "category": "first_message", "message": "first pose: map-frame (-0.00, -0.00)", "topic": "pose"}
+{"t": 1794279117.0021179, "category": "tf_up", "message": "map->base_link available; SLAM is localizing"}
+{"t": 1794279120.036841, "category": "first_message", "message": "first map: 236x140 @ 0.050m/cell, 237 occupied cells", "topic": "map"}
+{"t": 1794279133.0173788, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1794279135.0026565, "category": "status", "message": "scan=ok | map=236x140@0.050 10%known 237occ | map->base_link=OK | pose=ok lag=0.05s(max 0.18) | odom=ok +3.81m/s | drive=ok cmd=3.50m/s | LB=held", "pose_lag_sec": 0.049, "pose_lag_max_sec": 0.178, "tf_ok": true, "speed": 3.81, "cmd_speed": 3.5, "pose_frozen": false, "occupied_cells": 237}
+{"t": 1794279155.003427, "category": "status", "message": "scan=ok | map=366x300@0.050 32%known 3802occ | map->base_link=OK | pose=ok lag=0.03s(max 0.18) | odom=ok +3.30m/s | drive=ok cmd=2.39m/s | LB=held", "pose_lag_sec": 0.032, "pose_lag_max_sec": 0.178, "tf_ok": true, "speed": 3.3, "cmd_speed": 2.39, "pose_frozen": false, "occupied_cells": 3802}
+{"t": 1794279156.6527638, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1794279157.2920465, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1794279165.9585323, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1794279168.8811235, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1794279175.00346, "category": "status", "message": "scan=ok | map=366x315@0.050 31%known 4296occ | map->base_link=OK | pose=ok lag=0.06s(max 0.18) | odom=ok +3.25m/s | drive=ok cmd=2.39m/s | LB=held", "pose_lag_sec": 0.062, "pose_lag_max_sec": 0.178, "tf_ok": true, "speed": 3.25, "cmd_speed": 2.39, "pose_frozen": false, "occupied_cells": 4296}
+{"t": 1794279177.0840993, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1794279177.1061652, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1794279186.4088738, "category": "pose_lag_high", "message": "/slam_pose stamp is 0.36s behind now; localization is not keeping up (dashboard overlay error ~= speed x lag)", "lag_sec": 0.365}
+{"t": 1794279189.1447303, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1794279195.8266966, "category": "closing", "message": "worst pose lag this run: 3.80s"}

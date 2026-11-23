@@ -1,0 +1,36 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-11-11T14:12:27-08:00'
+algorithms:
+  /drive:
+  - /ftg_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /camera/camera
+- /camera_static_tf
+- /foxglove_bridge
+- /ftg_node
+- /joy
+- /safety_node
+- /static_baselink_to_laser
+- /urg_node
+- /usb_cam_stream_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+bag_live_sec: 4.8
+stopped: '2026-11-11T14:20:21-08:00'
+stop_reason: no algorithm publishing for 3.2 s
+duration_sec: 473.5
+recorder_exit_code: 0
+bag_exit_code: 0
+recorder_failures: []
+recorder_killed: false
+bag_bytes: 130222999
+activity:
+  first_odom_speed_mps: 0.0
+  max_speed_mps: 4.98
+  moved: true
+  started_late: false
+  lb_held_fraction: 0.109

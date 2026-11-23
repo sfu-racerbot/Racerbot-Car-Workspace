@@ -1,0 +1,237 @@
+/pure_pursuit_node:
+  ros__parameters:
+    avoidance_fallback_trigger_distance: 0.6
+    avoidance_fov_deg: 60.0
+    avoidance_min_gap_distance: 1.0
+    avoidance_speed: 1.0
+    avoidance_trigger_distance: 1.5
+    body_clearance_fov_deg: 180.0
+    body_contact_escape_clearance: 0.0
+    car_length: 0.58
+    car_width: 0.31
+    closed_loop: true
+    command_slew_max_dt: 0.1
+    control_rate_hz: 40.0
+    deadman_button: 4
+    decision_log_period_sec: 1.0
+    delay_lqr:
+      actuation_delay: 0.075
+      q_heading: 1.0
+      q_lateral: 1.0
+      r_steer: 1.0
+      sensing_delay: 0.05
+      servo_gain: 15.0
+      servo_rate: 2.5
+      v_grid_max: 6.0
+    delay_mpc:
+      actuation_delay: 0.075
+      deadline_sec: 0.008
+      dt: 0.025
+      horizon_steps: 32
+      max_consecutive_misses: 3
+      max_iter: 4000
+      q_heading: 4.0
+      q_lateral: 4.0
+      r_rate: 0.0
+      r_steer: 1.0
+      sensing_delay: 0.05
+      servo_gain: 15.0
+      servo_rate: 2.5
+    drive_topic: /drive
+    emergency_arc_clearance: 0.14
+    emergency_arc_length: 1.0
+    emergency_escape_clearance: 0.1
+    emergency_escape_min_gap: 0.8
+    emergency_escape_speed: 0.25
+    emergency_hard_stop_distance: 0.25
+    emergency_stop_clearance: 0.03
+    emergency_stop_distance: 0.35
+    enable_deadman: true
+    enable_lidar_safety: true
+    enable_local_pass_planner: false
+    enable_obstacle_avoidance: true
+    enable_opponent_following: true
+    enable_opponent_overtake: false
+    following_brake: 3.0
+    following_reacquire_speed: 0.25
+    following_reserve: 0.65
+    following_response_sec: 0.45
+    following_speed_uncertainty: 1.0
+    following_stop_speed: 0.3
+    frozen_map_topic: /auto_map_race/frozen_map
+    intent_horizon_sec: 1.5
+    intent_max_length: 8.0
+    intent_rate_hz: 20.0
+    intent_samples: 16
+    intent_topic: /drive_intent
+    joy_timeout_sec: 0.5
+    joy_topic: /joy
+    laser_offset_x: 0.26
+    laser_offset_y: 0.0
+    live_tunable_spec: '{"version":1,"node":"pure_pursuit_node","params":[{"name":"max_speed","group":"Speed","label":"max
+      speed","kind":"float","min":0.3,"max":6.0,"step":0.1,"unit":"m/s","safety":false,"description":"Ceiling
+      on commanded speed. The recorded speed profile is clipped to this, so lowering
+      it slows the whole lap without re-recording a line."},{"name":"min_speed","group":"Speed","label":"min
+      speed","kind":"float","min":0.0,"max":3.0,"step":0.1,"unit":"m/s","safety":false,"description":"Floor
+      the profiled speed is held to, so the car keeps creeping through the slowest
+      corner instead of stalling in it."},{"name":"max_acceleration","group":"Speed","label":"max
+      acceleration","kind":"float","min":1.0,"max":8.0,"step":0.25,"unit":"m/s^2","safety":false,"description":"How
+      fast a speed *command* may rise (not a demand on the motor). Bounded on both
+      sides: too low and the car cannot rebuild speed behind a slower car, too high
+      and it arrives too hot to commit to a pass. 5-6 is the validated band -- see
+      docs/simulator.md before leaving it."},{"name":"max_braking_decel","group":"Speed","label":"max
+      braking decel","kind":"float","min":1.0,"max":12.0,"step":0.25,"unit":"m/s^2","safety":false,"description":"Shapes
+      how fast a normal speed command may fall. An emergency stop ignores this and
+      is immediate."},{"name":"max_lateral_accel","group":"Speed","label":"max lateral
+      accel","kind":"float","min":0.5,"max":6.0,"step":0.1,"unit":"m/s^2","safety":false,"description":"Cornering
+      aggression: the online cap holds speed to sqrt(a_lat / curvature). The single
+      best knob for \"it understeers wide\" vs \"it scrubs and slows\"."},{"name":"min_lookahead","group":"Line
+      following","label":"min lookahead","kind":"float","min":0.2,"max":3.0,"step":0.05,"unit":"m","safety":false,"description":"Lookahead
+      distance at a standstill. Smaller corners harder and wobbles sooner; larger
+      cuts corners and settles."},{"name":"max_lookahead","group":"Line following","label":"max
+      lookahead","kind":"float","min":0.5,"max":5.0,"step":0.05,"unit":"m","safety":false,"description":"Lookahead
+      ceiling at speed. Must stay at or below overtake_lookahead_distance."},{"name":"lookahead_speed_gain","group":"Line
+      following","label":"lookahead speed gain","kind":"float","min":0.0,"max":0.6,"step":0.01,"unit":"m
+      per m/s","safety":false,"description":"How much the lookahead stretches with
+      measured speed: L = gain*v + min_lookahead, clipped to [min, max]."},{"name":"max_steering_rate","group":"Line
+      following","label":"max steering rate","kind":"float","min":0.2,"max":4.0,"step":0.1,"unit":"rad/s","safety":false,"description":"Caps
+      how fast the steering angle may slew between commands. Lower is calmer and later;
+      higher is sharper and can chatter."},{"name":"enable_obstacle_avoidance","group":"Avoidance","label":"enable
+      obstacle avoidance","kind":"bool","min":0.0,"max":1.0,"step":0.0,"unit":"","safety":false,"description":"Steer
+      around something in the forward cone when there is room, instead of only hard-stopping
+      for it. The hard stop still wins when it is too close."},{"name":"avoidance_trigger_distance","group":"Avoidance","label":"avoidance
+      trigger distance","kind":"float","min":0.3,"max":4.0,"step":0.05,"unit":"m","safety":false,"description":"How
+      far ahead a map-absent object starts a steer-around. Applies only once a map
+      is available to subtract the walls."},{"name":"avoidance_min_gap_distance","group":"Avoidance","label":"avoidance
+      min gap distance","kind":"float","min":0.3,"max":3.0,"step":0.05,"unit":"m","safety":false,"description":"How
+      deep an opening must be before it counts as somewhere to steer into."},{"name":"avoidance_speed","group":"Avoidance","label":"avoidance
+      speed","kind":"float","min":0.2,"max":3.0,"step":0.05,"unit":"m/s","safety":false,"description":"Speed
+      held while actively steering around something."},{"name":"enable_opponent_overtake","group":"Overtaking","label":"enable
+      opponent overtake","kind":"bool","min":0.0,"max":1.0,"step":0.0,"unit":"","safety":false,"description":"Track
+      a detected opponent and attempt a pass. Turning this off leaves the car following
+      the racing line and braking for traffic."},{"name":"overtake_trigger_gap","group":"Overtaking","label":"overtake
+      trigger gap","kind":"float","min":0.5,"max":10.0,"step":0.1,"unit":"m","safety":false,"description":"Track
+      distance to the opponent at which a pass starts being considered."},{"name":"overtake_closing_margin","group":"Overtaking","label":"overtake
+      closing margin","kind":"float","min":0.0,"max":2.0,"step":0.05,"unit":"m/s","safety":false,"description":"Minimum
+      closing rate before a pass is worth attempting. Raise it if the car keeps committing
+      to passes it cannot finish."},{"name":"overtake_lateral_offset","group":"Overtaking","label":"overtake
+      lateral offset","kind":"float","min":0.0,"max":1.0,"step":0.05,"unit":"m","safety":false,"description":"Sideways
+      nudge applied to the steering target while passing -- how wide the pass runs."},{"name":"overtake_clear_margin","group":"Overtaking","label":"overtake
+      clear margin","kind":"float","min":0.0,"max":5.0,"step":0.1,"unit":"m","safety":false,"description":"Track
+      distance to get past the opponent before rejoining the racing line."},{"name":"overtake_min_side_clearance","group":"Overtaking","label":"overtake
+      min side clearance","kind":"float","min":0.0,"max":2.0,"step":0.05,"unit":"m","safety":false,"description":"Room
+      the passing side must have before the car will commit. Higher = choosier about
+      passing places."},{"name":"emergency_stop_distance","group":"Safety margins","label":"emergency
+      stop distance","kind":"float","min":0.15,"max":2.0,"step":0.05,"unit":"m","safety":true,"description":"Brake
+      reserve for steering around something and for a committed pass. It no longer
+      sets the hard stop: that is the swept-path check and the cone backstop, set
+      in the YAML, not here."},{"name":"emergency_stop_clearance","group":"Safety
+      margins","label":"emergency stop clearance","kind":"float","min":0.0,"max":0.4,"step":0.01,"unit":"m","safety":true,"description":"All-round
+      contact floor measured from the car body rather than the sensor -- this is the
+      one that sees a wall the car is alongside."},{"name":"safety_fov_deg","group":"Safety
+      margins","label":"safety fov deg","kind":"float","min":20.0,"max":180.0,"step":5.0,"unit":"deg","safety":true,"description":"Width
+      of the forward cone the hard-stop net watches. Narrower ignores more of what
+      is beside the car."},{"name":"max_cross_track_error","group":"Safety margins","label":"max
+      cross track error","kind":"float","min":0.3,"max":5.0,"step":0.1,"unit":"m","safety":true,"description":"Stop
+      if the car is further than this from every waypoint -- the lost/kidnapped watchdog.
+      Raising it buys tolerance for a rough line and costs detection of a genuinely
+      lost car."}]}'
+    localization_source_topic: /auto_map_race/localization_source
+    lookahead_speed_gain: 0.15
+    lqr:
+      delay_compensation: 0.08
+      q_heading: 1.0
+      q_lateral: 1.0
+      r_steer: 1.0
+      steering_time_constant: 0.05
+      v_grid_max: 6.0
+    map_beam_step: 4
+    map_subtraction_margin: 0.4
+    map_topic: /map
+    max_acceleration: 6.0
+    max_braking_decel: 8.0
+    max_cross_track_error: 1.0
+    max_lateral_accel: 3.1
+    max_lookahead: 1.5
+    max_range: 10.0
+    max_speed: 5.0
+    max_steering_angle: 0.42
+    max_steering_rate: 1.0
+    min_lookahead: 0.6
+    min_speed: 0.5
+    mpc:
+      deadline_sec: 0.008
+      delay_compensation: 0.05
+      dt: 0.05
+      horizon_steps: 20
+      max_consecutive_misses: 3
+      max_iter: 4000
+      q_heading: 1.0
+      q_lateral: 4.0
+      r_rate: 0.01
+      r_steer: 1.0
+    nearest_search_window: 40
+    odom_timeout_sec: 0.5
+    odom_topic: /odom
+    off_racing_line_recovery_max_error: 2.0
+    off_racing_line_recovery_speed: 0.3
+    off_racing_line_recovery_timeout_sec: 5.0
+    opponent_cluster_gap: 0.3
+    opponent_confirm_count: 6
+    opponent_confirm_min_span_sec: 0.15
+    opponent_confirm_window_sec: 0.3
+    opponent_detection_mode: map
+    opponent_detection_settle_sec: 0.0
+    opponent_engagement_range: 5.0
+    opponent_lost_timeout_sec: 1.0
+    opponent_max_jump_m: 0.5
+    opponent_max_reverse_speed: 1.5
+    opponent_max_speed: 8.0
+    opponent_max_width: 0.7
+    opponent_min_wall_distance: 0.3
+    opponent_min_width: 0.15
+    opponent_open_side_margin: 0.5
+    opponent_velocity_smoothing: 0.3
+    overtake_clear_margin: 1.0
+    overtake_closing_margin: 0.3
+    overtake_completion_hold_sec: 0.5
+    overtake_completion_hysteresis: 0.1
+    overtake_lateral_offset: 0.35
+    overtake_lookahead_distance: 4.0
+    overtake_max_blind_sec: 3.0
+    overtake_max_duration_sec: 8.0
+    overtake_measurement_uncertainty: 0.35
+    overtake_min_lead_gain: 0.1
+    overtake_min_side_clearance: 0.7
+    overtake_retry_sec: 3.0
+    overtake_stall_sec: 1.5
+    overtake_trigger_gap: 3.0
+    pass_clear_margin: 0.5
+    pass_speed_uncertainty: 0.5
+    pass_standoff: 2.5
+    pending_waypoints_file: ''
+    pose_frame: laser
+    pose_frozen_min_speed: 0.3
+    pose_frozen_min_travel: 0.05
+    pose_frozen_timeout_sec: 0.5
+    pose_timeout_sec: 0.5
+    pose_topic: /pf/viz/inferred_pose
+    publish_intent: true
+    racing_line_max_points: 2000
+    racing_line_topic: /racing_line
+    safety_fov_deg: 60.0
+    scan_timeout_sec: 0.5
+    scan_topic: /scan
+    speed_lead_time: 0.25
+    stanley:
+      delay_compensation: 0.1
+      gain: 5.0
+      softening: 1.0
+      steering_time_constant: 0.05
+    start_type_description_service: true
+    steering_law: delay_lqr
+    tracking_curvature_smoothing: 2
+    use_sim_time: false
+    wait_for_waypoints: false
+    waypoints_file: /home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-151026-rebuilt/raceline_profiled.csv
+    wheelbase: 0.36

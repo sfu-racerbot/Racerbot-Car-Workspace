@@ -1,0 +1,9 @@
+{"t": 1794279845.1299129, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1794279845.169103, "category": "first_message", "message": "first drive: speed=0.00m/s", "topic": "drive"}
+{"t": 1794279845.4706144, "category": "first_message", "message": "first map: 420x329 @ 0.050m/cell, 4467 occupied cells", "topic": "map"}
+{"t": 1794279846.0789962, "category": "first_message", "message": "first odom: linear.x=+0.00m/s", "topic": "odom"}
+{"t": 1794279846.133221, "category": "status", "message": "scan=NEVER | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": 4467}
+{"t": 1794279846.2025776, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1794279846.7589183, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1794279867.1304169, "category": "status", "message": "scan=ok | map=420x329@0.050 100%known 4467occ | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": 4467}
+{"t": 1794279882.6217136, "category": "closing", "message": "worst pose lag this run: 0.00s"}
