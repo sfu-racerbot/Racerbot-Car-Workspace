@@ -201,6 +201,7 @@ def replay_window(motion, drive, index, ids, horizon, calibration, seed=1, facto
     if calibration.steering_linkage is not None:
         steering = np.interp(steering, *np.array(calibration.steering_linkage).T)
     steering = np.clip(steering, calibration.steering_max_right, calibration.steering_max_left)
+    steering = calibration.physical_steering(float(steering))
     state = initial_state(motion, index, steering, calibration.lr)
     plant = factory(calibration, seed)
     try:

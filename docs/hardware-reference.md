@@ -58,7 +58,7 @@ Length remains **0.58 m**, with no bumper-to-bumper measurement. If the publishe
 
 Car 2 measured **0.325 m** hub centre to hub centre, **0.265 m** from the rear hub centre to the LiDAR centre, **0.27 m** outer tyre to outer tyre and **0.495 m** bumper to bumper. The 0.325 m wheelbase matches Traxxas's 0.324 m, so the 0.36 m figure above was not a hub-to-hub distance.
 
-**The configs keep 0.36 m on purpose.** Each car's steering map and full-lock angles were fitted from driven circles using `angle = atan(0.36 / radius)`. 0.36 m is therefore the effective wheelbase that turns each command into the circle the car really drives. Changing it alone would make every controller turn less than it plans. Change it only together with a new circle calibration. The simulator check is in [sim-calibration.md](sim-calibration.md#car-2s-weight-and-body-measured-not-adopted-2026-11-23).
+**The configs keep 0.36 m on purpose.** Each car's steering map and full-lock angles were fitted from driven circles using `angle = atan(0.36 / radius)`. 0.36 m is therefore the effective wheelbase that turns each command into the circle the car really drives. Changing it alone would make every controller turn less than it plans. Change it only together with a new circle calibration, followed by a floor test. The simulator models the real 0.325 m axles and converts each command to the wheel angle that drives the same circle; see [sim-calibration.md](sim-calibration.md#car-2s-weight-and-body-2026-11-23).
 
 The LiDAR measurement agrees with the 0.26 m offset to within 5 mm. The safety envelope (`car_width` 0.31, `car_length` 0.58) stays: it is wider and longer than the measured body, which only adds clearance. Car 2 weighs 3.955 kg, split 42% front and 58% rear.
 

@@ -38,9 +38,11 @@ def test_incompatible_cache_schedules_a_new_baseline(car_profiles, tmp_path, cha
     cached, jobs, new_key = _plan(path, car)
     if change == 'car':
         # Cloned hardware still uses rb2's measured scales (SLAM_SPEED_FIT.md).
-        expected = replace(law_sweep.calibration_for_car('rb1'),
-                           odom_speed_scale=1.0261486728316354,
-                           speed_command_scale=1.0108904807240708)
+        # ...and rb2's measured body and mass (calibration.RB2_MEASURED, 2026-11-23).
+        from sim_fidelity.calibration import rb2_measured
+        rb1 = law_sweep.calibration_for_car('rb1')
+        expected = replace(rb1, odom_speed_scale=1.0261486728316354,
+                           speed_command_scale=1.0108904807240708, **rb2_measured(rb1))
         assert law_sweep.calibration_for_car('rb2') == expected
         values = {'plant': asdict(expected),
                   'controller': law_sweep.effective_config(

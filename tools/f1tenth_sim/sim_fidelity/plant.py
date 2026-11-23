@@ -256,13 +256,13 @@ class FidelityPlant:
         self.degrade_agents = degrade_agents
 
         self.grip = [
-            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase,
+            ProgressiveGrip(calibration.grip_curve, calibration.physical_wheelbase,
                             falling=calibration.grip_curve_falls,
                             longitudinal_coupling=calibration.longitudinal_grip_coupling)
             if calibration.grip_curve is not None
             else GripEnvelope(
                 friction_accel_limit=calibration.friction_accel_limit,
-                wheelbase=calibration.wheelbase,
+                wheelbase=calibration.physical_wheelbase,
                 longitudinal_coupling=calibration.longitudinal_grip_coupling,
             )
             for _ in range(num_agents)
@@ -277,8 +277,8 @@ class FidelityPlant:
             SteeringServo(
                 gain=calibration.steering_servo_gain,
                 rate_max=calibration.steering_rate_max,
-                angle_min=calibration.steering_max_right,
-                angle_max=calibration.steering_max_left,
+                angle_min=calibration.physical_steering(calibration.steering_max_right),
+                angle_max=calibration.physical_steering(calibration.steering_max_left),
             )
             for _ in range(num_agents)
         ]
@@ -422,6 +422,8 @@ class FidelityPlant:
 
             if self._linkage is not None:
                 steering = float(np.interp(steering, *self._linkage))
+            # From here on the angle is the real wheel angle on the real axles.
+            steering = self.calibration.physical_steering(steering)
 
             if self.profile.speed_loop_model:
                 speed = self._measured_speed_loop(speed, measured_speed)

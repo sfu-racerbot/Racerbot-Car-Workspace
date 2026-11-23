@@ -102,7 +102,16 @@ class CarCalibration:
     """Every physical constant the simulator needs for this car."""
 
     # --- Geometry -------------------------------------------------------
+    # The wheelbase the car's steering commands refer to: every controller
+    # config uses it, and each car's servo map and full-lock angles were
+    # fitted from driven circles as atan(wheelbase / radius). A command of
+    # angle a therefore drives a circle of radius wheelbase / tan(a).
     wheelbase: float = 0.36
+    # The real distance between the axles, used by the physics (lf, lr, the
+    # tyres and the grip limit). None means the same as wheelbase. When the
+    # two differ, the plant turns each commanded angle into the real wheel
+    # angle that drives the same circle (physical_steering).
+    physical_wheelbase: float | None = None
     # The padded safety envelope, used for clearance to walls.
     width: float = 0.31
     length: float = 0.58
@@ -218,6 +227,12 @@ class CarCalibration:
     def __post_init__(self, car_id):
         # Identity is provenance metadata, not a physical calibration/hash field.
         object.__setattr__(self, 'car_id', car_id)
+        if self.physical_wheelbase is None:
+            object.__setattr__(self, 'physical_wheelbase', self.wheelbase)
+        for name in ('wheelbase', 'physical_wheelbase'):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError(f'{name} must be finite and positive, got {value!r}')
         # Preserve CarCalibration(**overrides) for library users, resolving
         # omitted car fields at construction rather than module import. Only
         # these: the floor models' None means "off" (FLOORS), and resolving it
@@ -242,12 +257,22 @@ class CarCalibration:
     @property
     def lf(self) -> float:
         """Front axle to centre of gravity, metres."""
-        return self.wheelbase * self.cog_front_fraction
+        return self.physical_wheelbase * self.cog_front_fraction
 
     @property
     def lr(self) -> float:
         """Centre of gravity to rear axle, metres."""
-        return self.wheelbase * (1.0 - self.cog_front_fraction)
+        return self.physical_wheelbase * (1.0 - self.cog_front_fraction)
+
+    def physical_steering(self, angle: float) -> float:
+        """The real wheel angle for a commanded ``angle``: the one that drives the same circle.
+
+        A command means a circle of radius wheelbase / tan(angle) (see ``wheelbase``), so on
+        axles physical_wheelbase apart the wheels turn to atan(tan(angle) * physical / wheelbase).
+        """
+        if self.physical_wheelbase == self.wheelbase:
+            return float(angle)
+        return math.atan(math.tan(angle) * self.physical_wheelbase / self.wheelbase)
 
     @property
     def friction_accel_limit(self) -> float:
@@ -274,8 +299,8 @@ class CarCalibration:
             h=self.cog_height,
             m=self.mass,
             I=self.yaw_inertia,
-            s_min=self.steering_max_right,
-            s_max=self.steering_max_left,
+            s_min=self.physical_steering(self.steering_max_right),
+            s_max=self.physical_steering(self.steering_max_left),
             sv_min=-self.steering_rate_max,
             sv_max=self.steering_rate_max,
             a_max=self.friction_accel_limit,
@@ -292,7 +317,7 @@ class CarCalibration:
             # the whole arrangement with something justified.
             width=self.width,
             length=self.length,
-            collision_body_center_x=self.wheelbase / 2.0,
+            collision_body_center_x=self.physical_wheelbase / 2.0,
         )
 
 
@@ -303,6 +328,11 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
         "tape-measured on this car 2026-08-24: 0.36 m front axle to rear "
         "axle, now in vesc.yaml. Traxxas publishes 0.324 for a stock "
         "74276-4; this car is not one",
+    ),
+    "physical_wheelbase": (
+        Provenance.DERIVED,
+        "same as wheelbase unless the car's profile has a measured axle distance "
+        "(car 2: see RB2_MEASURED)",
     ),
     "width": (
         Provenance.DERIVED,
@@ -556,8 +586,33 @@ def calibration_for_car(car_id: str | None = None) -> CarCalibration:
     if car_id == 'rb2':
         speed = FLOORS['slam_speed_2026_11_rb2'].overrides
         calibration = replace(calibration, **{key: speed[key] for key in
-                              ('odom_speed_scale', 'speed_command_scale')})
+                              ('odom_speed_scale', 'speed_command_scale')},
+                              **rb2_measured(calibration))
     return calibration
+
+
+# Car 2, weighed and tape-measured on 2026-11-23 (one scale, one axle at a time; tape on the floor,
+# wheels straight). docs/sim-calibration.md "Car 2's weight and body (2026-11-23)".
+RB2_FRONT_AXLE_KG = 1.673
+RB2_REAR_AXLE_KG = 2.283
+RB2_MEASURED = dict(
+    physical_wheelbase=(0.325, "hub centre to hub centre; Traxxas publishes 0.324. Steering commands still "
+                               "refer to wheelbase 0.36, which the 2026-10-16 circles were fitted with"),
+    body_width=(0.27, "outer tyre edge to outer tyre edge"),
+    body_length=(0.495, "front bumper to rear bumper"),
+    lidar_offset_x=(0.265, "rear hub centre to LiDAR centre"),
+    mass=(RB2_FRONT_AXLE_KG + RB2_REAR_AXLE_KG, "front axle 1.673 kg + rear axle 2.283 kg"),
+    # The rear axle carries the share of the weight that sits ahead of it: lf / L = rear / total.
+    cog_front_fraction=(RB2_REAR_AXLE_KG / (RB2_FRONT_AXLE_KG + RB2_REAR_AXLE_KG),
+                        "rear axle weight / total weight (42% front, 58% rear)"),
+)
+
+
+def rb2_measured(calibration: CarCalibration) -> dict:
+    """Car 2's measured values; yaw inertia (never measured) scaled with the measured mass."""
+    values = {name: value for name, (value, _source) in RB2_MEASURED.items()}
+    values['yaw_inertia'] = calibration.yaw_inertia * values['mass'] / calibration.mass
+    return values
 
 
 def __getattr__(name):
@@ -1005,6 +1060,11 @@ def describe(calibration: CarCalibration | None = None) -> list[tuple]:
             loop, loop_source, named = car_speed_loop(calibration.car_id)
             if field.name in named and getattr(calibration, field.name) == loop[field.name]:
                 provenance, source = Provenance.MEASURED, loop_source
+        if calibration.car_id == 'rb2' and field.name in RB2_MEASURED \
+                and getattr(calibration, field.name) == RB2_MEASURED[field.name][0]:
+            provenance, source = Provenance.MEASURED, 'rb2, 2026-11-23: ' + RB2_MEASURED[field.name][1]
+        if calibration.car_id == 'rb2' and field.name == 'yaw_inertia':
+            provenance, source = Provenance.ESTIMATED, 'gym default scaled by rb2 measured mass / 3.74; never measured'
         if calibration.car_id == 'rb2' and field.name in ('odom_speed_scale', 'speed_command_scale'):
             floor = FLOORS['slam_speed_2026_11_rb2']
             if getattr(calibration, field.name) == floor.overrides[field.name]:

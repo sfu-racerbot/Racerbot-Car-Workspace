@@ -4,9 +4,9 @@
 loc.scan_points adds LASER_X=0.26 before matching, so loc's pose is the
 rear-axle base_link, NOT the laser (docs/hardware-reference.md, Physical
 dimensions). CG lateral velocity is v_rear + l_r * yaw_rate. Geometry comes
-from sim_fidelity.calibration.calibration_for_car: wheelbase 0.36 m and
-l_r=0.18 m on both cars. Its cog_front_fraction=0.5 is an UNMEASURED midpoint
-assumption, not a per-car CG measurement; see CarCalibration's mass properties.
+from sim_fidelity.calibration.calibration_for_car: l_r=0.18 m on car 1, whose
+cog_front_fraction=0.5 is an UNMEASURED midpoint assumption, and about 0.137 m on
+car 2, from its axle weights and 0.325 m axles (measured 2026-11-23).
 
 Trust requires h10 >= 0.75. Position/yaw steps above 0.30 m/rad reject both
 ends plus 0.20 s; gaps above 0.125 s split segments. Each segment is linearly
@@ -251,7 +251,7 @@ def main(argv=None) -> int:
             np.savez_compressed(args.samples / f'{args.car}_{path.stem}.npz', **motion)
         print(f'{args.car} {path.stem}: {summary["trusted_samples"]}/{summary["samples"]} trusted', flush=True)
     report = dict(car=args.car, geometry=dict(wheelbase_m=cal.wheelbase, lr_m=cal.lr,
-                  cg_source='CarCalibration.cog_front_fraction: unmeasured midpoint assumption'),
+                  cg_source='CarCalibration.lr (cog_front_fraction: measured on car 2, midpoint assumption on car 1)'),
                   method=__doc__, runs=results,
                   pooled_sample_weighted=summarize(pool_motions(motions), cal.wheelbase))
     args.json.expanduser().write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
