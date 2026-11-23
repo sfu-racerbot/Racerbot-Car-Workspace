@@ -351,6 +351,60 @@ def footprint_clearance(field_at, xy, front=0.43, rear=0.15, half_width=0.155):
     return field_at(px, py).min(axis=1)
 
 
+def _batch_frames(xy):
+    """path_frames for every row of xy (B, n, 2): (tangents, left normals), each (B, n, 2)."""
+    d = np.roll(xy, -1, axis=1) - np.roll(xy, 1, axis=1)
+    t = d / np.maximum(np.hypot(d[..., 0], d[..., 1]), 1e-12)[..., None]
+    return t, np.stack([-t[..., 1], t[..., 0]], axis=-1)
+
+
+def _batch_footprint_clearance(field_at, xy, front=0.43, rear=0.15, half_width=0.155):
+    """footprint_clearance for every row of xy (B, n, 2): (B, n)."""
+    t, nrm = _batch_frames(xy)
+    along = np.linspace(-rear, front, 7)
+    across = np.linspace(-half_width, half_width, 5)
+    pa, pc = np.meshgrid(along, across)
+    outline = (np.abs(pc) == half_width) | (pa == along[0]) | (pa == along[-1])
+    pa, pc = pa[outline], pc[outline]
+    px = xy[..., 0, None] + pa * t[..., 0, None] + pc * nrm[..., 0, None]
+    py = xy[..., 1, None] + pa * t[..., 1, None] + pc * nrm[..., 1, None]
+    return field_at(px, py).min(axis=-1)
+
+
+def _batch_cone_clearance(field_at, xy, laser_x=0.26, half_fov=math.radians(30.0), beams=13, max_range=1.5,
+                          step_floor=0.01):
+    """cone_clearance for every row of xy (B, n, 2): (B, n)."""
+    t, _ = _batch_frames(xy)
+    heading = np.arctan2(t[..., 1], t[..., 0])
+    ox = (xy[..., 0] + laser_x * np.cos(heading))[..., None]
+    oy = (xy[..., 1] + laser_x * np.sin(heading))[..., None]
+    angles = heading[..., None] + np.linspace(-half_fov, half_fov, beams)
+    dx, dy = np.cos(angles), np.sin(angles)
+    r = np.zeros_like(angles)
+    for _ in range(64):
+        live = r < max_range
+        if not live.any():
+            break
+        d = field_at(ox + r * dx, oy + r * dy)
+        r = np.where(live & (d >= step_floor), r + np.maximum(d, step_floor), r)
+        if np.all((d < step_floor) | ~live):
+            break
+    return np.minimum(r, max_range).min(axis=-1)
+
+
+def _batch_body_floor(xy, kappa, body_floor, body_floor_tight, curvature_limit, window_m=0.6):
+    """body_floor_at for every row of xy (B, n, 2), given each row's |curvature|: (B, n)."""
+    if body_floor_tight is None or body_floor_tight == body_floor:
+        return np.full(kappa.shape, float(body_floor))
+    weight = np.clip((np.abs(kappa) / curvature_limit - 0.5) / 0.4, 0.0, 1.0)
+    d = np.roll(xy, -1, axis=1) - xy
+    spacing = np.median(np.hypot(d[..., 0], d[..., 1]))
+    half = max(0, int(round(window_m / max(float(spacing), 1e-6))))
+    if half:
+        weight = np.max([np.roll(weight, j, axis=1) for j in range(-half, half + 1)], axis=0)
+    return body_floor + (body_floor_tight - body_floor) * weight
+
+
 @dataclass(frozen=True)
 class MinTimeLine:
     ok: bool
@@ -367,7 +421,8 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
                       half_width=0.155, wall_margin=0.10, emergency_stop_distance=0.35, cone_margin=0.10,
                       body_floor=0.08, control_spacing=1.0, smoothing=0.5, max_iter=300, repairs=8,
                       body_floor_tight=None,
-                      laser_x=0.26, speed_floor_gain=0.0, speed_floor_from=3.0, batched_gradient=True):
+                      laser_x=0.26, speed_floor_gain=0.0, speed_floor_from=3.0, batched_gradient=True,
+                      clearance_field=None, clearance_pad=0.03, clearance_weight=1000.0):
     """The fastest closed line inside the corridor that keeps every safety margin.
 
     center: (n, 2) closed, smooth reference line (the minimum-curvature line, normally); width_left/right:
@@ -379,6 +434,13 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
     batched_gradient: evaluate L-BFGS-B's finite-difference gradient in one batched pass (the same steps
     scipy takes, forward_difference_gradient) rather than letting scipy call the cost once per control
     point. False is the original path, kept to compare against.
+    clearance_field: optional (x, y) -> wall distance that varies smoothly with position (a bilinear sample of
+    the same distance field as `field_at`, normally). Given, every candidate line also pays
+    clearance_weight * shortfall^2 at each station where its body or forward cone is under its floor plus
+    `clearance_pad`, so the optimizer trades the steering limit against the walls in one solve. Without it
+    clearance is enforced only by the repairs below, which pull the line towards the corridor's middle; in a
+    hairpin narrower than twice the turning radius that tightens the corner past the steering limit, and the
+    two limits chase each other until the repairs run out (rb2, 2026-11-16 oval: no line).
     """
     from scipy.interpolate import CubicSpline
     from scipy.optimize import minimize
@@ -423,13 +485,32 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
 
     limit = physics.curvature_limit
 
+    need_cone = emergency_stop_distance + cone_margin
+
+    def clearance_cost(xy, kappa):
+        """(B,) penalty for rows of xy (B, n, 2) closer to the walls than their floors plus the pad."""
+        if clearance_field is None:
+            return np.zeros(len(xy))
+        floors = _batch_body_floor(xy, kappa, body_floor, body_floor_tight, limit)
+        if speed_floor_gain > 0.0:
+            floors = floors + np.array([speed_floor_extra(row, physics, speed_floor_gain, speed_floor_from)
+                                        for row in xy])
+        body = _batch_footprint_clearance(clearance_field, xy, half_width=half_width)
+        # Only ranges under the cone's floor cost anything, so no ray needs marching beyond it.
+        cone = _batch_cone_clearance(clearance_field, xy, laser_x=laser_x,
+                                     max_range=need_cone + clearance_pad + 0.05)
+        short = (np.maximum(floors + clearance_pad - body, 0.0) ** 2
+                 + np.maximum(need_cone + clearance_pad - cone, 0.0) ** 2)
+        return clearance_weight * np.sum(short, axis=1)
+
     def cost(c):
         xy = line(stations(c))
+        kappa = signed_curvature(xy)
         second = np.roll(c, -1) - 2.0 * c + np.roll(c, 1)
-        excess = np.maximum(np.abs(signed_curvature(xy)) - limit, 0.0)
+        excess = np.maximum(np.abs(kappa) - limit, 0.0)
         # The steering limit is a wall, not a trade: no speed makes an over-tight corner drivable.
         return (lap_time(xy, physics) + smoothing * float(np.sum(second ** 2))
-                + 1000.0 * float(np.sum(excess ** 2)))
+                + 1000.0 * float(np.sum(excess ** 2)) + float(clearance_cost(xy[None], kappa[None])[0]))
 
     # The spline is linear in its control values, so stations(c) == basis @ c for every c.
     basis = CubicSpline(knots, np.vstack([np.eye(m), np.eye(m)[:1]]), bc_type='periodic')(s[:-1])
@@ -437,12 +518,12 @@ def optimize_min_time(center, width_left, width_right, physics: CarPhysics, fiel
     def batch_cost(controls):
         xy = center[None] + (controls @ basis.T)[..., None] * normals[None]
         second = np.roll(controls, -1, axis=1) - 2.0 * controls + np.roll(controls, 1, axis=1)
-        excess = np.maximum(np.abs(_batch_curvature(xy)) - limit, 0.0)
+        kappa = _batch_curvature(xy)
+        excess = np.maximum(np.abs(kappa) - limit, 0.0)
         return (_batch_lap_time(xy, physics) + smoothing * np.sum(second ** 2, axis=1)
-                + 1000.0 * np.sum(excess ** 2, axis=1))
+                + 1000.0 * np.sum(excess ** 2, axis=1) + clearance_cost(xy, kappa))
 
     start_lap = lap_time(line(stations(control)), physics)
-    need_cone = emergency_stop_distance + cone_margin
     for _ in range(repairs + 1):
         lo, hi = control_bounds()
         control = np.clip(control, lo, hi)

@@ -172,7 +172,7 @@ def _min_time_from(start_offsets, mc, field_at, cfg):
             start=start_offsets, half_width=cfg.half_width, wall_margin=cfg.wall_margin,
             emergency_stop_distance=cfg.emergency_stop_distance,
             cone_margin=cfg.cone_margin + 0.03 * run, body_floor=cfg.body_floor + 0.01 * run,
-            body_floor_tight=tight + 0.01 * run,
+            body_floor_tight=tight + 0.01 * run, clearance_field=mc.get('clearance_field'),
             laser_x=cfg.laser_x, speed_floor_gain=cfg.speed_floor_gain, speed_floor_from=cfg.speed_floor_from)
         candidate = _candidate('min_time', resample_closed_path(result.xy, cfg.spacing), field_at, cfg)
         if candidate.ok:
@@ -212,7 +212,8 @@ def _start_offsets(name, mc, prepared, field_at, cfg):
         center, mc['remaining_left'], mc['remaining_right'], loose, field_at,
         half_width=cfg.half_width, wall_margin=cfg.wall_margin,
         emergency_stop_distance=cfg.emergency_stop_distance, cone_margin=cfg.cone_margin,
-        body_floor=cfg.body_floor, body_floor_tight=cfg.body_floor_tight, laser_x=cfg.laser_x)
+        body_floor=cfg.body_floor, body_floor_tight=cfg.body_floor_tight, laser_x=cfg.laser_x,
+        clearance_field=mc.get('clearance_field'))
     return offsets_of(center, short.xy)
 
 
@@ -269,11 +270,31 @@ def _best_min_time(mc, prepared, field_at, cfg):
                      f'{best.reason}; start {best_name} of: {", ".join(tried)}')
 
 
+def smooth_clearance(grid: OccupancyMap, field):
+    """(x, y) -> wall distance, bilinear between cell centres of `field` (0 off the map).
+
+    The checks (check_line) read the nearest cell, which is flat across each cell, so an optimizer's
+    finite-difference step sees no slope there. This is the same field made continuous for the optimizer's
+    cost only; every verdict still comes from the nearest-cell field.
+    """
+    from scipy.ndimage import map_coordinates
+
+    def at(x, y):
+        x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+        col = (x - grid.origin_x) / grid.resolution - 0.5
+        row = (y - grid.origin_y) / grid.resolution - 0.5
+        out = map_coordinates(field, [row.ravel(), col.ravel()], order=1, mode='constant', cval=0.0)
+        return out.reshape(np.broadcast(x, y).shape)
+    return at
+
+
 def build_race_line(grid: OccupancyMap, seed_xy, cfg: RaceLineConfig) -> RaceLine:
     field = grid.clearance_field()
 
     def field_at(x, y):
         return grid.clearance_at(x, y, field)
+
+    smooth_at = smooth_clearance(grid, field)
 
     prepared = None
     candidates = []
@@ -300,6 +321,9 @@ def build_race_line(grid: OccupancyMap, seed_xy, cfg: RaceLineConfig) -> RaceLin
         mc = optimize_minimum_curvature(
             center, left, right, vehicle_half_width=cfg.half_width,
             safety_margin=cfg.wall_margin, spacing=cfg.optimize_spacing)
+        # The minimum-time solves read the corridor from here, and with it the smooth wall distance
+        # their cost uses to keep the body and forward cone off the walls (optimize_min_time).
+        mc = dict(mc, clearance_field=smooth_at)
         candidates.append(_candidate('min_curvature', resample_closed_path(mc['line'], cfg.spacing),
                                      field_at, cfg))
     except Exception as exc:
