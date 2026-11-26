@@ -1,0 +1,299 @@
+# classification_rules.yaml -- what makes a recording usable, and for what.
+#
+# Read by race_diagnostics.dataset_classifier, which grades every recorded run
+# for five uses (the `applications` below) and writes <run>/qualification.yaml.
+# Every threshold it applies is in this file, none in the code. After changing
+# one, regrade every recording with:
+#
+#   python3 tools/run_analysis/run_triage.py --qualify --all
+#
+# How a grade is reached (docs/run-diagnostics.md#dataset-qualification):
+#   * Each threshold has a `usable` and a `conditional` level. Meeting `usable`
+#     gives usable, meeting only `conditional` gives conditional, neither gives
+#     unusable. A level left out never applies: no `conditional` level means
+#     the check can lower a grade to conditional but never to unusable.
+#   * A use is graded by its worst check, and every check that lowered it is
+#     listed as a reason.
+#
+# The file is checked when it is loaded: an unknown key, a signal no use
+# refers to, or a usable level weaker than its conditional level is an error,
+# not a silent default.
+
+schema: 1
+
+# ---------------------------------------------------------------------------
+# How the bag is measured. Changing these changes the numbers in each
+# qualification.yaml, not only the grades.
+measurement:
+  # Wheel speed (m/s) above which the car counts as moving. 0.3 m/s is where
+  # vehicle_state_node starts trusting steering measured from the gyro
+  # (src/imu_bridge/README.md), so "moving" means the same thing in both.
+  moving_speed_mps: 0.3
+  # /steering/measured is NaN below 0.3 m/s by design; its finite fraction is
+  # only counted above this speed.
+  measured_steering_min_speed_mps: 0.5
+  # A steering or speed reversal counts only if it swings at least this far
+  # from the previous turning point (hysteresis), so sensor noise is not a swing.
+  steering_swing_rad: 0.1
+  speed_swing_mps: 1.0
+  # Lateral acceleration (speed x yaw rate) above which the car is cornering.
+  cornering_accel_mps2: 1.0
+  # A header stamp further than this from the time the bag received the
+  # message is a stamp problem (also: a zero stamp, or one that goes backwards).
+  stamp_tolerance_s: 0.5
+  # A topic silent for longer than this is not covering that stretch.
+  coverage_gap_s: 1.0
+  # Distance and time are not integrated across a wheel-speed gap longer than this.
+  max_integration_gap_s: 0.5
+  # A moving moment counts as autonomous when LB is held and a driving
+  # command arrived on the drive_command topic within this many seconds.
+  command_match_s: 0.5
+  # Carried between LB holds (tools/run_analysis/run_triage.py): the wheels
+  # stayed below still_mps while the median scan range changed by over moved_m.
+  carried_still_mps: 0.02
+  carried_moved_m: 0.15
+  # LB holds shorter than this are ignored, as tools/run_analysis/runlog.py does.
+  lb_min_hold_s: 0.5
+  # What a valid message is. A scan needs this fraction of its beams inside
+  # [range_min, range_max]; the rest are bounds on physically possible values.
+  valid:
+    scan_min_beam_fraction: 0.25
+    max_speed_mps: 15.0
+    max_steering_rad: 0.6
+    max_accel_mps2: 156.9    # 16 g, the VESC IMU's largest range
+    max_gyro_radps: 34.9     # 2000 deg/s, likewise
+
+# ---------------------------------------------------------------------------
+# Units and axes of topics whose messages do not say. Anything not listed is
+# SI (m/s^2, rad/s) in car axes (x forward, y left, z up).
+topics:
+  /sensors/imu/raw: {gyro_unit: deg/s, accel_unit: g, axes: board}   # VESC, as the driver publishes it
+  /imu/bno/raw: {axes: sensor}                                        # BNO085 in its own axes
+  /drive_intent: {format: json, version: 1}                           # docs/drive-intent.md
+
+# ---------------------------------------------------------------------------
+# Signals: a role a recording can fill, the topics that can fill it (best
+# first), and how good each must be. The first listed topic with at least two
+# valid messages is used; the others are listed in qualification.yaml as
+# alternatives. A transform signal looks for one parent -> child transform.
+#
+# Checks (each optional):
+#   min_rate_hz                 1 / median time between messages
+#   max_gap_s                   longest silence between two messages
+#   min_valid_fraction          share of messages that pass `measurement.valid`
+#   min_coverage                share of the recording with no silence over coverage_gap_s
+#   max_stamp_problem_fraction  share of messages with a bad header stamp
+#   min_count                   messages (for latched topics, where rate means nothing)
+signals:
+  scan:
+    topics: [/scan]
+    kind: scan
+    checks:
+      min_rate_hz: {usable: 30, conditional: 10}
+      max_gap_s: {usable: 0.5, conditional: 2.0}
+      min_valid_fraction: {usable: 0.95, conditional: 0.5}
+      min_coverage: {usable: 0.95, conditional: 0.7}
+      max_stamp_problem_fraction: {usable: 0.01, conditional: 0.1}
+  wheel_odom:
+    topics: [/odom]
+    kind: odometry
+    checks:
+      min_rate_hz: {usable: 30, conditional: 10}
+      max_gap_s: {usable: 0.5, conditional: 2.0}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+      min_coverage: {usable: 0.95, conditional: 0.7}
+      max_stamp_problem_fraction: {usable: 0.01, conditional: 0.1}
+  odom_tf:
+    topics: [/tf]
+    kind: transform
+    transform: [odom, base_link]
+    checks:
+      min_rate_hz: {usable: 20, conditional: 5}
+      max_gap_s: {usable: 0.5, conditional: 2.0}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+      min_coverage: {usable: 0.95, conditional: 0.7}
+      max_stamp_problem_fraction: {usable: 0.01, conditional: 0.1}
+  laser_mount:
+    topics: [/tf_static]
+    kind: transform
+    transform: [base_link, laser]
+    latched: true
+    checks:
+      min_count: {usable: 1}
+      min_valid_fraction: {usable: 1.0}
+  imu:
+    # Gyro and accelerometer. Car-axis topics first; a board- or sensor-axis
+    # topic still gives yaw rate, by projecting the gyro on gravity's direction.
+    topics: [/imu/data, /imu/vesc/data, /imu/bno/data, /sensors/imu/raw, /imu/bno/raw]
+    kind: imu
+    checks:
+      min_rate_hz: {usable: 40, conditional: 10}
+      max_gap_s: {usable: 0.5, conditional: 2.0}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+      min_coverage: {usable: 0.95, conditional: 0.7}
+      max_stamp_problem_fraction: {usable: 0.01, conditional: 0.1}
+  car_imu:
+    # Calibrated, car-axis IMU only (imu_bridge): measured lateral acceleration.
+    topics: [/imu/data, /imu/vesc/data, /imu/bno/data]
+    kind: imu
+    checks:
+      min_rate_hz: {usable: 40, conditional: 10}
+      max_gap_s: {usable: 0.5, conditional: 2.0}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+      min_coverage: {usable: 0.95, conditional: 0.7}
+      max_stamp_problem_fraction: {usable: 0.01, conditional: 0.1}
+  vesc_state:
+    topics: [/sensors/core]
+    kind: vesc_state
+    checks:
+      min_rate_hz: {usable: 30, conditional: 10}
+      max_gap_s: {usable: 0.5, conditional: 2.0}
+      min_coverage: {usable: 0.95, conditional: 0.7}
+  steering_command:
+    # What reached the VESC (ackermann_mux's output) first, then the driving
+    # node's own command. Commands stop while LB is released, so coverage and
+    # gaps are not checked.
+    topics: [/ackermann_cmd, /drive]
+    kind: ackermann
+    checks:
+      min_rate_hz: {usable: 20, conditional: 5}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+  drive_command:
+    # A driving algorithm's own output.
+    topics: [/drive, /auto_map/drive, /auto_race/drive]
+    kind: ackermann
+    checks:
+      min_rate_hz: {usable: 20, conditional: 5}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+  measured_steering:
+    topics: [/steering/measured]
+    kind: joint_state
+    checks:
+      min_rate_hz: {usable: 20, conditional: 5}
+      max_gap_s: {usable: 0.5, conditional: 2.0}
+      min_coverage: {usable: 0.9, conditional: 0.5}
+  joy:
+    topics: [/joy]
+    kind: joy
+    checks:
+      min_rate_hz: {usable: 5, conditional: 1}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+  drive_intent:
+    topics: [/drive_intent]
+    kind: drive_intent
+    checks:
+      min_rate_hz: {usable: 5, conditional: 1}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+  map_pose:
+    # Where the car is on a map: particle filter, then SLAM's two outputs.
+    topics: [/pf/viz/inferred_pose, /slam_pose, /pose]
+    kind: pose
+    checks:
+      min_rate_hz: {usable: 10, conditional: 1}
+      min_valid_fraction: {usable: 0.99, conditional: 0.9}
+      min_coverage: {usable: 0.8, conditional: 0.3}
+
+# ---------------------------------------------------------------------------
+# Facts about the recording itself, from auto_record.yaml and the bag. Each
+# names the grade it caps each use at (`all` for every use); an empty mapping
+# is listed in qualification.yaml but changes no grade.
+recording_flags:
+  no_bag: {all: unusable}               # the folder holds no bag/ at all
+  bag_not_closed: {all: unusable}       # bag/metadata.yaml missing: `ros2 bag reindex <run>/bag`, then regrade
+  read_failed: {all: unusable}          # the bag stopped reading before read_min_fraction of its messages
+  read_incomplete: {all: conditional}   # it stopped later than that
+  superseded: {all: unusable}           # a stub another recorder replaced at once (auto_record.yaml)
+  recorder_killed: {all: conditional}   # the recorder did not stop in time and was killed
+  bag_recorder_failed: {all: conditional}  # `ros2 bag record` exited non-zero
+  other_recorder_failed: {}             # race_diag_node / system_log died: the bag is unaffected
+  started_late: {algorithm_accuracy: conditional}  # the car was already moving when the bag started
+read_min_fraction: 0.9
+
+# ---------------------------------------------------------------------------
+# The five uses. For each:
+#   required    signals it cannot do without; missing (or unusable) gives
+#               `if_missing`, unusable by default
+#   references  ground truth to judge against; missing (or unusable) gives
+#               `if_missing`, conditional by default
+#   criteria    metrics from qualification.yaml's `metrics`, with
+#               at_least/at_most thresholds; a metric that could not be
+#               measured gives `if_unknown` (conditional by default, `skip`
+#               to ignore it)
+applications:
+  localization:
+    description: >-
+      Scan matching, SLAM or particle-filter localization replayed offline:
+      LiDAR, wheel odometry and the frames that tie them, while the car moves.
+    required:
+      scan: {}
+      wheel_odom: {}
+      odom_tf: {}
+      # bringup's base_link -> laser is fixed (0.26 0 0.11), so a run without
+      # it can still be replayed by restoring it.
+      laser_mount: {if_missing: conditional}
+    references:
+      map_pose: {}
+    criteria:
+      distance_m: {at_least: {usable: 20.0, conditional: 5.0}}
+      moving_s: {at_least: {usable: 10.0, conditional: 3.0}}
+      # A car carried between LB holds jumps where nothing it senses saw it move.
+      carried_between_holds: {at_most: {usable: 0}, if_unknown: skip}
+  velocity_estimation:
+    description: >-
+      Estimating speed from wheels and IMU: wheel speed, an accelerometer and
+      the VESC's state, through enough speed changes to tell them apart.
+    required:
+      wheel_odom: {}
+      imu: {}
+      vesc_state: {if_missing: conditional}
+    references:
+      map_pose: {}
+    criteria:
+      moving_s: {at_least: {usable: 10.0, conditional: 3.0}}
+      max_speed_mps: {at_least: {usable: 2.0, conditional: 0.5}}
+      speed_swings: {at_least: {usable: 4, conditional: 1}}
+  steering_response:
+    description: >-
+      How the car turns for a steering command: commanded steering, wheel
+      speed and an independent gyro (/odom's turn rate is computed from the
+      command, so it cannot be the measurement), with the steering exercised.
+    required:
+      steering_command: {}
+      wheel_odom: {}
+      imu: {}
+    references:
+      measured_steering: {}
+    criteria:
+      steering_std_rad: {at_least: {usable: 0.05, conditional: 0.02}}
+      steering_reversals: {at_least: {usable: 6, conditional: 2}}
+      moving_s: {at_least: {usable: 10.0, conditional: 3.0}}
+      measured_steering_finite_fraction: {at_least: {usable: 0.8, conditional: 0.3}, if_unknown: skip}
+  lateral_acceleration:
+    description: >-
+      Cornering load: gyro yaw rate and wheel speed (a_y = v * yaw rate),
+      judged against a calibrated accelerometer, through real corners.
+    required:
+      imu: {}
+      wheel_odom: {}
+    references:
+      car_imu: {}
+    criteria:
+      lateral_accel_p95_mps2: {at_least: {usable: 1.5, conditional: 0.5}}
+      cornering_s: {at_least: {usable: 5.0, conditional: 1.0}}
+  algorithm_accuracy:
+    description: >-
+      How well a driving algorithm followed its own plan: its commands, LB,
+      scans and wheel speed while it drove, judged against what it intended
+      (/drive_intent) and where the car really was (a map pose).
+    required:
+      drive_command: {}
+      wheel_odom: {}
+      joy: {}
+      scan: {}
+    references:
+      drive_intent: {}
+      map_pose: {}
+    criteria:
+      algorithm_known: {at_least: {usable: 1}}
+      autonomous_s: {at_least: {usable: 20.0, conditional: 5.0}}
+      autonomous_distance_m: {at_least: {usable: 20.0, conditional: 5.0}}

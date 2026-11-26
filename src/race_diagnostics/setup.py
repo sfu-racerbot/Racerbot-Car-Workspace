@@ -17,6 +17,7 @@ setup(
         ('share/' + package_name + '/config', [
             'config/race_diagnostics.yaml',
             'config/auto_record.yaml',
+            'config/classification_rules.yaml',
         ]),
     ],
     install_requires=['setuptools'],

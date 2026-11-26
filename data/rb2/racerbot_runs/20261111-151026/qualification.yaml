@@ -1,0 +1,249 @@
+# Written by race_diagnostics.dataset_classifier from this run's bag and
+# metadata; regenerated, never edited. How to read it:
+# docs/run-diagnostics.md#dataset-qualification
+schema: 1
+run_id: 20261111-151026
+car: rb2
+classifier:
+  version: 1
+  rules: classification_rules.yaml
+  rules_sha256: 66fef5fca61b6c4eceb358c267098b41f8dfceaa026ffe59339c1b0cfcbf5cae
+summary:
+  localization: usable
+  velocity_estimation: unusable
+  steering_response: unusable
+  lateral_acceleration: unusable
+  algorithm_accuracy: usable
+applications:
+  localization:
+    status: usable
+    explanation: 'usable: every required signal, reference and threshold met (distance_m 92.5689, moving_s
+      35.5286, carried_between_holds 0)'
+    reasons: []
+  velocity_estimation:
+    status: unusable
+    explanation: 'unusable: required imu unusable: imu (/imu/data) stamp problem fraction 0.1168, usable
+      needs at most 0.01'
+    reasons:
+    - 'unusable: required imu unusable: imu (/imu/data) stamp problem fraction 0.1168, usable needs at
+      most 0.01'
+  steering_response:
+    status: unusable
+    explanation: 'unusable: required imu unusable: imu (/imu/data) stamp problem fraction 0.1168, usable
+      needs at most 0.01'
+    reasons:
+    - 'unusable: required imu unusable: imu (/imu/data) stamp problem fraction 0.1168, usable needs at
+      most 0.01'
+  lateral_acceleration:
+    status: unusable
+    explanation: 'unusable: required imu unusable: imu (/imu/data) stamp problem fraction 0.1168, usable
+      needs at most 0.01'
+    reasons:
+    - 'unusable: required imu unusable: imu (/imu/data) stamp problem fraction 0.1168, usable needs at
+      most 0.01'
+    - 'conditional: reference car_imu unusable: car_imu (/imu/data) stamp problem fraction 0.1168, usable
+      needs at most 0.01'
+  algorithm_accuracy:
+    status: usable
+    explanation: 'usable: every required signal, reference and threshold met (algorithm_known 1, autonomous_s
+      34.9718, autonomous_distance_m 90.4515)'
+    reasons: []
+recording:
+  status: usable
+  flags: []
+  bag: true
+  bag_closed: true
+  bag_files: 1
+  bag_messages: 99880
+  duration_s: 63.1168
+  bag_bytes: 46685180
+  auto_record: false
+  messages_read: 99880
+  read_error: null
+run_info:
+  schema: 1
+  run_id: 20261111-151026
+  recorder: record_run
+  started: unknown
+  car_id: rb2
+  host: unknown
+  workspace_commit: fde123f7f6ab895bbe929f964e4cbf2d50e36ba1
+  algorithms: unknown
+  topics: unknown
+  source: reconstructed from the run folder (recorded before run_info.yaml existed)
+  car_id_source: metadata/car_id.txt
+  session_log: map_course-20261111-151025.log
+  bag_start_utc: '2026-11-11T23:10:30+00:00'
+  algorithm_nodes:
+  - auto_map_race_node
+  - gap_follow_node
+  algorithm_source: metadata/params
+signals:
+  scan:
+    topic: /scan
+    status: usable
+    reasons: []
+    alternatives: []
+  wheel_odom:
+    topic: /odom
+    status: usable
+    reasons: []
+    alternatives: []
+  odom_tf:
+    topic: /tf odom->base_link
+    status: usable
+    reasons: []
+    alternatives: []
+  laser_mount:
+    topic: /tf_static base_link->laser
+    status: usable
+    reasons: []
+    alternatives: []
+  imu:
+    topic: /imu/data
+    status: unusable
+    reasons:
+    - imu (/imu/data) stamp problem fraction 0.1168, usable needs at most 0.01
+    alternatives:
+    - /imu/vesc/data
+    - /imu/bno/data
+    - /sensors/imu/raw
+    - /imu/bno/raw
+  car_imu:
+    topic: /imu/data
+    status: unusable
+    reasons:
+    - car_imu (/imu/data) stamp problem fraction 0.1168, usable needs at most 0.01
+    alternatives:
+    - /imu/vesc/data
+    - /imu/bno/data
+  vesc_state:
+    topic: /sensors/core
+    status: usable
+    reasons: []
+    alternatives: []
+  steering_command:
+    topic: /ackermann_cmd
+    status: usable
+    reasons: []
+    alternatives:
+    - /drive
+  drive_command:
+    topic: /drive
+    status: usable
+    reasons: []
+    alternatives:
+    - /auto_map/drive
+  measured_steering:
+    topic: /steering/measured
+    status: usable
+    reasons: []
+    alternatives: []
+  joy:
+    topic: /joy
+    status: usable
+    reasons: []
+    alternatives: []
+  drive_intent:
+    topic: /drive_intent
+    status: usable
+    reasons: []
+    alternatives: []
+  map_pose:
+    topic: /slam_pose
+    status: usable
+    reasons: []
+    alternatives:
+    - /pose
+metrics:
+  distance_m: 92.5689
+  moving_s: 35.5286
+  max_speed_mps: 3.9454
+  speed_swings: 27
+  lb_held_s: 38.5369
+  lb_holds: 1
+  carried_between_holds: 0
+  steering_std_rad: 0.1874
+  steering_reversals: 35
+  measured_steering_finite_fraction: 1.0
+  lateral_accel_p95_mps2: 3.54
+  cornering_s: 27.3148
+  measured_lateral_accel_p95_mps2: 5.0063
+  autonomous_s: 34.9718
+  autonomous_distance_m: 90.4515
+  duration_s: 63.1168
+  algorithm_known: 1
+activity:
+  first_odom_speed_mps: 0.0
+  max_speed_mps: 3.95
+  moved: true
+  started_late: false
+  lb_held_fraction: 0.61
+streams:
+  /ackermann_cmd: {type: ackermann_msgs/msg/AckermannDriveStamped, count: 2328, valid_fraction: 1.0, rate_hz: 40.0847,
+    max_gap_s: 1.0638, coverage: 0.9288, stamp_problem_fraction: 0.0}
+  /auto_map/drive: {type: ackermann_msgs/msg/AckermannDriveStamped, count: 2379, valid_fraction: 1.0,
+    rate_hz: 40.5788, max_gap_s: 0.0776, coverage: 0.9463, stamp_problem_fraction: 0.0}
+  /commands/motor/speed: {type: std_msgs/msg/Float64, count: 2329, valid_fraction: null, rate_hz: 40.1338,
+    max_gap_s: 1.0666, coverage: 0.9301, stamp_problem_fraction: null}
+  /commands/servo/position: {type: std_msgs/msg/Float64, count: 2329, valid_fraction: null, rate_hz: 40.1135,
+    max_gap_s: 1.0668, coverage: 0.9301, stamp_problem_fraction: null}
+  /diagnostics: {type: diagnostic_msgs/msg/DiagnosticArray, count: 250, valid_fraction: null, rate_hz: 3.5696,
+    max_gap_s: 0.5875, coverage: 1.0, stamp_problem_fraction: null}
+  /drive: {type: ackermann_msgs/msg/AckermannDriveStamped, count: 2330, valid_fraction: 1.0, rate_hz: 40.0506,
+    max_gap_s: 1.0638, coverage: 0.9306, stamp_problem_fraction: 0.0}
+  /drive_intent: {type: std_msgs/msg/String, count: 923, valid_fraction: 1.0, rate_hz: 15.5396, max_gap_s: 0.1157,
+    coverage: 0.946, stamp_problem_fraction: 0.0}
+  /imu/bno/data: {type: sensor_msgs/msg/Imu, count: 15023, valid_fraction: 1.0, rate_hz: 325.3416, max_gap_s: 0.3382,
+    coverage: 0.9606, stamp_problem_fraction: 0.1166}
+  /imu/bno/raw: {type: sensor_msgs/msg/Imu, count: 15032, valid_fraction: 1.0, rate_hz: 318.5225, max_gap_s: 0.3411,
+    coverage: 0.9622, stamp_problem_fraction: 0.1162}
+  /imu/data: {type: sensor_msgs/msg/Imu, count: 15023, valid_fraction: 1.0, rate_hz: 325.531, max_gap_s: 0.3408,
+    coverage: 0.9604, stamp_problem_fraction: 0.1168}
+  /imu/vesc/data: {type: sensor_msgs/msg/Imu, count: 2938, valid_fraction: 1.0, rate_hz: 50.6155, max_gap_s: 0.5821,
+    coverage: 0.959, stamp_problem_fraction: 0.0}
+  /imu_bridge/wheel_odom: {type: nav_msgs/msg/Odometry, count: 2938, valid_fraction: null, rate_hz: 51.0318,
+    max_gap_s: 0.5779, coverage: 0.9589, stamp_problem_fraction: null}
+  /initialpose: {type: geometry_msgs/msg/PoseWithCovarianceStamped, count: 0, valid_fraction: null, rate_hz: null,
+    max_gap_s: null, coverage: 0.0, stamp_problem_fraction: null}
+  /joy: {type: sensor_msgs/msg/Joy, count: 1099, valid_fraction: 1.0, rate_hz: 19.5079, max_gap_s: 0.3522,
+    coverage: 1.0, stamp_problem_fraction: 0.0}
+  /map: {type: nav_msgs/msg/OccupancyGrid, count: 12, valid_fraction: null, rate_hz: 0.1996, max_gap_s: 5.0878,
+    coverage: 0.0, stamp_problem_fraction: null}
+  /map_metadata: {type: nav_msgs/msg/MapMetaData, count: 12, valid_fraction: null, rate_hz: 0.1997, max_gap_s: 5.0879,
+    coverage: 0.0, stamp_problem_fraction: null}
+  /odom: {type: nav_msgs/msg/Odometry, count: 3142, valid_fraction: 1.0, rate_hz: 50.3095, max_gap_s: 0.3505,
+    coverage: 1.0, stamp_problem_fraction: 0.0}
+  /odom/fused: {type: nav_msgs/msg/Odometry, count: 2916, valid_fraction: null, rate_hz: 50.2739, max_gap_s: 0.0728,
+    coverage: 0.9255, stamp_problem_fraction: null}
+  /odom/imu: {type: nav_msgs/msg/Odometry, count: 2922, valid_fraction: null, rate_hz: 51.195, max_gap_s: 0.0779,
+    coverage: 0.9245, stamp_problem_fraction: null}
+  /parameter_events: {type: rcl_interfaces/msg/ParameterEvent, count: 264, valid_fraction: null, rate_hz: 85598.0408,
+    max_gap_s: 2.197, coverage: 0.0436, stamp_problem_fraction: null}
+  /pose: {type: geometry_msgs/msg/PoseWithCovarianceStamped, count: 151, valid_fraction: 1.0, rate_hz: 4.3149,
+    max_gap_s: 16.5633, coverage: 0.5472, stamp_problem_fraction: 0.0}
+  /rosout: {type: rcl_interfaces/msg/Log, count: 305, valid_fraction: null, rate_hz: 17.0831, max_gap_s: 1.0149,
+    coverage: 0.968, stamp_problem_fraction: null}
+  /scan: {type: sensor_msgs/msg/LaserScan, count: 2512, valid_fraction: 1.0, rate_hz: 40.406, max_gap_s: 0.3693,
+    coverage: 1.0, stamp_problem_fraction: 0.0}
+  /sensors/core: {type: vesc_msgs/msg/VescStateStamped, count: 3141, valid_fraction: 1.0, rate_hz: 50.1168,
+    max_gap_s: 0.3532, coverage: 1.0, stamp_problem_fraction: 0.0}
+  /sensors/imu/raw: {type: sensor_msgs/msg/Imu, count: 3141, valid_fraction: 1.0, rate_hz: 50.0176, max_gap_s: 0.3728,
+    coverage: 1.0, stamp_problem_fraction: 0.0}
+  /sensors/servo_position_command: {type: std_msgs/msg/Float64, count: 2329, valid_fraction: null, rate_hz: 40.1211,
+    max_gap_s: 1.0763, coverage: 0.9288, stamp_problem_fraction: null}
+  /slam_pose: {type: geometry_msgs/msg/PoseStamped, count: 2179, valid_fraction: 1.0, rate_hz: 40.0052,
+    max_gap_s: 1.0437, coverage: 0.8648, stamp_problem_fraction: 0.0427}
+  /slam_toolbox/graph_visualization: {type: visualization_msgs/msg/MarkerArray, count: 12, valid_fraction: null,
+    rate_hz: 0.1997, max_gap_s: 5.0869, coverage: 0.0, stamp_problem_fraction: null}
+  /steering/measured: {type: sensor_msgs/msg/JointState, count: 2951, valid_fraction: 1.0, rate_hz: 50.083,
+    max_gap_s: 0.3792, coverage: 0.9472, stamp_problem_fraction: 0.0}
+  /tf: {type: tf2_msgs/msg/TFMessage, count: 8967, valid_fraction: null, rate_hz: 198.1717, max_gap_s: 0.3558,
+    coverage: 1.0, stamp_problem_fraction: null}
+  /tf odom->base_link: {type: tf2_msgs/msg/TFMessage, count: 3142, valid_fraction: 1.0, rate_hz: 50.3276,
+    max_gap_s: 0.3558, coverage: 1.0, stamp_problem_fraction: 0.0}
+  /tf_static: {type: tf2_msgs/msg/TFMessage, count: 3, valid_fraction: null, rate_hz: 5.344, max_gap_s: 0.3444,
+    coverage: 0.0059, stamp_problem_fraction: null}
+  /tf_static base_link->laser: {type: tf2_msgs/msg/TFMessage, count: 1, valid_fraction: 1.0, rate_hz: null,
+    max_gap_s: null, coverage: 0.0, stamp_problem_fraction: null}
+error: null

@@ -3,7 +3,9 @@
  "copy": [
   "src/pure_pursuit",
   "src/racerbot_launch",
-  "tools/run_analysis"
+  "tools/run_analysis",
+  "src/race_diagnostics",
+  "src/racerbot_car"
  ],
  "mutations": [
   {
@@ -1110,7 +1112,7 @@
    ]
   },
   {
-   "file": "tools/run_analysis/run_triage.py",
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
    "old": "return sorted(set(DRIVERS.findall(processes_text)))",
    "new": "return DRIVERS.findall(processes_text)",
    "tests": [
@@ -1126,7 +1128,7 @@
    ]
   },
   {
-   "file": "tools/run_analysis/run_triage.py",
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
    "old": "both = np.isfinite(a) & np.isfinite(b) & (a > 0) & (b > 0)",
    "new": "both = np.isfinite(a) & np.isfinite(b)",
    "tests": [
@@ -1134,7 +1136,7 @@
    ]
   },
   {
-   "file": "tools/run_analysis/run_triage.py",
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
    "old": "flags.append(wheels_still and scan_change(scans[before], scans[after]) > moved_m)",
    "new": "flags.append(scan_change(scans[before], scans[after]) > moved_m)",
    "tests": [
@@ -1158,8 +1160,8 @@
    ]
   },
   {
-   "file": "tools/run_analysis/run_triage.py",
-   "old": "wheels_still = len(between) == 0 or bool(np.all(np.abs(between[:, 1]) < still_mps))",
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "wheels_still = len(between) > 0 and bool(np.all(np.abs(between[:, 1]) < still_mps))",
    "new": "wheels_still = True",
    "tests": [
     "tools/run_analysis/tests/test_run_triage.py"

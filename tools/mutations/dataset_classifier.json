@@ -1,0 +1,514 @@
+{
+ "about": "Hard rule 1 for the dataset classifier: each break must turn its tests red. Run: PATH=<python with rosbags>:$PATH python3 tools/check_mutations.py tools/mutations/dataset_classifier.json --no-ros",
+ "copy": [
+  "src/race_diagnostics",
+  "src/racerbot_car",
+  "tools/run_analysis",
+  "data/rb1/racerbot_runs/20261030-190408",
+  "data/rb1/racerbot_runs/20261030-190904",
+  "data/rb1/racerbot_runs/20261111-153409",
+  "data/rb2/racerbot_runs/20261030-183134"
+ ],
+ "mutations": [
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "                count, direction, lo = count + 1, -1, v",
+   "new": "                count, direction, lo = count, -1, v",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "            elif v - lo >= swing:\n                count, direction, hi = count + 1, 1, v",
+   "new": "            elif v - lo > swing:\n                count, direction, hi = count + 1, 1, v",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    silent = float(np.sum(pauses[pauses > coverage_gap_s]))",
+   "new": "    silent = float(np.sum(pauses[pauses >= coverage_gap_s]))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "        median = float(np.median(dt))",
+   "new": "        median = float(np.mean(dt))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    ok = dt <= max_gap_s\n",
+   "new": "    ok = dt <= max_gap_s * 10\n",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    moving = float(np.sum(dt[ok & (speed >= moving_speed_mps)]))",
+   "new": "    moving = float(np.sum(dt[ok & (speed > moving_speed_mps)]))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    return gyro @ (up / norm)",
+   "new": "    return gyro @ up",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    if not math.isfinite(norm) or norm < 0.5 * GRAVITY:",
+   "new": "    if not math.isfinite(norm) or norm < 0.4 * GRAVITY:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    lateral = speed * np.abs(np.asarray(yaw, dtype=float))",
+   "new": "    lateral = speed * np.asarray(yaw, dtype=float)",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    return float(np.percentile(lateral[moving], 95)), cornering",
+   "new": "    return float(np.percentile(lateral[moving], 50)), cornering",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    out[(t_query < t[0]) | (t_query > t[-1])] = np.nan",
+   "new": "    pass",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    driven = (dt <= max_gap_s) & (speed >= moving_speed_mps) & held & recent",
+   "new": "    driven = (dt <= max_gap_s) & (speed >= moving_speed_mps) & recent",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "(end - cmd_t[np.maximum(last, 0)] <= match_s)",
+   "new": "(end - cmd_t[np.maximum(last, 0)] >= match_s)",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    return [w for w in windows if w[1] - w[0] >= min_duration]",
+   "new": "    return windows",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "        flags.append(wheels_still and scan_change(scans[before], scans[after]) > moved_m)",
+   "new": "        flags.append(wheels_still and scan_change(scans[before], scans[after]) < moved_m)",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py",
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    if len(moving) < 2:\n        return 0.0, 0",
+   "new": "    if len(moving) < 2:\n        return None, None",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    if not moving.any():\n        return 0.0, 0.0",
+   "new": "    if not moving.any():\n        return None, None",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "    return sorted(name for name in names if name.strip('/') not in NOT_AN_ALGORITHM)",
+   "new": "    return sorted(names)",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "    valid = share >= rules['measurement']['valid']['scan_min_beam_fraction']",
+   "new": "    valid = share > 0",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "             and any(v != 0.0 for v in gyro + accel)  # all six zero: IMU off or not fitted\n",
+   "new": "",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "    gyro_scale = math.radians(1.0) if fmt['gyro_unit'] == 'deg/s' else 1.0",
+   "new": "    gyro_scale = 1.0",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "    accel_scale = GRAVITY if fmt['accel_unit'] == 'g' else 1.0",
+   "new": "    accel_scale = 1.0",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "    valid = (_finite(steering, speed) and abs(steering) <= limits['max_steering_rad']",
+   "new": "    valid = (_finite(steering, speed) and abs(steering) < limits['max_steering_rad']",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "    valid = _finite(v) and abs(v) <= rules['measurement']['valid']['max_speed_mps']",
+   "new": "    valid = _finite(v)",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "        problems = (s == 0) | (np.abs(rx - s) > m['stamp_tolerance_s']) | backwards",
+   "new": "        problems = (np.abs(rx - s) > m['stamp_tolerance_s'] * 1e12) | backwards",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "        elif not held and self.held and self.last_scan is not None:\n            self.snapshots[self.last_scan[0]] = self.last_scan[1]",
+   "new": "        elif not held and self.held and self.last_scan is not None:\n            pass",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_every_message_the_bag_says_it_holds_is_read_once",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_the_activity_matches_what_run_activity_recorded_on_the_car",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_lb_holds_are_the_ones_runlog_finds",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_carrying_from_snapshots_equals_carrying_from_every_scan"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "            self.snapshots[t] = ranges\n            self.waiting_for_press_scan = False",
+   "new": "            self.waiting_for_press_scan = False",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_every_message_the_bag_says_it_holds_is_read_once",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_the_activity_matches_what_run_activity_recorded_on_the_car",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_lb_holds_are_the_ones_runlog_finds",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_carrying_from_snapshots_equals_carrying_from_every_scan"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "        scans.invalidate(beams != counts[np.argmax(seen)])",
+   "new": "        pass",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "            report['read_error'] = f'{type(e).__name__}: {e}'",
+   "new": "            raise",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "                report['messages_read'] += 1\n",
+   "new": "",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_every_message_the_bag_says_it_holds_is_read_once",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_the_activity_matches_what_run_activity_recorded_on_the_car",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_lb_holds_are_the_ones_runlog_finds",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_carrying_from_snapshots_equals_carrying_from_every_scan"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "    return abs(math.sqrt(r.x ** 2 + r.y ** 2 + r.z ** 2 + r.w ** 2) - 1.0) < 0.01",
+   "new": "    return False",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/bag_stats.py",
+   "old": "            if signal['kind'] == 'transform':\n                transforms.setdefault(topic, []).append(tuple(signal['transform']))",
+   "new": "            if signal['kind'] == 'transform':\n                pass",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "    for key in present:\n        if int(np.sum(streams[key].mask()))",
+   "new": "    for key in reversed(present):\n        if int(np.sum(streams[key].mask()))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "        for part, default in (('required', 'unusable'), ('references', 'conditional')):",
+   "new": "        for part, default in (('required', 'conditional'), ('references', 'conditional')):",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "        for part, default in (('required', 'unusable'), ('references', 'conditional')):",
+   "new": "        for part, default in (('required', 'unusable'), ('references', 'unusable')):",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "        flags.append('read_incomplete' if fraction >= read_min_fraction else 'read_failed')",
+   "new": "        flags.append('read_incomplete' if fraction > read_min_fraction else 'read_failed')",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "    if (activity or {}).get('started_late'):\n        flags.append('started_late')",
+   "new": "    if False:\n        flags.append('started_late')",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_the_late_starts_are_the_ones_the_car_flagged"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "                if_unknown = criterion.get('if_unknown', 'conditional')",
+   "new": "                if_unknown = criterion.get('if_unknown', 'skip')",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "    if any(not f.startswith('ros2 bag record') for f in failures):\n        flags.append('other_recorder_failed')",
+   "new": "    if any(not f.startswith('ros2 bag record') for f in failures):\n        flags.append('bag_recorder_failed')",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "        'applications': {app: {'status': 'unusable', 'explanation': f'unusable: {reason}',",
+   "new": "        'applications': {app: {'status': 'conditional', 'explanation': f'unusable: {reason}',",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "        if scan is not None and len(scan.t):",
+   "new": "        if True:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "        out['speed_swings'] = mx.reversals(odom_v, m['speed_swing_mps'])",
+   "new": "        out['speed_swings'] = mx.reversals(odom_v, m['steering_swing_rad'])",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
+   "old": "    out['algorithm_known'] = int(isinstance(names, list) and bool(mx.driving_algorithms(names)))",
+   "new": "    out['algorithm_known'] = int(isinstance(names, list))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "    return max(statuses, key=RANK.__getitem__, default='usable')",
+   "new": "    return min(statuses, key=RANK.__getitem__, default='usable')",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "    if 'conditional' not in levels or meets(levels['conditional']):",
+   "new": "    if 'conditional' in levels and meets(levels['conditional']):",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "        weaker = conditional > usable if direction == 'at_least' else conditional < usable",
+   "new": "        weaker = conditional < usable if direction == 'at_least' else conditional > usable",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "    if unused:\n        raise RulesError",
+   "new": "    if False:\n        raise RulesError",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "                if signal not in signals:\n                    raise RulesError(f'{where}.{part}: no signal {signal}')",
+   "new": "                if signal not in signals:\n                    continue",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/outputs.py",
+   "old": "        if path.read_text() == text:\n            return False",
+   "new": "        if False:\n            return False",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/outputs.py",
+   "old": "                kept = [row for row in existing if row['car'] not in cars]",
+   "new": "                kept = []",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/outputs.py",
+   "old": "    for row in sorted(rows, key=lambda r: (r['car'], r['run_id'])):",
+   "new": "    for row in rows:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/outputs.py",
+   "old": "        row['recording'] = UNCLASSIFIED\n        for app in apps:\n            row[app] = UNCLASSIFIED\n        return row",
+   "new": "        return row",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/outputs.py",
+   "old": "    temporary = path.with_name(f'.{path.name}.tmp-{os.getpid()}')",
+   "new": "    temporary = path",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/outputs.py",
+   "old": "        if temporary.exists():\n            temporary.unlink()",
+   "new": "        pass",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
+   "old": "    return UNKNOWN, None",
+   "new": "    return 'rb1', None",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
+   "old": "    names, source = algorithm_names(run_dir, info.get('algorithms') if written else None)",
+   "new": "    names, source = algorithm_names(run_dir, info.get('algorithms'))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
+   "old": "        return drivers_in(' '.join(sorted(p.stem for p in params.glob('*.yaml')))), 'metadata/params'",
+   "new": "        return None, None",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
+   "old": "        if 0 <= (run_time - log_time).total_seconds() <= 5:",
+   "new": "        if 0 <= (run_time - log_time).total_seconds() <= 1:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
+   "old": "        'car_id': car_id or UNKNOWN,",
+   "new": "        'car_id': car_id or socket.gethostname(),",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
+   "old": "        wheels_still = len(between) > 0 and bool(np.all(np.abs(between[:, 1]) < still_mps))",
+   "new": "        wheels_still = len(between) == 0 or bool(np.all(np.abs(between[:, 1]) < still_mps))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  }
+ ]
+}

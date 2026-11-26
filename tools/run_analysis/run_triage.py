@@ -11,28 +11,33 @@ car senses saw it move. The answer then names where a clean replay can start fro
 Why: on 2026-10-31, most of the 30 Oct recordings that "failed to map" turned out to be other teams' algorithms
 or a few seconds of driving (docs/superpowers/specs/2026-10-30-slam-reliability.md). Carrying is judged from the
 car's own scans and wheels: placing single scans on a reference map once called a car carried 12 m that wasn't.
+
+Dataset qualification -- what each recording is usable for (race_diagnostics.dataset_classifier, the same code
+bringup's recorder runs after every recording; docs/run-diagnostics.md#dataset-qualification):
+
+    python3 tools/run_analysis/run_triage.py --qualify <run> [more runs]   # grade these runs
+    python3 tools/run_analysis/run_triage.py --qualify --all              # grade every run in data/
+    python3 tools/run_analysis/run_triage.py --inventory                  # rebuild data/dataset_inventory.csv
+
+Each writes <run>/qualification.yaml and refreshes data/dataset_inventory.csv, only where something changed;
+--dry-run prints the grades and writes nothing. Reading a bag needs ROS sourced or rosbags installed.
 """
 import argparse
-import re
 import sys
 from pathlib import Path
 
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(ROOT / 'src' / 'race_diagnostics'))
 
-# Driving and mapping code that can appear in processes.txt, ours and team A's.
-DRIVERS = re.compile(r'\b(gap_follow_node|pure_pursuit_node|auto_map_race_node|stanley\w*_node|lqr\w*_node|'
-                     r'mpc\w*_node|neural_racer_node|ftg_node|disparity_extender_node|racerbot_[ab]\w*|'
-                     r'async_slam_toolbox_node|joy_teleop)\b')
-STILL_MPS = 0.02  # wheel speed of a parked car
-MOVED_M = 0.15  # median change of the scan, parked, that means the car is somewhere else
+# The driving-code names and the carried-between-holds check live with the classifier now, so the two can
+# never disagree; imported back under their old names.
+from race_diagnostics.dataset_classifier.metrics import (  # noqa: E402,F401
+    DRIVERS, MOVED_M, STILL_MPS, algorithms, moved_between, scan_change)
+
 SHORT_S = 5.0  # less LB than this is not a mapping run
-
-
-def algorithms(processes_text):
-    """The driving and mapping code in a run's metadata/processes.txt, sorted, each once."""
-    return sorted(set(DRIVERS.findall(processes_text)))
 
 
 def hold_stats(odom, windows):
@@ -48,29 +53,6 @@ def hold_stats(odom, windows):
             metres, top = 0.0, 0.0
         out.append((float(start), float(end - start), metres, top))
     return out
-
-
-def scan_change(a, b):
-    """Median change of the ranges both scans saw, in metres: about zero for the same place."""
-    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
-    both = np.isfinite(a) & np.isfinite(b) & (a > 0) & (b > 0)
-    return float(np.median(np.abs(a[both] - b[both]))) if both.any() else float('nan')
-
-
-def moved_between(scan_t, scans, odom, windows, still_mps=STILL_MPS, moved_m=MOVED_M):
-    """For each gap between holds: whether the scan changed while the wheels never turned (carried)."""
-    odom = np.asarray(odom, dtype=float).reshape(-1, 2)
-    flags = []
-    for (_, end), (start, _) in zip(windows[:-1], windows[1:]):
-        before = int(np.searchsorted(scan_t, end, side='right')) - 1
-        after = int(np.searchsorted(scan_t, start))
-        if before < 0 or after >= len(scan_t):
-            flags.append(False)
-            continue
-        between = odom[(odom[:, 0] > end + 0.5) & (odom[:, 0] < start)]
-        wheels_still = len(between) == 0 or bool(np.all(np.abs(between[:, 1]) < still_mps))
-        flags.append(wheels_still and scan_change(scans[before], scans[after]) > moved_m)
-    return flags
 
 
 def verdict(holds, carried):
@@ -101,10 +83,56 @@ def triage(run_dir):
         'carried': carried, 'verdict': verdict(holds, carried)}
 
 
+def qualify(args, parser):
+    """--qualify / --inventory: grade runs with the dataset classifier and print the counts."""
+    from race_diagnostics.dataset_classifier import classifier, load_rules, outputs
+    rules = load_rules(args.rules)
+    data_root = Path(args.data_root)
+    if args.inventory and not args.qualify:
+        changed = outputs.rebuild_inventory(data_root, rules)
+        print(f"{data_root / outputs.INVENTORY}: {'rebuilt' if changed else 'already up to date'}")
+        return 0
+    if args.all == bool(args.runs):
+        parser.error('--qualify needs run folders or --all, not both')
+    runs = classifier.find_runs(data_root) if args.all else args.runs
+    apps = list(rules['applications'])
+    counts = {app: dict.fromkeys(('usable', 'conditional', 'unusable'), 0) for app in apps}
+    for run_dir, doc in classifier.classify_all(data_root if args.all else None, rules, runs=runs,
+                                                jobs=args.jobs, dry_run=args.dry_run):
+        for app in apps:
+            counts[app][doc['summary'][app]] += 1
+        error = f"  ERROR {doc['error']}" if doc.get('error') else ''
+        print(f"{doc['car']}/{doc['run_id']}: " + ' '.join(
+            f"{app.split('_')[0]}={doc['summary'][app]}" for app in apps) + error, flush=True)
+    if not args.all and not args.dry_run:
+        for data_root_of_run in {classifier.run_location(r)[0] for r in runs} - {None}:
+            outputs.update_inventory(data_root_of_run, rules,
+                                     cars={classifier.run_location(r)[1] for r in runs})
+    print(f"\n{len(runs)} run(s){' (dry run: nothing written)' if args.dry_run else ''}")
+    print(f"{'application':22s} {'usable':>7s} {'conditional':>12s} {'unusable':>9s}")
+    for app in apps:
+        c = counts[app]
+        print(f"{app:22s} {c['usable']:7d} {c['conditional']:12d} {c['unusable']:9d}")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('runs', type=Path, nargs='+')
+    parser.add_argument('runs', type=Path, nargs='*')
+    parser.add_argument('--qualify', action='store_true',
+                        help='grade the runs for the five dataset uses (writes qualification.yaml)')
+    parser.add_argument('--all', action='store_true', help='with --qualify: every run under --data-root')
+    parser.add_argument('--inventory', action='store_true',
+                        help='rebuild dataset_inventory.csv from the qualification files')
+    parser.add_argument('--rules', help='rules file (default: src/race_diagnostics/config/classification_rules.yaml)')
+    parser.add_argument('--data-root', default=str(ROOT / 'data'), help='the data/ folder (default: this checkout\'s)')
+    parser.add_argument('--jobs', type=int, default=1, help='runs graded in parallel')
+    parser.add_argument('--dry-run', action='store_true', help='print the grades, write nothing')
     args = parser.parse_args(argv)
+    if args.qualify or args.inventory:
+        return qualify(args, parser)
+    if not args.runs:
+        parser.error('give run folders, or --qualify / --inventory')
     for run in args.runs:
         try:
             result = triage(run)

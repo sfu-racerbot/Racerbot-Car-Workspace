@@ -57,6 +57,8 @@ ros2 run race_diagnostics summarize_run <dir>
 | `launch/auto_record_launch.py` | Starts `auto_record`; included by every `f1tenth_stack` bringup. |
 | `config/race_diagnostics.yaml` | Topics, reporting cadence, pose-lag alert threshold. |
 | `config/auto_record.yaml` | Which topics mean "an algorithm is running", which nodes are another recorder, the start/stop delays. |
+| `race_diagnostics/dataset_classifier/` | Grades a recorded run for five uses and writes `qualification.yaml` and `data/dataset_inventory.csv`. Its `__init__.py` lists the public functions; reads bags only, no rclpy. See [dataset qualification](../../docs/run-diagnostics.md#dataset-qualification). |
+| `config/classification_rules.yaml` | Every threshold the dataset classifier applies. Checked on load: an unknown key or impossible threshold is refused. |
 
 ## Tests
 
@@ -76,6 +78,12 @@ source /opt/ros/jazzy/setup.bash && source install/setup.bash
 export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 python3 -m pytest src/race_diagnostics/test/ -v     # about a minute; no skips
 ```
+
+The dataset classifier's tests (`test_dataset_classifier_*.py`) need no ROS
+either: they build runs from closed forms and stand in only for the bag reader.
+Its tests on the recorded bags in `data/` are in the tool suite,
+`tools/run_analysis/tests/test_dataset_classifier_bag.py`, and each break in
+`tools/mutations/dataset_classifier.json` must turn them red.
 
 The test fixtures are real log lines from the 2026-07-27 session, so the
 classifier is verified against output the car actually produced rather

@@ -11,7 +11,41 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-09 (latest): map racer, faster lines and an earlier throttle
+## 2026-11-26 (latest): dataset qualification of every recording
+
+Every recording in `data/<id>/racerbot_runs/` is now graded for five uses: localization, velocity estimation, steering response, lateral acceleration and algorithm accuracy.
+
+Each use gets `usable`, `conditional` or `unusable` with its reason, in a new `qualification.yaml` beside the bag. `data/dataset_inventory.csv` has one row per run. All 63 existing folders are graded, 61 of them with a bag.
+
+The grading only reads: every one of the 2,462 files already in `data/` is byte for byte unchanged. It does not yet run automatically after each recording. See `docs/run-diagnostics.md#dataset-qualification`.
+
+### race_diagnostics
+
+- New `dataset_classifier/` (no rclpy): reads a bag once with `rosbag2_py` or `rosbags`, grades it, and writes atomically, only when something changed.
+- New `config/classification_rules.yaml`: every threshold, checked on load. Installed by `setup.py`; `package.xml` gains `python3-numpy`.
+
+### tools/run_analysis
+
+- `run_triage.py`: new `--qualify RUN... | --qualify --all`, `--inventory`, `--dry-run`, `--jobs`, `--rules`, `--data-root`. Its default output is unchanged.
+- `run_triage.py`'s driving-code names, `scan_change` and `moved_between` moved into the classifier and are imported back.
+- **Behavior change:** `moved_between` no longer calls a car carried across an LB release shorter than the 0.5 s it ignores while the car coasts. Car 1's `20261111-153721` was called carried over a 0.4 s release at 2.7 m/s. Six runs' carried counts dropped.
+
+### Results (2026-11-26, 63 folders)
+
+| Use | usable | conditional | unusable |
+|---|---|---|---|
+| localization | 11 | 42 | 10 |
+| velocity estimation | 8 | 43 | 12 |
+| steering response | 13 | 37 | 13 |
+| lateral acceleration | 13 | 38 | 12 |
+| algorithm accuracy | 11 | 38 | 14 |
+
+### Tests
+
+- New: `src/race_diagnostics/test/test_dataset_classifier_runs.py` and `test_dataset_classifier_metrics.py` (synthetic runs and closed forms), and `tools/run_analysis/tests/test_dataset_classifier_bag.py` (real bags against their own metadata and the car's `activity`; change detectors on the committed results, labelled as such). `test_run_triage.py`: the short-release case.
+- Hard rule 1: `tools/mutations/dataset_classifier.json`, every break checked with `tools/check_mutations.py --no-ros`.
+
+## 2026-11-09: map racer, faster lines and an earlier throttle
 
 The map racer (`auto_map_race` line + `pure_pursuit`) now beats car 2's best gap_follow configuration on our own courses at the current 5 m/s VESC limit, in simulation only: 06a 10.75 s against 11.33 s (about 5 % faster), 06b 8.63 s against 8.28-8.60 s across gap_follow configurations (up to 4 % slower; its zero-margin plan bound is 7.78 s), no contact on 6 seeds each. Never run on the floor yet. The 10 % target across the course suite was met only with a 7 m/s top speed (24 courses, +6.1 % mean, 0 contact), which is not shipped: the acceleration model above 5.4 m/s is estimated, not measured.
 

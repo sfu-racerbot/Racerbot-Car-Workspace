@@ -79,6 +79,14 @@ def test_a_car_that_drove_between_holds_was_not_carried():
     assert rt.moved_between(*_run(carry=True, wheels=True)) == [False]
 
 
+def test_a_release_too_short_to_see_the_wheels_stop_is_not_carried():
+    # recorded: rb1 20261111-153721 released LB for 0.4 s at 2.7 m/s; the scan moved because the car was
+    # driving. Nothing in the first 0.5 s after a release counts (the car is coasting), so there is no evidence.
+    scan_t, scans, odom, _ = _run(carry=True)
+    odom[:, 1] = 2.7
+    assert rt.moved_between(scan_t, scans, odom, [(2.0, 10.8), (11.2, 19.0)]) == [False]
+
+
 def test_one_hold_has_no_gaps():
     scan_t, scans, odom, windows = _run()
     assert rt.moved_between(scan_t, scans, odom, windows[:1]) == []

@@ -1,0 +1,239 @@
+# Written by race_diagnostics.dataset_classifier from this run's bag and
+# metadata; regenerated, never edited. How to read it:
+# docs/run-diagnostics.md#dataset-qualification
+schema: 1
+run_id: 20261030-190519
+car: rb1
+classifier:
+  version: 1
+  rules: classification_rules.yaml
+  rules_sha256: 66fef5fca61b6c4eceb358c267098b41f8dfceaa026ffe59339c1b0cfcbf5cae
+summary:
+  localization: conditional
+  velocity_estimation: conditional
+  steering_response: conditional
+  lateral_acceleration: conditional
+  algorithm_accuracy: conditional
+applications:
+  localization:
+    status: conditional
+    explanation: 'conditional: scan (/scan) coverage 0.9432, usable needs at least 0.95; wheel_odom (/odom)
+      coverage 0.9433, usable needs at least 0.95; odom_tf (/tf odom->base_link) coverage 0.9435, usable
+      needs at least 0.95; reference map_pose missing: map_pose: none of /pf/viz/inferred_pose, /slam_pose,
+      /pose in the bag'
+    reasons:
+    - 'conditional: scan (/scan) coverage 0.9432, usable needs at least 0.95'
+    - 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95'
+    - 'conditional: odom_tf (/tf odom->base_link) coverage 0.9435, usable needs at least 0.95'
+    - 'conditional: reference map_pose missing: map_pose: none of /pf/viz/inferred_pose, /slam_pose, /pose
+      in the bag'
+  velocity_estimation:
+    status: conditional
+    explanation: 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95; reference
+      map_pose missing: map_pose: none of /pf/viz/inferred_pose, /slam_pose, /pose in the bag'
+    reasons:
+    - 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95'
+    - 'conditional: reference map_pose missing: map_pose: none of /pf/viz/inferred_pose, /slam_pose, /pose
+      in the bag'
+  steering_response:
+    status: conditional
+    explanation: 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95; reference
+      measured_steering missing: measured_steering: none of /steering/measured in the bag'
+    reasons:
+    - 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95'
+    - 'conditional: reference measured_steering missing: measured_steering: none of /steering/measured
+      in the bag'
+  lateral_acceleration:
+    status: conditional
+    explanation: 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95; reference
+      car_imu missing: car_imu: none of /imu/data, /imu/vesc/data, /imu/bno/data in the bag'
+    reasons:
+    - 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95'
+    - 'conditional: reference car_imu missing: car_imu: none of /imu/data, /imu/vesc/data, /imu/bno/data
+      in the bag'
+  algorithm_accuracy:
+    status: conditional
+    explanation: 'conditional: recording: the car was already moving when the bag started; wheel_odom
+      (/odom) coverage 0.9433, usable needs at least 0.95; scan (/scan) coverage 0.9432, usable needs
+      at least 0.95; reference drive_intent missing: drive_intent: none of /drive_intent in the bag; reference
+      map_pose missing: map_pose: none of /pf/viz/inferred_pose, /slam_pose, /pose in the bag; autonomous_s
+      16.6998, usable needs at least 20'
+    reasons:
+    - 'conditional: recording: the car was already moving when the bag started'
+    - 'conditional: wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95'
+    - 'conditional: scan (/scan) coverage 0.9432, usable needs at least 0.95'
+    - 'conditional: reference drive_intent missing: drive_intent: none of /drive_intent in the bag'
+    - 'conditional: reference map_pose missing: map_pose: none of /pf/viz/inferred_pose, /slam_pose, /pose
+      in the bag'
+    - 'conditional: autonomous_s 16.6998, usable needs at least 20'
+recording:
+  status: usable
+  flags:
+  - started_late
+  bag: true
+  bag_closed: true
+  bag_files: 1
+  bag_messages: 32555
+  duration_s: 70.5936
+  bag_bytes: 18533764
+  auto_record: true
+  superseded: false
+  recorder_killed: false
+  bag_exit_code: null
+  recorder_failures: []
+  stop_reason: no algorithm publishing for 3.0 s
+  messages_read: 32555
+  read_error: null
+run_info:
+  schema: 1
+  run_id: 20261030-190519
+  recorder: auto_record
+  started: '2026-10-30T19:05:19-07:00'
+  car_id: unknown
+  host: unknown
+  workspace_commit: ffbfac098fcb3857ad672f28346aa96e9aec5224
+  algorithms:
+    /drive:
+    - /ftg_node
+  topics: unknown
+  source: reconstructed from the run folder (recorded before run_info.yaml existed)
+  bag_start_utc: '2026-10-31T02:05:21+00:00'
+  algorithm_nodes:
+  - ftg_node
+  algorithm_source: auto_record.yaml
+signals:
+  scan:
+    topic: /scan
+    status: conditional
+    reasons:
+    - scan (/scan) coverage 0.9432, usable needs at least 0.95
+    alternatives: []
+  wheel_odom:
+    topic: /odom
+    status: conditional
+    reasons:
+    - wheel_odom (/odom) coverage 0.9433, usable needs at least 0.95
+    alternatives: []
+  odom_tf:
+    topic: /tf odom->base_link
+    status: conditional
+    reasons:
+    - odom_tf (/tf odom->base_link) coverage 0.9435, usable needs at least 0.95
+    alternatives: []
+  laser_mount:
+    topic: /tf_static base_link->laser
+    status: usable
+    reasons: []
+    alternatives: []
+  imu:
+    topic: /sensors/imu/raw
+    status: usable
+    reasons: []
+    alternatives: []
+  car_imu:
+    topic: null
+    status: missing
+    reasons:
+    - 'car_imu: none of /imu/data, /imu/vesc/data, /imu/bno/data in the bag'
+    alternatives: []
+  vesc_state:
+    topic: /sensors/core
+    status: usable
+    reasons: []
+    alternatives: []
+  steering_command:
+    topic: /ackermann_cmd
+    status: usable
+    reasons: []
+    alternatives:
+    - /drive
+  drive_command:
+    topic: /drive
+    status: usable
+    reasons: []
+    alternatives: []
+  measured_steering:
+    topic: null
+    status: missing
+    reasons:
+    - 'measured_steering: none of /steering/measured in the bag'
+    alternatives: []
+  joy:
+    topic: /joy
+    status: usable
+    reasons: []
+    alternatives: []
+  drive_intent:
+    topic: null
+    status: missing
+    reasons:
+    - 'drive_intent: none of /drive_intent in the bag'
+    alternatives: []
+  map_pose:
+    topic: null
+    status: missing
+    reasons:
+    - 'map_pose: none of /pf/viz/inferred_pose, /slam_pose, /pose in the bag'
+    alternatives: []
+metrics:
+  distance_m: 42.7926
+  moving_s: 17.9005
+  max_speed_mps: 3.4089
+  speed_swings: 8
+  lb_held_s: 17.6861
+  lb_holds: 1
+  carried_between_holds: 0
+  steering_std_rad: 0.1234
+  steering_reversals: 106
+  measured_steering_finite_fraction: null
+  lateral_accel_p95_mps2: 3.2047
+  cornering_s: 13.7494
+  measured_lateral_accel_p95_mps2: null
+  autonomous_s: 16.6998
+  autonomous_distance_m: 40.8789
+  duration_s: 70.5936
+  algorithm_known: 1
+activity:
+  first_odom_speed_mps: 2.9
+  max_speed_mps: 3.41
+  moved: true
+  started_late: true
+  lb_held_fraction: 0.259
+streams:
+  /ackermann_cmd: {type: ackermann_msgs/msg/AckermannDriveStamped, count: 2592, valid_fraction: 1.0, rate_hz: 40.0121,
+    max_gap_s: 0.3534, coverage: 0.9169, stamp_problem_fraction: 0.0}
+  /commands/motor/speed: {type: std_msgs/msg/Float64, count: 2588, valid_fraction: null, rate_hz: 40.0193,
+    max_gap_s: 0.3548, coverage: 0.9154, stamp_problem_fraction: null}
+  /commands/servo/position: {type: std_msgs/msg/Float64, count: 2588, valid_fraction: null, rate_hz: 40.0201,
+    max_gap_s: 0.3551, coverage: 0.9154, stamp_problem_fraction: null}
+  /diagnostics: {type: diagnostic_msgs/msg/DiagnosticArray, count: 267, valid_fraction: null, rate_hz: 129.4718,
+    max_gap_s: 0.916, coverage: 0.9437, stamp_problem_fraction: null}
+  /drive: {type: ackermann_msgs/msg/AckermannDriveStamped, count: 2710, valid_fraction: 1.0, rate_hz: 40.0388,
+    max_gap_s: 0.3531, coverage: 0.9592, stamp_problem_fraction: 0.0004}
+  /joy: {type: sensor_msgs/msg/Joy, count: 1116, valid_fraction: 1.0, rate_hz: 19.7688, max_gap_s: 0.3439,
+    coverage: 0.9572, stamp_problem_fraction: 0.0}
+  /odom: {type: nav_msgs/msg/Odometry, count: 3330, valid_fraction: 1.0, rate_hz: 50.04, max_gap_s: 0.0283,
+    coverage: 0.9433, stamp_problem_fraction: 0.0}
+  /parameter_events: {type: rcl_interfaces/msg/ParameterEvent, count: 0, valid_fraction: null, rate_hz: null,
+    max_gap_s: null, coverage: 0.0, stamp_problem_fraction: null}
+  /rosout: {type: rcl_interfaces/msg/Log, count: 606, valid_fraction: null, rate_hz: 25.4418, max_gap_s: 1.5509,
+    coverage: 0.9103, stamp_problem_fraction: null}
+  /safety/brake: {type: std_msgs/msg/Bool, count: 1408, valid_fraction: null, rate_hz: 20.0017, max_gap_s: 0.3641,
+    coverage: 1.0, stamp_problem_fraction: null}
+  /scan: {type: sensor_msgs/msg/LaserScan, count: 2666, valid_fraction: 1.0, rate_hz: 40.0193, max_gap_s: 0.0286,
+    coverage: 0.9432, stamp_problem_fraction: 0.0}
+  /sensors/core: {type: vesc_msgs/msg/VescStateStamped, count: 3380, valid_fraction: 1.0, rate_hz: 50.0144,
+    max_gap_s: 0.3401, coverage: 0.9575, stamp_problem_fraction: 0.0}
+  /sensors/imu/raw: {type: sensor_msgs/msg/Imu, count: 3381, valid_fraction: 1.0, rate_hz: 50.02, max_gap_s: 0.3399,
+    coverage: 0.9577, stamp_problem_fraction: 0.0}
+  /sensors/servo_position_command: {type: std_msgs/msg/Float64, count: 2591, valid_fraction: null, rate_hz: 40.005,
+    max_gap_s: 0.3546, coverage: 0.9165, stamp_problem_fraction: null}
+  /tf: {type: tf2_msgs/msg/TFMessage, count: 3331, valid_fraction: null, rate_hz: 50.0349, max_gap_s: 0.0272,
+    coverage: 0.9435, stamp_problem_fraction: null}
+  /tf odom->base_link: {type: tf2_msgs/msg/TFMessage, count: 3331, valid_fraction: 1.0, rate_hz: 50.0349,
+    max_gap_s: 0.0272, coverage: 0.9435, stamp_problem_fraction: 0.0}
+  /tf_static: {type: tf2_msgs/msg/TFMessage, count: 1, valid_fraction: null, rate_hz: null, max_gap_s: null,
+    coverage: 0.0, stamp_problem_fraction: null}
+  /tf_static base_link->laser: {type: tf2_msgs/msg/TFMessage, count: 1, valid_fraction: 1.0, rate_hz: null,
+    max_gap_s: null, coverage: 0.0, stamp_problem_fraction: null}
+error: null
