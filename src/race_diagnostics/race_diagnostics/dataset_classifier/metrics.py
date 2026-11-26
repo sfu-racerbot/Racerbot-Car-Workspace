@@ -4,36 +4,18 @@ metrics.py -- the numbers a recording is graded on, from plain arrays.
 No ROS and no bag reading here (bag_stats.py does that), so every function can
 be checked against a closed form. Times are bag receive times in seconds.
 
-The driving-code names, scan_change and moved_between came from
-tools/run_analysis/run_triage.py, which imports them back from here, so the
-triage tool and the classifier judge "carried between holds" the same way.
+scan_change and moved_between came from tools/run_analysis/run_triage.py,
+which imports them back from here, so the triage tool and the classifier judge
+"carried between holds" the same way. Which code drove a run is algorithms.py.
 """
 
 import math
-import re
 
 import numpy as np
 
-# Driving and mapping code that can appear in processes.txt, ours and team A's.
-DRIVERS = re.compile(r'\b(gap_follow_node|pure_pursuit_node|auto_map_race_node|stanley\w*_node|lqr\w*_node|'
-                     r'mpc\w*_node|neural_racer_node|ftg_node|disparity_extender_node|racerbot_[ab]\w*|'
-                     r'async_slam_toolbox_node|joy_teleop)\b')
-# In DRIVERS, but they do not drive the car by themselves: SLAM, and the
-# manual gamepad layer. A run with only these has no algorithm to judge.
-NOT_AN_ALGORITHM = frozenset({'async_slam_toolbox_node', 'joy_teleop'})
 STILL_MPS = 0.02  # wheel speed of a parked car
 MOVED_M = 0.15  # median change of the scan, parked, that means the car is somewhere else
 GRAVITY = 9.80665  # m/s^2 per g
-
-
-def algorithms(processes_text):
-    """The driving and mapping code in a run's metadata/processes.txt, sorted, each once."""
-    return sorted(set(DRIVERS.findall(processes_text)))
-
-
-def driving_algorithms(names):
-    """The names that are a driving algorithm, without SLAM and the gamepad layer."""
-    return sorted(name for name in names if name.strip('/') not in NOT_AN_ALGORITHM)
 
 
 def scan_change(a, b):

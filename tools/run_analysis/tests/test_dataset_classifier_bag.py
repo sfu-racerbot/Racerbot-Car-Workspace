@@ -7,6 +7,8 @@ Oracles:
   * recorded measurements: each bag's own bag/metadata.yaml (message counts per topic), and the `activity:` that
     run_activity.py wrote into auto_record.yaml on the car with rosbag2_py, a different reader;
   * invariants: runlog.py's LB holds and moved_between over every scan agree with the classifier's;
+  * independent sources: which gap follower ran, from metadata/processes.txt and from the parameters the node
+    itself reported (metadata/params/gap_follow_node.yaml), agree on every run that has both;
   * change detectors (not oracles), labelled where used: every committed qualification.yaml regrades from its own
     stored numbers to its stored grades under the current rules, the small runs re-measure to their committed
     files byte for byte, and data/dataset_inventory.csv is what the committed qualification files rebuild to.
@@ -14,6 +16,7 @@ Oracles:
         python3 tools/run_analysis/run_triage.py --qualify --all
 """
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -28,6 +31,8 @@ sys.path.insert(0, str(ROOT / 'src' / 'race_diagnostics'))
 from run_analysis import bagread, runlog  # noqa: E402
 from race_diagnostics.dataset_classifier import classifier as cl, load_rules, outputs  # noqa: E402
 from race_diagnostics.dataset_classifier import metrics as mx  # noqa: E402
+from race_diagnostics.dataset_classifier import algorithms as al  # noqa: E402
+from race_diagnostics.dataset_classifier.run_info import read_run_info  # noqa: E402
 from race_diagnostics.dataset_classifier.bag_stats import read_streams  # noqa: E402
 
 RULES = load_rules()
@@ -189,3 +194,61 @@ def test_a_dry_run_over_one_run_prints_the_table_and_writes_nothing(tmp_path):
     assert 'application' in out.stdout and 'lateral_acceleration' in out.stdout
     assert sorted((p.name, p.stat().st_mtime_ns) for p in run.iterdir()) == before
     assert (DATA / outputs.INVENTORY).stat().st_mtime_ns == inventory
+
+
+# --------------------------------------------------------------------------- which code drove
+
+# racerbot_a's reactive gap follower, which starts a node named like this workspace's: gap_follow_node.
+TEAM_A_GAP_FOLLOW_RUNS = ['rb2/racerbot_runs/20261030-182852', 'rb2/racerbot_runs/20261109-183455',
+                          'rb2/racerbot_runs/20261109-183910']
+
+
+@pytest.mark.parametrize('run', TEAM_A_GAP_FOLLOW_RUNS)
+def test_team_a_gap_follower_runs_are_named_as_racerbot_a_code(run):
+    # Independent of the processes.txt match: the node reported reactive's own parameter, not this workspace's.
+    reported = al.reported_parameters(DATA / run / 'metadata' / 'params' / 'gap_follow_node.yaml')
+    assert 'use_fallback_method' in reported and 'enable_deadman' not in reported
+    info = read_run_info(DATA / run, known=RULES['algorithms'])
+    assert info['algorithm_nodes'] == ['gap_follow_node']
+    assert [(c['code'], c['repo'], c['from']) for c in info['algorithm_code']] == [
+        ('reactive/gap_follow_node', 'racerbot_a', 'metadata/processes.txt')]
+
+
+def test_processes_and_the_parameter_snapshot_agree_on_every_recorded_gap_follower(tmp_path):
+    known = RULES['algorithms']
+    seen = {}
+    for run_dir in RUNS:
+        processes = run_dir / 'metadata' / 'processes.txt'
+        params = run_dir / 'metadata' / 'params' / 'gap_follow_node.yaml'
+        if not (processes.is_file() and params.is_file()):
+            continue
+        by_process = [code for node, code in al.from_processes(processes.read_text(errors='replace'), known)
+                      if node == 'gap_follow_node']
+        # The same run with its processes.txt left out: only the parameter snapshot can say.
+        only_params = tmp_path / run_dir.relative_to(DATA).as_posix().replace('/', '_')
+        (only_params / 'metadata' / 'params').mkdir(parents=True)
+        shutil.copy(params, only_params / 'metadata' / 'params')
+        by_params = [c['code'] for c in al.identify(['gap_follow_node'], known, only_params)]
+        assert by_params == by_process, run_dir
+        seen[str(run_dir.relative_to(DATA))] = by_process[0]
+    # Not vacuous: runs of both packages were compared.
+    assert sorted(run for run, code in seen.items() if code == 'reactive/gap_follow_node') == TEAM_A_GAP_FOLLOW_RUNS
+    assert 'gap_follow/gap_follow_node' in seen.values()
+
+
+def test_every_recorded_algorithm_is_on_the_list():
+    """A run showing unknown/<node> needs that code added to classification_rules.yaml's algorithms:."""
+    unknown, found = {}, set()
+    for run_dir in RUNS:
+        info = read_run_info(run_dir, known=RULES['algorithms'])
+        if not isinstance(info['algorithm_code'], list):
+            continue
+        for item in info['algorithm_code']:
+            found.add((item['code'], item['from'].split(' ')[0]))
+            if item['code'].startswith('unknown/'):
+                unknown.setdefault(str(run_dir.relative_to(DATA)), []).append(item['from'])
+    assert unknown == {}
+    # Not vacuous: each way of matching was used, and the map_course runs (no processes.txt) were among them.
+    assert {('reactive/gap_follow_node', 'metadata/processes.txt'), ('ftg/ftg_node', 'metadata/processes.txt'),
+            ('gap_follow/gap_follow_node', 'metadata/params/gap_follow_node.yaml'),
+            ('pure_pursuit/auto_map_race_node', 'node')} <= found

@@ -247,11 +247,6 @@ def test_lb_windows_close_at_the_last_message_and_drop_short_holds():
     assert mx.lb_windows([], [], 0.5) == []
 
 
-def test_driving_algorithms_leave_out_slam_and_the_gamepad():
-    assert mx.driving_algorithms(['async_slam_toolbox_node', 'joy_teleop']) == []
-    assert mx.driving_algorithms(['/gap_follow_node', 'joy_teleop']) == ['/gap_follow_node']
-
-
 def _replay(scan_t, scans, joy_t, held):
     """Feed a CarryTracker in bag order, joy first on equal times."""
     tracker = CarryTracker()

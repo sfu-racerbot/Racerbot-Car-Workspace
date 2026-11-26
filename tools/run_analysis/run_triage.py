@@ -32,12 +32,23 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(ROOT / 'src' / 'race_diagnostics'))
 
-# The driving-code names and the carried-between-holds check live with the classifier now, so the two can
-# never disagree; imported back under their old names.
+# The carried-between-holds check and the list of driving code live with the classifier, so the two can never
+# disagree; imported back under their old names.
 from race_diagnostics.dataset_classifier.metrics import (  # noqa: E402,F401
-    DRIVERS, MOVED_M, STILL_MPS, algorithms, moved_between, scan_change)
+    MOVED_M, STILL_MPS, moved_between, scan_change)
+from race_diagnostics.dataset_classifier.algorithms import from_processes  # noqa: E402
 
 SHORT_S = 5.0  # less LB than this is not a mapping run
+
+
+def algorithms(processes_text, known=None):
+    """The driving and mapping code running in a run's metadata/processes.txt, as package/executable (so
+    racerbot_a's reactive/gap_follow_node is not this workspace's gap_follow/gap_follow_node), sorted, each
+    once. known: the classifier's algorithms list, from its rules file unless given."""
+    if known is None:
+        from race_diagnostics.dataset_classifier import load_rules
+        known = load_rules()['algorithms']
+    return sorted({code for _, code in from_processes(processes_text, known)})
 
 
 def hold_stats(odom, windows):

@@ -23,6 +23,7 @@ import numpy as np
 from race_diagnostics.run_activity import summarize
 
 from . import metrics as mx
+from .algorithms import drove
 from .bag_stats import JOY, ODOM, SCAN, bag_metadata, read_streams, stream_stats, transform_key
 from .rules import CHECKS, RANK, level, load_rules, worst
 from .run_info import read_run_info, UNKNOWN
@@ -111,8 +112,8 @@ def _metrics(streams, sources, carry, facts, info, rules):
                          'measured_lateral_accel_p95_mps2', 'autonomous_s',
                          'autonomous_distance_m'))
     out['duration_s'] = facts.get('duration_s')
-    names = info.get('algorithm_nodes')
-    out['algorithm_known'] = int(isinstance(names, list) and bool(mx.driving_algorithms(names)))
+    code = info.get('algorithm_code')
+    out['algorithm_known'] = int(isinstance(code, list) and drove(code))
 
     odom = streams.get(sources.get('wheel_odom') or '')
     odom_t = odom.times() if odom else np.zeros(0)
@@ -185,7 +186,7 @@ def measure(run_dir, rules, backend='auto'):
     bag_dir = run_dir / 'bag'
     bag_info = bag_metadata(bag_dir) if bag_dir.is_dir() else None
     facts = _recording_facts(run_dir, bag_info)
-    info = read_run_info(run_dir, bag_info)
+    info = read_run_info(run_dir, bag_info, rules['algorithms'])
     measured = {'run_info': info, 'recording': facts, 'streams': {}, 'sources': {},
                 'alternatives': {}, 'metrics': {}, 'activity': None}
     if not facts['bag'] or not facts['bag_closed']:

@@ -7,7 +7,7 @@ car: rb2
 classifier:
   version: 1
   rules: classification_rules.yaml
-  rules_sha256: 66fef5fca61b6c4eceb358c267098b41f8dfceaa026ffe59339c1b0cfcbf5cae
+  rules_sha256: ee1483c875929c6657c19e2641d902adc474e2064995ea837c084e56b9556606
 summary:
   localization: conditional
   velocity_estimation: unusable
@@ -88,6 +88,7 @@ run_info:
   bag_start_utc: '2026-10-20T03:07:05+00:00'
   algorithm_nodes: unknown
   algorithm_source: unknown
+  algorithm_code: unknown
 signals:
   scan:
     topic: /scan

@@ -58,7 +58,7 @@ ros2 run race_diagnostics summarize_run <dir>
 | `config/race_diagnostics.yaml` | Topics, reporting cadence, pose-lag alert threshold. |
 | `config/auto_record.yaml` | Which topics mean "an algorithm is running", which nodes are another recorder, the start/stop delays. |
 | `race_diagnostics/dataset_classifier/` | Grades a recorded run for five uses and writes `qualification.yaml` and `data/dataset_inventory.csv`. Its `__init__.py` lists the public functions; reads bags only, no rclpy. See [dataset qualification](../../docs/run-diagnostics.md#dataset-qualification). |
-| `config/classification_rules.yaml` | Every threshold the dataset classifier applies. Checked on load: an unknown key or impossible threshold is refused. |
+| `config/classification_rules.yaml` | Every threshold the dataset classifier applies, and the `algorithms:` list that names whose code drove a run (`reactive/gap_follow_node` is team A's, `gap_follow/gap_follow_node` ours). Checked on load: an unknown key, impossible threshold, or two entries it could not tell apart is refused. |
 
 ## Tests
 

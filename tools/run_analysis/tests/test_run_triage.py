@@ -22,7 +22,9 @@ PROCESSES = """    PID    PPID                  STARTED COMMAND
 
 
 def test_algorithms_names_the_driving_code_once_each_and_not_the_dashboard():
-    assert rt.algorithms(PROCESSES) == ['async_slam_toolbox_node', 'disparity_extender_node']
+    # package/executable from each install path; disparity_extender runs twice and is listed once.
+    assert rt.algorithms(PROCESSES) == ['disparity_extender/disparity_extender_node',
+                                        'slam_toolbox/async_slam_toolbox_node']
     assert rt.algorithms('') == []
 
 

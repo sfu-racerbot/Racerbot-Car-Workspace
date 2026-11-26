@@ -726,6 +726,10 @@ command below after a session.
   changes.
 - **Old runs are graded the same way as new ones,** and anything an old run
   never recorded (its car, its algorithm) is written as `unknown`, not guessed.
+- **Names whose code drove, not just the node.** Team A's gap follower and ours
+  start a node with the same name. The inventory tells them apart by package
+  (`reactive/gap_follow_node` against `gap_follow/gap_follow_node`): three of
+  car 2's runs were listed as ours before 2026-11-26.
 - **About a minute** for all 63 folders (4.7 GB of bags) with `--jobs 4` on a
   12-core laptop.
 - **Checked against the raw data.** On four runs (parked, fast lapping, a late
@@ -837,7 +841,7 @@ recording:
 | `summary` | The five grades, one line each. |
 | `applications` | Per use: the grade, an `explanation` (the reasons that set the grade) and every `reason` found, worst first. |
 | `recording` | Whether the bag itself is sound: closed, fully readable, not killed or superseded (from `auto_record.yaml`). |
-| `run_info` | What the run was: recorder, car, algorithm, workspace commit. `source` says whether the recorder wrote it or it was rebuilt from an old run's files; anything not known is `unknown`. |
+| `run_info` | What the run was: recorder, car, algorithm, workspace commit. `source` says whether the recorder wrote it or it was rebuilt from an old run's files; anything not known is `unknown`. `algorithm_code` says whose code each algorithm node was, and how that was found ([Which code drove](#which-code-drove)). |
 | `signals` | For each role (scan, IMU, map pose...), which topic filled it, its grade and why, and the other topics that could have. |
 | `metrics` | The numbers the grades compare: distance, moving time, steering spread, lateral acceleration. |
 | `streams` | Per topic: message count, rate, longest gap, share valid, coverage, bad stamps. |
@@ -849,14 +853,63 @@ Never edit it by hand: the next regrade overwrites it.
 `data/dataset_inventory.csv` has one row per run folder, for both cars,
 sorted by car and time. A folder never graded shows `unclassified`.
 
-Its columns: car, run, path, recorder, start time, duration, algorithm,
-distance, moving time, top speed and LB time. Then the recording's own grade,
-the five grades, the five reasons (`<use>_why`), and the classifier and rules
-version that wrote them.
+Its columns, left to right:
+
+- what the run was: car, run, path, recorder, start time, duration;
+- the code that drove, as `package/executable` (`algorithms`), and whose
+  repository it came from (`algorithm_repos`);
+- distance, moving time, top speed and LB time;
+- the recording's own grade, the five grades and the five reasons (`<use>_why`);
+- the classifier and rules version that wrote them.
 
 Open it in any spreadsheet and filter a grade column. A car refreshes only its
 own rows, so the two cars' commits touch different lines. **If git reports a
 conflict in it anyway:** run `run_triage.py --inventory` and commit the result.
+
+### Which code drove
+
+Two teams' code can start a [node](glossary.md#node) with the same name. This
+workspace's `gap_follow` package and team A's `reactive` package (in
+[racerbot_a](https://github.com/sfu-racerbot/racerbot_a)) both run a node
+called `gap_follow_node`. So the inventory names code by its package and
+program, `<package>/<executable>`, and the repository it came from:
+
+| `algorithms` | `algorithm_repos` | What ran |
+|---|---|---|
+| `gap_follow/gap_follow_node` | `racerbot-ws` | this workspace's gap follower |
+| `reactive/gap_follow_node` | `racerbot_a` | team A's gap follower |
+| `unknown/gap_follow_node` | `unknown` | one of the two, and nothing in the run says which |
+
+The code the classifier knows is listed under `algorithms:` in
+[`classification_rules.yaml`](../src/race_diagnostics/config/classification_rules.yaml).
+Each node a run names is matched to one entry, trying these in order:
+
+1. **`metadata/processes.txt`**, the processes running while the run was
+   recorded. Each line holds the program's install path, such as
+   `install/reactive/lib/reactive/gap_follow_node`, which names the package
+   exactly.
+2. **The node name,** when only one entry starts a node of that name.
+   `ftg_node` is only ever team A's.
+3. **The parameter snapshot,** `metadata/params/<node>.yaml`, for a run with no
+   `processes.txt` (a hand-started or `map_course` recording). Entries that
+   share a node name each list one parameter only their code declares:
+   `enable_deadman` for ours, `use_fallback_method` for team A's.
+
+Anything else is `unknown/<node>`, with the reason in `qualification.yaml`
+under `run_info.algorithm_code`. SLAM and the gamepad layer are listed there
+too, but they never drive the car by themselves, so they never count as an
+algorithm and are left out of the inventory's `algorithms` column.
+
+**Adding a new driving node:** add a line for it under `algorithms:` (package
+and executable, repository, node name), then regrade. Until you do, its runs
+show `unknown/<node>`, and the tool suite's
+`test_every_recorded_algorithm_is_on_the_list` fails, naming them.
+
+**Checked (2026-11-26):** on all 20 runs with both a `processes.txt` and a
+parameter snapshot of `gap_follow_node`, the two name the same package. Before
+this, the inventory listed team A's three `reactive` runs on car 2
+(`20261030-182852`, `20261109-183455`, `20261109-183910`) as plain
+`gap_follow_node`, the same as ours.
 
 ### Changing the rules
 
@@ -932,6 +985,11 @@ release at 2.7 m/s.
   `metadata/processes.txt`, else the parameter snapshot in `metadata/params/`.
   Five folders on car 2 hold none of these (two have no bag at all), so their
   algorithm is `unknown` and algorithm accuracy is at best conditional.
+- **Team A's runs are at best conditional for algorithm accuracy.** That use
+  needs `/drive_intent`, what the algorithm was trying to do, as its reference.
+  No `racerbot_a` node publishes it yet (checked on its `main`, `b9bfd35`), so
+  every `ftg`, `disparity_extender` and `reactive` run stops at "reference
+  drive_intent missing".
 
 ## When mapping fails: the tools, in order
 

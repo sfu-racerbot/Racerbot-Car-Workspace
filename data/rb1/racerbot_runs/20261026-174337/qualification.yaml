@@ -7,7 +7,7 @@ car: rb1
 classifier:
   version: 1
   rules: classification_rules.yaml
-  rules_sha256: 66fef5fca61b6c4eceb358c267098b41f8dfceaa026ffe59339c1b0cfcbf5cae
+  rules_sha256: ee1483c875929c6657c19e2641d902adc474e2064995ea837c084e56b9556606
 summary:
   localization: conditional
   velocity_estimation: conditional
@@ -75,7 +75,24 @@ run_info:
   algorithm_nodes:
   - auto_map_race_node
   - gap_follow_node
+  - slam_toolbox
   algorithm_source: metadata/params
+  algorithm_code:
+  - node: auto_map_race_node
+    code: pure_pursuit/auto_map_race_node
+    repo: racerbot-ws
+    role: driving
+    from: node name
+  - node: gap_follow_node
+    code: gap_follow/gap_follow_node
+    repo: racerbot-ws
+    role: driving
+    from: metadata/params/gap_follow_node.yaml (enable_deadman)
+  - node: slam_toolbox
+    code: slam_toolbox/async_slam_toolbox_node
+    repo: slam_toolbox
+    role: mapping
+    from: node name
 signals:
   scan:
     topic: /scan
