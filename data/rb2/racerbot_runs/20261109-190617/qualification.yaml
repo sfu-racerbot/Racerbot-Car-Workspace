@@ -1,0 +1,211 @@
+# Written by race_diagnostics.dataset_classifier from this run's bag and
+# metadata; regenerated, never edited. How to read it:
+# docs/run-diagnostics.md#dataset-qualification
+schema: 1
+run_id: 20261109-190617
+car: rb2
+classifier:
+  version: 1
+  rules: classification_rules.yaml
+  rules_sha256: 66fef5fca61b6c4eceb358c267098b41f8dfceaa026ffe59339c1b0cfcbf5cae
+summary:
+  localization: usable
+  velocity_estimation: usable
+  steering_response: conditional
+  lateral_acceleration: conditional
+  algorithm_accuracy: conditional
+applications:
+  localization:
+    status: usable
+    explanation: 'usable: every required signal, reference and threshold met (distance_m 55.2042, moving_s
+      21.5203, carried_between_holds 0)'
+    reasons: []
+  velocity_estimation:
+    status: usable
+    explanation: 'usable: every required signal, reference and threshold met (moving_s 21.5203, max_speed_mps
+      5.4171, speed_swings 11)'
+    reasons: []
+  steering_response:
+    status: conditional
+    explanation: 'conditional: reference measured_steering missing: measured_steering: none of /steering/measured
+      in the bag'
+    reasons:
+    - 'conditional: reference measured_steering missing: measured_steering: none of /steering/measured
+      in the bag'
+  lateral_acceleration:
+    status: conditional
+    explanation: 'conditional: reference car_imu missing: car_imu: none of /imu/data, /imu/vesc/data,
+      /imu/bno/data in the bag'
+    reasons:
+    - 'conditional: reference car_imu missing: car_imu: none of /imu/data, /imu/vesc/data, /imu/bno/data
+      in the bag'
+  algorithm_accuracy:
+    status: conditional
+    explanation: 'conditional: recording: the car was already moving when the bag started; algorithm_known
+      0, usable needs at least 1; autonomous_s 18.8674, usable needs at least 20'
+    reasons:
+    - 'conditional: recording: the car was already moving when the bag started'
+    - 'conditional: algorithm_known 0, usable needs at least 1'
+    - 'conditional: autonomous_s 18.8674, usable needs at least 20'
+recording:
+  status: usable
+  flags:
+  - started_late
+  bag: true
+  bag_closed: true
+  bag_files: 1
+  bag_messages: 51658
+  duration_s: 92.9968
+  bag_bytes: 27949559
+  auto_record: false
+  messages_read: 51658
+  read_error: null
+run_info:
+  schema: 1
+  run_id: 20261109-190617
+  recorder: unknown
+  started: unknown
+  car_id: unknown
+  host: unknown
+  workspace_commit: unknown
+  algorithms: unknown
+  topics: unknown
+  source: reconstructed from the run folder (recorded before run_info.yaml existed)
+  bag_start_utc: '2026-11-10T03:06:18+00:00'
+  algorithm_nodes: unknown
+  algorithm_source: unknown
+signals:
+  scan:
+    topic: /scan
+    status: usable
+    reasons: []
+    alternatives: []
+  wheel_odom:
+    topic: /odom
+    status: usable
+    reasons: []
+    alternatives: []
+  odom_tf:
+    topic: /tf odom->base_link
+    status: usable
+    reasons: []
+    alternatives: []
+  laser_mount:
+    topic: /tf_static base_link->laser
+    status: usable
+    reasons: []
+    alternatives: []
+  imu:
+    topic: /sensors/imu/raw
+    status: usable
+    reasons: []
+    alternatives: []
+  car_imu:
+    topic: null
+    status: missing
+    reasons:
+    - 'car_imu: none of /imu/data, /imu/vesc/data, /imu/bno/data in the bag'
+    alternatives: []
+  vesc_state:
+    topic: /sensors/core
+    status: usable
+    reasons: []
+    alternatives: []
+  steering_command:
+    topic: /ackermann_cmd
+    status: usable
+    reasons: []
+    alternatives:
+    - /drive
+  drive_command:
+    topic: /drive
+    status: usable
+    reasons: []
+    alternatives: []
+  measured_steering:
+    topic: null
+    status: missing
+    reasons:
+    - 'measured_steering: none of /steering/measured in the bag'
+    alternatives: []
+  joy:
+    topic: /joy
+    status: usable
+    reasons: []
+    alternatives: []
+  drive_intent:
+    topic: /drive_intent
+    status: usable
+    reasons: []
+    alternatives: []
+  map_pose:
+    topic: /pf/viz/inferred_pose
+    status: usable
+    reasons: []
+    alternatives: []
+metrics:
+  distance_m: 55.2042
+  moving_s: 21.5203
+  max_speed_mps: 5.4171
+  speed_swings: 11
+  lb_held_s: 19.1632
+  lb_holds: 3
+  carried_between_holds: 0
+  steering_std_rad: 0.1536
+  steering_reversals: 16
+  measured_steering_finite_fraction: null
+  lateral_accel_p95_mps2: 3.2437
+  cornering_s: 13.9499
+  measured_lateral_accel_p95_mps2: null
+  autonomous_s: 18.8674
+  autonomous_distance_m: 50.6095
+  duration_s: 92.9968
+  algorithm_known: 0
+activity:
+  first_odom_speed_mps: 2.05
+  max_speed_mps: 5.42
+  moved: true
+  started_late: true
+  lb_held_fraction: 0.217
+streams:
+  /ackermann_cmd: {type: ackermann_msgs/msg/AckermannDriveStamped, count: 3446, valid_fraction: 1.0, rate_hz: 40.0338,
+    max_gap_s: 0.2044, coverage: 0.9333, stamp_problem_fraction: 0.0}
+  /commands/motor/speed: {type: std_msgs/msg/Float64, count: 3411, valid_fraction: null, rate_hz: 40.0113,
+    max_gap_s: 0.202, coverage: 0.9237, stamp_problem_fraction: null}
+  /commands/servo/position: {type: std_msgs/msg/Float64, count: 3412, valid_fraction: null, rate_hz: 40.0247,
+    max_gap_s: 0.202, coverage: 0.924, stamp_problem_fraction: null}
+  /diagnostics: {type: diagnostic_msgs/msg/DiagnosticArray, count: 446, valid_fraction: null, rate_hz: 60.2942,
+    max_gap_s: 0.622, coverage: 0.9629, stamp_problem_fraction: null}
+  /drive: {type: ackermann_msgs/msg/AckermannDriveStamped, count: 3445, valid_fraction: 1.0, rate_hz: 40.0008,
+    max_gap_s: 0.1845, coverage: 0.9331, stamp_problem_fraction: 0.0}
+  /drive_intent: {type: std_msgs/msg/String, count: 1339, valid_fraction: 1.0, rate_hz: 13.7851, max_gap_s: 0.2703,
+    coverage: 0.9328, stamp_problem_fraction: 0.0}
+  /joy: {type: sensor_msgs/msg/Joy, count: 1531, valid_fraction: 1.0, rate_hz: 19.6331, max_gap_s: 0.1048,
+    coverage: 0.9678, stamp_problem_fraction: 0.0}
+  /map: {type: nav_msgs/msg/OccupancyGrid, count: 1, valid_fraction: null, rate_hz: null, max_gap_s: null,
+    coverage: 0.0, stamp_problem_fraction: null}
+  /odom: {type: nav_msgs/msg/Odometry, count: 4536, valid_fraction: 1.0, rate_hz: 50.0573, max_gap_s: 0.0797,
+    coverage: 0.9754, stamp_problem_fraction: 0.0}
+  /parameter_events: {type: rcl_interfaces/msg/ParameterEvent, count: 0, valid_fraction: null, rate_hz: null,
+    max_gap_s: null, coverage: 0.0, stamp_problem_fraction: null}
+  /pf/viz/inferred_pose: {type: geometry_msgs/msg/PoseStamped, count: 4348, valid_fraction: 1.0, rate_hz: 49.8189,
+    max_gap_s: 0.1386, coverage: 0.954, stamp_problem_fraction: 0.0}
+  /rosout: {type: rcl_interfaces/msg/Log, count: 705, valid_fraction: null, rate_hz: 6.0519, max_gap_s: 1.3417,
+    coverage: 0.9737, stamp_problem_fraction: null}
+  /scan: {type: sensor_msgs/msg/LaserScan, count: 3589, valid_fraction: 1.0, rate_hz: 39.621, max_gap_s: 0.0572,
+    coverage: 0.9664, stamp_problem_fraction: 0.0}
+  /sensors/core: {type: vesc_msgs/msg/VescStateStamped, count: 4534, valid_fraction: 1.0, rate_hz: 50.0191,
+    max_gap_s: 0.0606, coverage: 0.975, stamp_problem_fraction: 0.0}
+  /sensors/imu/raw: {type: sensor_msgs/msg/Imu, count: 4538, valid_fraction: 1.0, rate_hz: 50.0412, max_gap_s: 0.0519,
+    coverage: 0.9759, stamp_problem_fraction: 0.0}
+  /sensors/servo_position_command: {type: std_msgs/msg/Float64, count: 3481, valid_fraction: null, rate_hz: 40.0771,
+    max_gap_s: 0.2343, coverage: 0.9429, stamp_problem_fraction: null}
+  /tf: {type: tf2_msgs/msg/TFMessage, count: 8895, valid_fraction: null, rate_hz: 98.7406, max_gap_s: 0.0659,
+    coverage: 0.9852, stamp_problem_fraction: null}
+  /tf odom->base_link: {type: tf2_msgs/msg/TFMessage, count: 4548, valid_fraction: 1.0, rate_hz: 50.0394,
+    max_gap_s: 0.0807, coverage: 0.9762, stamp_problem_fraction: 0.0}
+  /tf_static: {type: tf2_msgs/msg/TFMessage, count: 1, valid_fraction: null, rate_hz: null, max_gap_s: null,
+    coverage: 0.0, stamp_problem_fraction: null}
+  /tf_static base_link->laser: {type: tf2_msgs/msg/TFMessage, count: 1, valid_fraction: 1.0, rate_hz: null,
+    max_gap_s: null, coverage: 0.0, stamp_problem_fraction: null}
+error: null

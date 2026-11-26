@@ -697,6 +697,242 @@ the tool's header.
 The UVic race day is already done: [`data/race_days/2026-11-11-uvic/`](../data/race_days/2026-11-11-uvic/README.md)
 says which stretches were the races and which were testing.
 
+## Dataset qualification
+
+Every recording can be graded for what it is good for as data. One command
+writes a `qualification.yaml` into each run folder, and one spreadsheet,
+`data/dataset_inventory.csv`, lists every run with its grades. Use it to pick
+recordings for a study without opening sixty bags by hand.
+
+**It is not automatic yet.** Grading after every recording, from bringup's
+recorder, is the next step and not in this version. Until then, run the
+command below after a session.
+
+### Highlights
+
+- **Five uses, three grades each.** Every run gets usable, conditional or
+  unusable for localization, velocity estimation, steering response, lateral
+  acceleration and algorithm accuracy, each with a one-line reason. A run can be
+  usable for several uses at once.
+- **Every threshold is in one file,**
+  [`classification_rules.yaml`](../src/race_diagnostics/config/classification_rules.yaml).
+  Change a number, rerun one command, and every recording is regraded. A
+  misspelt key or impossible threshold is refused with its name, never ignored.
+- **It never changes a recording.** It only reads the bag and writes two
+  files of its own. On 2026-11-26, grading all 63 run folders left all 2,462
+  files already in `data/` byte for byte identical (checked with `sha256sum`).
+- **Safe to repeat.** Regrading writes nothing unless a grade or number
+  changed, so a second run leaves no new timestamps, duplicate rows or git
+  changes.
+- **Old runs are graded the same way as new ones,** and anything an old run
+  never recorded (its car, its algorithm) is written as `unknown`, not guessed.
+- **About a minute** for all 63 folders (4.7 GB of bags) with `--jobs 4` on a
+  12-core laptop.
+- **Checked against the raw data.** On four runs (parked, fast lapping, a late
+  start, a hand-started `map_course`), distance, moving time, top speed, LB
+  holds and steering spread match an independent recomputation exactly.
+
+**Why it exists.** By November 2026 the cars had made 63 recordings, most
+named only by a timestamp. Which ones hold a real turn-in for steering
+calibration, which have a map pose to check localization against, which are 8 s
+of a parked car: answering that meant opening each bag. Now it is a column in a
+spreadsheet.
+
+### Grading runs
+
+**Terminal: any, from the workspace root, with ROS sourced or the `rosbags`
+Python package installed (`pip install rosbags==0.10.11`). It starts no
+[node](glossary.md#node), publishes nothing, and never moves the car.**
+
+```bash
+# Look first: print the grades, write nothing
+python3 tools/run_analysis/run_triage.py --qualify --all --dry-run
+
+# Grade every run under data/ and rebuild the inventory
+python3 tools/run_analysis/run_triage.py --qualify --all --jobs 4
+
+# Grade only some runs (refreshes their car's rows of the inventory)
+python3 tools/run_analysis/run_triage.py --qualify data/<id>/racerbot_runs/<time> [more runs]
+
+# Rebuild only data/dataset_inventory.csv, from the qualification files already there
+python3 tools/run_analysis/run_triage.py --inventory
+```
+
+**Working when:** each run prints one line, then a table of counts:
+
+```text
+rb1/20261030-190408: localization=conditional velocity=conditional steering=conditional lateral=conditional algorithm=unusable
+...
+63 run(s)
+application             usable  conditional  unusable
+localization                11           42        10
+```
+
+**If a line ends in `ERROR ...`:** that run could not be read. It is graded
+unusable with the error as its reason; its files are untouched. **If it fails
+with `No module named 'rosbags'`:** install it, or source ROS first.
+
+`python3 -m race_diagnostics.dataset_classifier <run>` grades a single run the
+same way, from an installed workspace.
+
+### The five uses
+
+A **reference** below is ground truth to compare against. Without one a run
+can still be used, but only `conditional`: you have the data, not the answer.
+
+| Use | It needs | Reference | Usable when (shipped rules) |
+|---|---|---|---|
+| `localization` | `/scan`, wheel odometry (`/odom`), the `odom -> base_link` [transform](glossary.md#tf--transform--frame) | a map pose (`/pf/viz/inferred_pose`, `/slam_pose` or `/pose`) | 20 m driven, 10 s moving, never carried between LB holds |
+| `velocity_estimation` | `/odom`, an IMU, `/sensors/core` | a map pose | 10 s moving, 2 m/s top speed, 4 speed swings of 1 m/s |
+| `steering_response` | a steering command (`/ackermann_cmd`, else `/drive`), `/odom`, a gyro | `/steering/measured` | steering spread 0.05 rad and 6 reversals of 0.1 rad while moving, 10 s moving |
+| `lateral_acceleration` | a gyro, `/odom` | a calibrated car-axis IMU (`/imu/data`, `/imu/vesc/data` or `/imu/bno/data`) | 1.5 m/s² at the 95th percentile, 5 s above 1 m/s² |
+| `algorithm_accuracy` | an algorithm's `/drive`, `/odom`, `/joy`, `/scan` | `/drive_intent` and a map pose | a known algorithm, 20 s and 20 m driven by it with LB held |
+
+`/odom`'s turn rate is computed from the steering command, so it cannot measure
+how the car really turned. Steering response and lateral acceleration need a
+real gyro.
+
+The VESC's raw IMU (`/sensors/imu/raw`) counts as one. It reports g and deg/s
+in the board's own axes, so its gyro is projected on "up" as its own
+accelerometer measures it. No mounting calibration is assumed.
+
+### The three grades
+
+| Grade | Meaning |
+|---|---|
+| `usable` | Everything the use needs is there, valid, and enough of it. |
+| `conditional` | Usable with a caveat, named in the reason. Most often a missing reference, or a short or patchy stretch. Read the reason before using it. |
+| `unusable` | Something the use cannot do without is missing or broken, or the car did too little. The recording is still kept: unusable for one use says nothing about the others. |
+
+Most runs come out `conditional` (42 of 63 for localization) because they have
+no map pose: most were `gap_follow`, which runs without a map. That is the
+grade working, not a fault.
+
+### Reading qualification.yaml
+
+The file reads top to bottom from the answer to the evidence. An excerpt
+from car 1's `20261030-190408`, a run of team A's `ftg` whose bag began with
+the car already at 2.2 m/s:
+
+```yaml
+summary:
+  localization: conditional
+  algorithm_accuracy: unusable
+applications:
+  algorithm_accuracy:
+    status: unusable
+    explanation: 'unusable: autonomous_s 4.8699, usable needs at least 20'
+    reasons:
+    - 'unusable: autonomous_s 4.8699, usable needs at least 20'
+    - 'conditional: recording: the car was already moving when the bag started'
+    - 'conditional: scan (/scan) coverage 0.8599, usable needs at least 0.95'
+    - ...  # no /drive_intent, no map pose, 12.2 m driven
+recording:
+  status: usable
+  flags: [started_late]
+```
+
+| Section | What it holds |
+|---|---|
+| `summary` | The five grades, one line each. |
+| `applications` | Per use: the grade, an `explanation` (the reasons that set the grade) and every `reason` found, worst first. |
+| `recording` | Whether the bag itself is sound: closed, fully readable, not killed or superseded (from `auto_record.yaml`). |
+| `run_info` | What the run was: recorder, car, algorithm, workspace commit. `source` says whether the recorder wrote it or it was rebuilt from an old run's files; anything not known is `unknown`. |
+| `signals` | For each role (scan, IMU, map pose...), which topic filled it, its grade and why, and the other topics that could have. |
+| `metrics` | The numbers the grades compare: distance, moving time, steering spread, lateral acceleration. |
+| `streams` | Per topic: message count, rate, longest gap, share valid, coverage, bad stamps. |
+
+Never edit it by hand: the next regrade overwrites it.
+
+### The inventory
+
+`data/dataset_inventory.csv` has one row per run folder, for both cars,
+sorted by car and time. A folder never graded shows `unclassified`.
+
+Its columns: car, run, path, recorder, start time, duration, algorithm,
+distance, moving time, top speed and LB time. Then the recording's own grade,
+the five grades, the five reasons (`<use>_why`), and the classifier and rules
+version that wrote them.
+
+Open it in any spreadsheet and filter a grade column. A car refreshes only its
+own rows, so the two cars' commits touch different lines. **If git reports a
+conflict in it anyway:** run `run_triage.py --inventory` and commit the result.
+
+### Changing the rules
+
+1. Edit [`src/race_diagnostics/config/classification_rules.yaml`](../src/race_diagnostics/config/classification_rules.yaml).
+   Its header explains every key.
+2. Regrade: `python3 tools/run_analysis/run_triage.py --qualify --all --jobs 4`.
+3. Commit the rules file together with the changed `qualification.yaml` files
+   and `data/dataset_inventory.csv`.
+
+**If you skip step 2:** the tool suite's `test_dataset_classifier_bag.py`
+fails, naming every run whose stored grades no longer match the rules.
+
+<details>
+<summary><strong>How a grade is reached</strong> (the measurement details and how they were checked; safe to skip)</summary>
+
+**Reading the bag.** The bag is read once, one message at a time, so a 581 MB
+bag never sits in memory. Only topics some signal uses are decoded; the rest are
+counted. It uses `rosbag2_py` when ROS is sourced and `rosbags` otherwise.
+
+**A signal** is a role, filled by the first topic in its list with at least two
+valid messages. It is graded on:
+
+- **rate:** 1 / the median time between messages;
+- **longest gap** between two messages;
+- **valid share:** messages inside physical bounds. A scan needs a quarter of
+  its beams in range and the run's usual beam count. An IMU sample must be
+  finite and not all zero. Steering must be within 0.6 rad, speed within 15 m/s;
+- **coverage:** the share of the recording without a silence over 1 s;
+- **bad stamps:** a zero header stamp, one over 0.5 s from when the bag received
+  it, or one going backwards.
+
+**Moving** means wheel speed of at least 0.3 m/s, the speed above which
+`vehicle_state_node` trusts its own steering measurement. Distance and time are
+never integrated across an odometry gap over 0.5 s.
+
+**Lateral acceleration** is wheel speed times yaw rate. **Autonomous** time is
+time moving with LB held and a command on the algorithm's drive topic within
+the last 0.5 s.
+
+**Carried between holds** comes from `run_triage.py`. Between two LB holds, the
+wheels stayed under 0.02 m/s after the car settled, while the median LiDAR range
+changed by over 0.15 m. Since 2026-11-26 a release shorter than the 0.5 s
+settle never counts: car 1's `20261111-153721` was called carried over a 0.4 s
+release at 2.7 m/s.
+
+**How it was checked (2026-11-26):**
+
+- Message counts equal each bag's own `metadata.yaml`.
+- The `activity` block equals what `run_activity` wrote on the car with a
+  different bag reader.
+- Lateral acceleration against the accelerometer on car 1's `20261026-174337`:
+  best-fit slope 0.99, correlation 0.81.
+- Car 2's raw VESC gyro, projected on gravity, against `/odom`'s turn rate:
+  correlation 0.89.
+- Carried, against the UVic race day's IMU-based handling labels: every gap
+  where the wheels stayed still agrees, 8 of 8.
+
+</details>
+
+### Limitations
+
+- **Not run after each recording yet.** Grade by hand after a session (above).
+  `tools/save_runs.sh` commits each run's `qualification.yaml` (it is inside
+  `data/<id>/`) but not yet `data/dataset_inventory.csv`.
+- **Carrying is only caught with the wheels still.** A car lifted with its
+  wheels turning reads as driven: on the UVic race day, 9 handled gaps were
+  missed this way. `race_segments.py`'s tilt-based handling check would catch
+  them, and is not used here yet.
+- **The thresholds are first estimates.** They were chosen from what each use
+  needs, not tuned against the results of a real study. Change them in the rules
+  file when one proves wrong.
+- **The algorithm comes from the run's own records:** `auto_record.yaml`, else
+  `metadata/processes.txt`, else the parameter snapshot in `metadata/params/`.
+  Five folders on car 2 hold none of these (two have no bag at all), so their
+  algorithm is `unknown` and algorithm accuracy is at best conditional.
+
 ## When mapping fails: the tools, in order
 
 These are the tools that found what was wrong on car 2 on 2026-10-30 and 31 ([the spec](superpowers/specs/2026-10-30-slam-reliability.md)). Use them in this order: each one answers the question the next one assumes.

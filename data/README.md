@@ -15,6 +15,8 @@ Older runs may still be under `~/.ros/racerbot_{runs,auto,sim}/`, which git neve
 | Folder | Written by | What's in it |
 |---|---|---|
 | `<car>/racerbot_runs/<timestamp>/` | bringup's automatic recorder (`auto_record`, every algorithm run, off with `record:=false`), `ros2 launch race_diagnostics record_run.py`, and `map_course` / `auto_map_race_launch.py` with diagnostics on | rosbag (`bag/`), `launch.log`, `metadata/` (git state, node parameters). See [run diagnostics](../docs/run-diagnostics.md) |
+| `<car>/racerbot_runs/<timestamp>/qualification.yaml` | `tools/run_analysis/run_triage.py --qualify` (`race_diagnostics`' dataset classifier), by hand for now | what the recording is usable for: localization, velocity estimation, steering response, lateral acceleration, algorithm accuracy, each `usable`, `conditional` or `unusable` with the reason. Regenerated, never edited. See [dataset qualification](../docs/run-diagnostics.md#dataset-qualification) |
+| `dataset_inventory.csv` | the same command | one row per run folder of both cars, with its five grades. Open it in a spreadsheet to pick recordings. `tools/save_runs.sh` does not commit it yet: commit it yourself after regrading |
 | `<car>/racerbot_runs/map_course-<timestamp>.log` | `ros2 run racerbot_launch map_course` | that session's terminal output |
 | `rb1/racerbot_runs/20261026-*/live_map/` | `tools/run_analysis/extract_map.py`, by hand (2026-10-26) | the last live SLAM map of each 2026-10-26 mapping run, which saved none; which ones are good: `rb1/racerbot_runs/LIVE_MAPS_2026-10-26.txt` |
 | `rb1/racerbot_auto/20261026-194514-clean/` | `tools/run_analysis/clean_map.py` | the cleaned map that became the simulator's car 1 course |
