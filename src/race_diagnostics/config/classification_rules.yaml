@@ -210,6 +210,34 @@ recording_flags:
 read_min_fraction: 0.9
 
 # ---------------------------------------------------------------------------
+# Code that can drive the car, as <package>/<executable>, and whose it is
+# (repo). A node name alone cannot say: this workspace's gap_follow and
+# racerbot_a's reactive both start gap_follow_node. Each node a run names is
+# matched to one entry here (dataset_classifier/algorithms.py):
+#   1. by metadata/processes.txt: the process's install path and __node:= name
+#   2. else by the node name, when only one entry starts that node
+#   3. else by metadata/params/<node>.yaml: the entry whose `parameter` the
+#      node reported (entries that share a node must each have their own)
+# and is otherwise named unknown/<node>. role: driving (the default) is an
+# algorithm to judge; mapping and manual never drive the car by themselves.
+# A new driving node goes here, or its runs show as unknown/<node>.
+algorithms:
+  gap_follow/gap_follow_node: {repo: racerbot-ws, node: gap_follow_node, parameter: enable_deadman}
+  pure_pursuit/pure_pursuit_node: {repo: racerbot-ws, node: pure_pursuit_node}
+  pure_pursuit/auto_map_race_node: {repo: racerbot-ws, node: auto_map_race_node}
+  pure_pursuit_tech/pure_pursuit_tech_node: {repo: racerbot-ws, node: pure_pursuit_tech_node}
+  neural_racer/neural_racer_node: {repo: racerbot-ws, node: neural_racer_node}
+  # racerbot_a (github.com/sfu-racerbot/racerbot_a, main b9bfd35): every node
+  # that publishes /drive. use_fallback_method is declared only by reactive's.
+  reactive/gap_follow_node: {repo: racerbot_a, node: gap_follow_node, parameter: use_fallback_method}
+  ftg/ftg_node: {repo: racerbot_a, node: ftg_node}
+  disparity_extender/disparity_extender_node: {repo: racerbot_a, node: disparity_extender_node}
+  pure_pursuit_a/pure_pursuit_a_node: {repo: racerbot_a, node: pure_pursuit_a_node}
+  obs_detection/obs_detection: {repo: racerbot_a, node: obs_detection_node}   # drives only around an obstacle
+  slam_toolbox/async_slam_toolbox_node: {repo: slam_toolbox, node: slam_toolbox, role: mapping}
+  joy_teleop/joy_teleop: {repo: f1tenth_system, node: joy_teleop, role: manual}
+
+# ---------------------------------------------------------------------------
 # The five uses. For each:
 #   required    signals it cannot do without; missing (or unusable) gives
 #               `if_missing`, unusable by default

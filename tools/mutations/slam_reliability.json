@@ -1112,9 +1112,9 @@
    ]
   },
   {
-   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
-   "old": "return sorted(set(DRIVERS.findall(processes_text)))",
-   "new": "return DRIVERS.findall(processes_text)",
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "    return sorted({code for _, code in from_processes(processes_text, known)})",
+   "new": "    return [code for _, code in reversed(from_processes(processes_text, known))]",
    "tests": [
     "tools/run_analysis/tests/test_run_triage.py"
    ]

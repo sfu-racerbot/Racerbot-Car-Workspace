@@ -21,6 +21,7 @@ from pathlib import Path
 
 import yaml
 
+from .algorithms import driving
 from .classifier import QUALIFICATION, find_runs, run_location
 
 INVENTORY = 'dataset_inventory.csv'
@@ -90,7 +91,7 @@ def read_qualification(run_dir):
 def columns(rules):
     apps = list(rules['applications'])
     return (['car', 'run_id', 'path', 'recorder', 'started', 'bag_start_utc', 'duration_s',
-             'algorithms', 'distance_m', 'moving_s', 'max_speed_mps', 'lb_held_s', 'recording']
+             'algorithms', 'algorithm_repos', 'distance_m', 'moving_s', 'max_speed_mps', 'lb_held_s', 'recording']
             + apps + [f'{app}_why' for app in apps]
             + ['recording_flags', 'classifier_version', 'rules_sha256'])
 
@@ -103,6 +104,15 @@ def _cell(value):
     if isinstance(value, list):
         return ';'.join(str(v) for v in value)
     return str(value)
+
+
+def _algorithm_cells(code):
+    """The driving code as package/executable, and whose repositories it is from.
+    SLAM and the gamepad layer are left out: they are in qualification.yaml."""
+    if not isinstance(code, list):
+        return {'algorithms': _cell(code), 'algorithm_repos': _cell(code)}
+    codes, repos = driving(code)
+    return {'algorithms': _cell(codes), 'algorithm_repos': _cell(repos)}
 
 
 def inventory_row(data_root, run_dir, rules):
@@ -125,7 +135,7 @@ def inventory_row(data_root, run_dir, rules):
         recorder=_cell(info.get('recorder')), started=_cell(info.get('started')),
         bag_start_utc=_cell(info.get('bag_start_utc')),
         duration_s=_cell(metrics.get('duration_s')),
-        algorithms=_cell(info.get('algorithm_nodes')),
+        **_algorithm_cells(info.get('algorithm_code')),
         distance_m=_cell(metrics.get('distance_m')), moving_s=_cell(metrics.get('moving_s')),
         max_speed_mps=_cell(metrics.get('max_speed_mps')),
         lb_held_s=_cell(metrics.get('lb_held_s')),

@@ -33,6 +33,9 @@ from race_diagnostics.dataset_classifier.run_info import (  # noqa: E402
 import dataset_classifier_fake_bag as fake  # noqa: E402
 
 RULES = load_rules()
+# This workspace's gap follower as metadata/processes.txt lists it (format from rb1 20261030-175055).
+OUR_GAP_FOLLOW = ('  31967   31923 Fri Oct 30 17:54:13 2026 /usr/bin/python3 /home/racerbotcar-1/racerbot-ws/install/'
+                  'gap_follow/lib/gap_follow/gap_follow_node --ros-args -r __node:=gap_follow_node\n')
 APPS = ['localization', 'velocity_estimation', 'steering_response', 'lateral_acceleration',
         'algorithm_accuracy']
 
@@ -402,9 +405,16 @@ def test_a_hand_started_run_names_its_algorithm_from_the_parameter_snapshot(tmp_
     params.mkdir()
     for node in ('ackermann_mux', 'auto_map_race_node', 'gap_follow_node', 'slam_toolbox', 'urg_node'):
         (params / f'{node}.yaml').write_text('{}\n')
+    # gap_follow_node as snapshot_params saves it, with a parameter only this workspace's gap_follow declares.
+    (params / 'gap_follow_node.yaml').write_text(
+        '/gap_follow_node:\n  ros__parameters:\n    enable_deadman: true\n    max_speed: 2.0\n')
     doc = cl.classify_run(run_dir, RULES, backend=fake.reader(driving))
-    assert doc['run_info']['algorithm_nodes'] == ['auto_map_race_node', 'gap_follow_node']
+    assert doc['run_info']['algorithm_nodes'] == ['auto_map_race_node', 'gap_follow_node', 'slam_toolbox']
     assert doc['run_info']['algorithm_source'] == 'metadata/params'
+    assert [(c['code'], c['role'], c['from']) for c in doc['run_info']['algorithm_code']] == [
+        ('pure_pursuit/auto_map_race_node', 'driving', 'node name'),
+        ('gap_follow/gap_follow_node', 'driving', 'metadata/params/gap_follow_node.yaml (enable_deadman)'),
+        ('slam_toolbox/async_slam_toolbox_node', 'mapping', 'node name')]
     assert doc['run_info']['recorder'] == UNKNOWN  # no auto_record.yaml and no events.jsonl
     assert doc['metrics']['algorithm_known'] == 1
 
@@ -412,9 +422,13 @@ def test_a_hand_started_run_names_its_algorithm_from_the_parameter_snapshot(tmp_
 def test_slam_and_the_gamepad_alone_are_not_an_algorithm(tmp_path, driving):
     processes = ('  1  1 Mon Dec  1 12:00:00 2026 /opt/ros/jazzy/lib/slam_toolbox/async_slam_toolbox_node\n'
                  '  2  1 Mon Dec  1 12:00:00 2026 /opt/ros/jazzy/lib/joy_teleop/joy_teleop\n')
-    _, doc = classify(tmp_path, driving, auto_record=False, processes=processes)
-    assert doc['run_info']['algorithm_nodes'] == ['async_slam_toolbox_node', 'joy_teleop']
+    run_dir, doc = classify(tmp_path, driving, auto_record=False, processes=processes)
+    # Started without __node:=, each runs under its listed node name.
+    assert doc['run_info']['algorithm_nodes'] == ['joy_teleop', 'slam_toolbox']
+    assert [c['role'] for c in doc['run_info']['algorithm_code']] == ['manual', 'mapping']
     assert doc['metrics']['algorithm_known'] == 0
+    row = outputs.inventory_row(tmp_path, run_dir, RULES)
+    assert (row['algorithms'], row['algorithm_repos']) == ('', '')  # nothing here drives the car
 
 
 # --------------------------------------------------------------------------- safety
@@ -514,7 +528,7 @@ def test_stricter_rules_regrade_stored_numbers_differently(tmp_path, driving):
 # --------------------------------------------------------------------------- inventory
 
 def test_the_inventory_has_one_row_per_run_folder_sorted_and_never_duplicated(tmp_path, driving):
-    runs = [fake.write_run(tmp_path, driving, car=car, run_id=run_id)
+    runs = [fake.write_run(tmp_path, driving, car=car, run_id=run_id, processes=OUR_GAP_FOLLOW)
             for car, run_id in [('rb2', '20261201-120000'), ('rb1', '20261201-130000'),
                                 ('rb1', '20261201-120000')]]
     (tmp_path / 'rb1' / 'racerbot_runs' / 'map_course-20261201-120000.log').write_text('')
@@ -526,7 +540,8 @@ def test_the_inventory_has_one_row_per_run_folder_sorted_and_never_duplicated(tm
         ('rb1', '20261201-120000'), ('rb1', '20261201-130000'), ('rb2', '20261201-120000')]
     # The run never graded is listed, as unclassified, not left out.
     assert rows[0]['localization'] == 'unclassified'
-    assert rows[1]['localization'] == 'usable' and rows[1]['algorithms'] == 'gap_follow_node'
+    assert rows[1]['localization'] == 'usable' and rows[1]['algorithms'] == 'gap_follow/gap_follow_node'
+    assert rows[1]['algorithm_repos'] == 'racerbot-ws'
     assert rows[1]['path'] == 'rb1/racerbot_runs/20261201-130000'
 
 
@@ -575,7 +590,7 @@ def test_an_old_run_says_unknown_rather_than_guessing(tmp_path, driving):
     info = read_run_info(run_dir)
     assert info['source'].startswith('reconstructed')
     for field in ('recorder', 'started', 'car_id', 'host', 'workspace_commit', 'algorithms',
-                  'topics', 'algorithm_nodes', 'algorithm_source', 'bag_start_utc'):
+                  'topics', 'algorithm_nodes', 'algorithm_source', 'algorithm_code', 'bag_start_utc'):
         assert info[field] == UNKNOWN, field
     assert not (run_dir / 'run_info.yaml').exists()
 

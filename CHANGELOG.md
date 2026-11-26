@@ -23,11 +23,15 @@ The grading only reads: every one of the 2,462 files already in `data/` is byte 
 
 - New `dataset_classifier/` (no rclpy): reads a bag once with `rosbag2_py` or `rosbags`, grades it, and writes atomically, only when something changed.
 - New `config/classification_rules.yaml`: every threshold, checked on load. Installed by `setup.py`; `package.xml` gains `python3-numpy`.
+- Its `algorithms:` list names the code that can drive as `<package>/<executable>`, with its repository. Team A's `reactive` package and our `gap_follow` both start `gap_follow_node`.
+- A run's node is matched by `metadata/processes.txt`, else a node name only one entry starts, else the parameter snapshot. `enable_deadman` is only ours and `use_fallback_method` only team A's.
+- The inventory's `algorithms` column shows that code, and a new `algorithm_repos` column its repository. Car 2's three `reactive` runs, listed as ours before, now show `reactive/gap_follow_node` and `racerbot_a`. No grade changed.
 
 ### tools/run_analysis
 
-- `run_triage.py`: new `--qualify RUN... | --qualify --all`, `--inventory`, `--dry-run`, `--jobs`, `--rules`, `--data-root`. Its default output is unchanged.
-- `run_triage.py`'s driving-code names, `scan_change` and `moved_between` moved into the classifier and are imported back.
+- `run_triage.py`: new `--qualify RUN... | --qualify --all`, `--inventory`, `--dry-run`, `--jobs`, `--rules`, `--data-root`.
+- `run_triage.py`'s `scan_change` and `moved_between` moved into the classifier and are imported back. Its list of driving code is the classifier's `algorithms:` list.
+- **Behavior change:** `run_triage.py` names driving code as `package/executable` (`reactive/gap_follow_node`, not `gap_follow_node`), so team A's code is not mistaken for ours. It also now recognises `pure_pursuit_a_node`, `obs_detection` and `pure_pursuit_tech_node`, which the old name pattern missed.
 - **Behavior change:** `moved_between` no longer calls a car carried across an LB release shorter than the 0.5 s it ignores while the car coasts. Car 1's `20261111-153721` was called carried over a 0.4 s release at 2.7 m/s. Six runs' carried counts dropped.
 
 ### Results (2026-11-26, 63 folders)
@@ -43,7 +47,8 @@ The grading only reads: every one of the 2,462 files already in `data/` is byte 
 ### Tests
 
 - New: `src/race_diagnostics/test/test_dataset_classifier_runs.py` and `test_dataset_classifier_metrics.py` (synthetic runs and closed forms), and `tools/run_analysis/tests/test_dataset_classifier_bag.py` (real bags against their own metadata and the car's `activity`; change detectors on the committed results, labelled as such). `test_run_triage.py`: the short-release case.
-- Hard rule 1: `tools/mutations/dataset_classifier.json`, every break checked with `tools/check_mutations.py --no-ros`.
+- New: `src/race_diagnostics/test/test_dataset_classifier_algorithms.py` (which code drove, from process lines and parameter snapshots copied from real runs). In the tool suite, car 2's three `reactive` runs must come out as team A's, and on all 20 runs with both records `processes.txt` and the parameter snapshot must name the same package.
+- Hard rule 1: `tools/mutations/dataset_classifier.json`, every break checked with `tools/check_mutations.py --no-ros`: 78 of 78 caught on 2026-11-26.
 
 ## 2026-11-09: map racer, faster lines and an earlier throttle
 

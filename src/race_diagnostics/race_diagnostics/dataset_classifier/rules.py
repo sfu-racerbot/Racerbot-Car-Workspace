@@ -9,8 +9,11 @@ against a default nobody chose.
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+import re
 
 import yaml
+
+from .algorithms import ROLES
 
 STATUSES = ('usable', 'conditional', 'unusable')
 RANK = {status: rank for rank, status in enumerate(STATUSES)}
@@ -44,7 +47,9 @@ METRICS = ('duration_s', 'distance_m', 'moving_s', 'max_speed_mps', 'speed_swing
            'cornering_s', 'measured_lateral_accel_p95_mps2', 'autonomous_s',
            'autonomous_distance_m', 'algorithm_known')
 TOP_KEYS = {'schema', 'measurement', 'topics', 'signals', 'recording_flags',
-            'read_min_fraction', 'applications'}
+            'read_min_fraction', 'algorithms', 'applications'}
+ALGORITHM_KEYS = ('repo', 'node', 'parameter', 'role')
+NAME = re.compile(r'^[A-Za-z0-9_]+$')
 
 
 class RulesError(ValueError):
@@ -199,6 +204,8 @@ def check_rules(data):
     if not 0 <= fraction <= 1:
         raise RulesError('read_min_fraction: must be between 0 and 1')
 
+    _check_algorithms(_mapping(data['algorithms'], 'algorithms'))
+
     applications = _mapping(data['applications'], 'applications')
     if not applications:
         raise RulesError('applications: none defined')
@@ -232,6 +239,37 @@ def check_rules(data):
     unused = sorted(set(signals) - used)
     if unused:
         raise RulesError(f'signals: {", ".join(unused)} not used by any application')
+
+
+def _check_algorithms(algorithms):
+    """Each entry is <package>/<executable> with a repo and the node it starts.
+    Entries that start the same node each need a parameter of their own, or a
+    run that names only the node could never be told apart."""
+    if not algorithms:
+        raise RulesError('algorithms: none listed')
+    by_node = {}
+    for code, entry in algorithms.items():
+        parts = code.split('/') if isinstance(code, str) else []
+        if len(parts) != 2 or not all(NAME.match(part) for part in parts):
+            raise RulesError(f'algorithms: {code!r} is not <package>/<executable>')
+        where = _where('algorithms', code)
+        _mapping(entry, where)
+        _unknown(entry, ALGORITHM_KEYS, where)
+        _missing(entry, ('repo', 'node'), where)
+        for key in ('repo', 'node', 'parameter'):
+            value = entry.get(key, '')
+            # A repository name may hold a hyphen (racerbot-ws); a ROS name may not.
+            if key in entry and not (isinstance(value, str)
+                                     and NAME.match(value.replace('-', '_') if key == 'repo' else value)):
+                raise RulesError(f'{where}.{key}: expected a name, got {value!r}')
+        if 'role' in entry:
+            _status(entry['role'], _where(where, 'role'), ROLES)
+        by_node.setdefault(entry['node'], []).append(code)
+    for node, codes in sorted(by_node.items()):
+        parameters = [algorithms[code].get('parameter') for code in codes]
+        if len(codes) > 1 and (None in parameters or len(set(parameters)) < len(codes)):
+            raise RulesError(f'algorithms: {", ".join(sorted(codes))} all start {node}: '
+                             f'each needs a parameter of its own to tell them apart')
 
 
 def worst(statuses):

@@ -7,7 +7,12 @@
   "data/rb1/racerbot_runs/20261030-190408",
   "data/rb1/racerbot_runs/20261030-190904",
   "data/rb1/racerbot_runs/20261111-153409",
-  "data/rb2/racerbot_runs/20261030-183134"
+  "data/rb2/racerbot_runs/20261030-183134",
+  "src/gap_follow",
+  "data/rb2/racerbot_runs/20261030-182852",
+  "data/rb2/racerbot_runs/20261109-183455",
+  "data/rb2/racerbot_runs/20261109-183910",
+  "data/rb1/racerbot_runs/20261026-194422"
  ],
  "mutations": [
   {
@@ -151,11 +156,11 @@
    ]
   },
   {
-   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/metrics.py",
-   "old": "    return sorted(name for name in names if name.strip('/') not in NOT_AN_ALGORITHM)",
-   "new": "    return sorted(names)",
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "    return any(item['role'] == DRIVING for item in identified)",
+   "new": "    return bool(identified)",
    "tests": [
-    "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py",
     "src/race_diagnostics/test/test_dataset_classifier_runs.py"
    ]
   },
@@ -366,8 +371,8 @@
   },
   {
    "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/classifier.py",
-   "old": "    out['algorithm_known'] = int(isinstance(names, list) and bool(mx.driving_algorithms(names)))",
-   "new": "    out['algorithm_known'] = int(isinstance(names, list))",
+   "old": "    out['algorithm_known'] = int(isinstance(code, list) and drove(code))",
+   "new": "    out['algorithm_known'] = int(isinstance(code, list))",
    "tests": [
     "src/race_diagnostics/test/test_dataset_classifier_runs.py"
    ]
@@ -471,15 +476,15 @@
   },
   {
    "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
-   "old": "    names, source = algorithm_names(run_dir, info.get('algorithms') if written else None)",
-   "new": "    names, source = algorithm_names(run_dir, info.get('algorithms'))",
+   "old": "    names, source = algorithm_names(run_dir, info.get('algorithms') if written else None, known)",
+   "new": "    names, source = algorithm_names(run_dir, info.get('algorithms'), known)",
    "tests": [
     "src/race_diagnostics/test/test_dataset_classifier_runs.py"
    ]
   },
   {
    "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
-   "old": "        return drivers_in(' '.join(sorted(p.stem for p in params.glob('*.yaml')))), 'metadata/params'",
+   "old": "        return sorted(p.stem for p in params.glob('*.yaml') if p.stem in nodes), 'metadata/params'",
    "new": "        return None, None",
    "tests": [
     "src/race_diagnostics/test/test_dataset_classifier_runs.py"
@@ -508,6 +513,164 @@
    "tests": [
     "src/race_diagnostics/test/test_dataset_classifier_metrics.py",
     "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "            found.add((remap['node'] if remap else known[code]['node'], code))",
+   "new": "            found.add((known[code]['node'], code))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "(?![A-Za-z0-9_./])",
+   "new": "",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "    found = set()\n    for match in _PROCESS.finditer(text or ''):\n        code = f\"{match['package']}/{match['executable']}\"\n        if code in known:\n            remap = _NODE.search(match['rest'])\n            found.add(",
+   "new": "    found = []\n    for match in _PROCESS.finditer(text or ''):\n        code = f\"{match['package']}/{match['executable']}\"\n        if code in known:\n            remap = _NODE.search(match['rest'])\n            found.append(",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py",
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "        if node in by_process:",
+   "new": "        if False:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_team_a_gap_follower_runs_are_named_as_racerbot_a_code",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_processes_and_the_parameter_snapshot_agree_on_every_recorded_gap_follower",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_every_recorded_algorithm_is_on_the_list"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "    if len(same) == 1:\n        return same, 'node name'",
+   "new": "    if len(same) >= 1:\n        return same, 'node name'",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_team_a_gap_follower_runs_are_named_as_racerbot_a_code",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_processes_and_the_parameter_snapshot_agree_on_every_recorded_gap_follower",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_every_recorded_algorithm_is_on_the_list"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "        if len(hits) == 1:",
+   "new": "        if hits:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "        hits = [code for code in same if known[code].get('parameter') in reported]",
+   "new": "        hits = [code for code in same if known[code].get('parameter') not in reported]",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_team_a_gap_follower_runs_are_named_as_racerbot_a_code",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_processes_and_the_parameter_snapshot_agree_on_every_recorded_gap_follower",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_every_recorded_algorithm_is_on_the_list"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "    for name in sorted(set(names)):",
+   "new": "    for name in names:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "    items = [item for item in identified if item['role'] == DRIVING]",
+   "new": "    items = list(identified)",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py",
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/algorithms.py",
+   "old": "    except (OSError, UnicodeDecodeError, yaml.YAMLError):\n        return None\n    if not isinstance(doc, dict):",
+   "new": "    except (OSError, yaml.YAMLError):\n        return None\n    if not isinstance(doc, dict):",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "        if len(codes) > 1 and (None in parameters or len(set(parameters)) < len(codes)):",
+   "new": "        if len(codes) > 1 and None in parameters:",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "        if len(parts) != 2 or not all(NAME.match(part) for part in parts):",
+   "new": "        if len(parts) < 2 or not all(NAME.match(part) for part in parts):",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "NAME.match(value.replace('-', '_') if key == 'repo' else value)",
+   "new": "NAME.match(value.replace('-', '_'))",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/rules.py",
+   "old": "    _check_algorithms(_mapping(data['algorithms'], 'algorithms'))\n",
+   "new": "",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_algorithms.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
+   "old": "        return sorted({node for node, _ in found}), 'metadata/processes.txt'",
+   "new": "        return [], 'metadata/processes.txt'",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/run_info.py",
+   "old": "    info['algorithm_code'] = identify(names, known, run_dir) if source else UNKNOWN",
+   "new": "    info['algorithm_code'] = identify(names, known) if source else UNKNOWN",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_team_a_gap_follower_runs_are_named_as_racerbot_a_code",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_processes_and_the_parameter_snapshot_agree_on_every_recorded_gap_follower",
+    "tools/run_analysis/tests/test_dataset_classifier_bag.py::test_every_recorded_algorithm_is_on_the_list"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "    return sorted({code for _, code in from_processes(processes_text, known)})",
+   "new": "    return [code.split('/')[-1] for _, code in from_processes(processes_text, known)]",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "src/race_diagnostics/race_diagnostics/dataset_classifier/outputs.py",
+   "old": "    return {'algorithms': _cell(codes), 'algorithm_repos': _cell(repos)}",
+   "new": "    return {'algorithms': _cell(codes), 'algorithm_repos': ''}",
+   "tests": [
+    "src/race_diagnostics/test/test_dataset_classifier_runs.py"
    ]
   }
  ]

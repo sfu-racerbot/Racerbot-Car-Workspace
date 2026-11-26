@@ -17,7 +17,7 @@ import socket
 
 import yaml
 
-from .metrics import algorithms as drivers_in
+from .algorithms import from_processes, identify, listed_nodes
 
 RUN_INFO = 'run_info.yaml'
 UNKNOWN = 'unknown'
@@ -107,9 +107,15 @@ def bag_start_utc(bag_info):
     return datetime.fromtimestamp(ns / 1e9, tz=timezone.utc).isoformat(timespec='seconds')
 
 
-def read_run_info(run_dir, bag_info=None):
+def read_run_info(run_dir, bag_info=None, known=None):
     """run_info.yaml if the recorder wrote one, else the same fields rebuilt
-    from what the run holds. `source` says which; unknowns stay `unknown`."""
+    from what the run holds. `source` says which; unknowns stay `unknown`.
+
+    known: the rules' algorithms list (the shipped rules' if not given), which
+    algorithm_code matches each algorithm node against."""
+    if known is None:
+        from .rules import load_rules
+        known = load_rules()['algorithms']
     run_dir = Path(run_dir)
     written = _load_yaml(run_dir / RUN_INFO)
     if written:
@@ -139,18 +145,20 @@ def read_run_info(run_dir, bag_info=None):
         if log:
             info['session_log'] = log
     info['bag_start_utc'] = bag_start_utc(bag_info)
-    names, source = algorithm_names(run_dir, info.get('algorithms') if written else None)
+    names, source = algorithm_names(run_dir, info.get('algorithms') if written else None, known)
     info['algorithm_nodes'] = names if source else UNKNOWN
     info['algorithm_source'] = source or UNKNOWN
+    # Whose code each node is: algorithms.py, from processes.txt or the parameter snapshot.
+    info['algorithm_code'] = identify(names, known, run_dir) if source else UNKNOWN
     return info
 
 
-def algorithm_names(run_dir, recorded=None):
+def algorithm_names(run_dir, recorded=None, known=None):
     """([node names], where they came from) for the driving code of a run.
 
     run_info's or auto_record.yaml's {topic: [nodes]} first (the nodes auto_record
-    saw publishing a drive topic), else the driving code in
-    metadata/processes.txt, as run_triage.py reads it, else the driving nodes
+    saw publishing a drive topic), else the listed executables (known, the rules'
+    algorithms list) running in metadata/processes.txt, else the listed nodes
     whose parameters snapshot_params saved in metadata/params/ (a hand-started
     or map_course recording has no processes.txt). (None, None) if none."""
     def names_of(value):
@@ -169,8 +177,10 @@ def algorithm_names(run_dir, recorded=None):
         return names, 'auto_record.yaml'
     processes = Path(run_dir) / 'metadata' / 'processes.txt'
     if processes.is_file():
-        return drivers_in(processes.read_text(errors='replace')), 'metadata/processes.txt'
+        found = from_processes(processes.read_text(errors='replace'), known or {})
+        return sorted({node for node, _ in found}), 'metadata/processes.txt'
     params = Path(run_dir) / 'metadata' / 'params'
     if params.is_dir():
-        return drivers_in(' '.join(sorted(p.stem for p in params.glob('*.yaml')))), 'metadata/params'
+        nodes = listed_nodes(known or {})
+        return sorted(p.stem for p in params.glob('*.yaml') if p.stem in nodes), 'metadata/params'
     return None, None
