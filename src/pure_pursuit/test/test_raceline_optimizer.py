@@ -258,6 +258,37 @@ def test_the_trust_region_bounds_a_single_pass():
     assert radii.max() <= radius + 0.25 + 1e-6
 
 
+def test_returned_line_stays_inside_both_limits_between_solver_knots(monkeypatch):
+    # Feasible corrections with flat spots on both bounds. An unconstrained
+    # Cartesian spline rings where the corrections reach or leave a bound.
+    def bounded_steps(matrix, offset, lower, upper, weight, spacing):
+        phase = 2 * np.pi * np.arange(len(lower)) / len(lower)
+        return np.clip(0.5 * np.sin(phase + np.pi / 4), lower, upper)
+
+    monkeypatch.setattr(opt, 'solve_lateral_offsets', bounded_steps)
+    center = np.array([7., -4.])
+    result = opt.optimize_minimum_curvature(
+        center + circle_path(5., 120), np.full(120, 2.), np.full(120, 2.),
+        vehicle_half_width=1e-6, safety_margin=0., spacing=0.3,
+        iterations=1, trust_region=0.25)
+    radii = np.linalg.norm(result['line'] - center, axis=1)
+    # Oracle: concentric circles at 5 +/- 0.25 m, including attained steps.
+    assert radii.min() == pytest.approx(4.75, abs=1e-6)
+    assert radii.max() == pytest.approx(5.25, abs=1e-6)
+
+
+def test_bounded_resampling_keeps_circle_curvature_through_the_seam():
+    reference = circle_path(5., count=24)
+    _, normals = opt.path_frames(reference)
+    moved = reference + 0.25 * normals
+    result = opt._resample_step(reference, moved, 0.075, 0.25)
+    # Oracle: the 4.75 m circle has curvature 1/r, including between sparse
+    # knots. Walking straight chords would give zero there and spikes at knots.
+    assert opt.signed_curvature(result) == pytest.approx(1 / 4.75, abs=0.002)
+    spacing = np.linalg.norm(result - np.roll(result, 1, axis=0), axis=1)
+    assert spacing == pytest.approx(0.075, rel=0.005)
+
+
 # ============================================================================
 # occupancy_map
 # ============================================================================
