@@ -11,7 +11,31 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-26 (latest): dataset qualification of every recording
+## 2026-11-26 (latest): dataset analysis examples (IMU project)
+
+One offline analysis per dataset use, so a graded run can be turned into numbers for state estimation and pure pursuit: localization, velocity estimation, steering response, lateral acceleration and algorithm accuracy. Each gives the model, the topics, measured against predicted, plots and metrics, and its limits. See `docs/dataset-examples.md`.
+
+The tools only read recordings: no driving code, parameter or calibration changed.
+
+### tools/run_analysis
+
+- New `dataset_examples/`: one script per use, plus `run_all.py` to run all five on a run. No ROS needed; results go to `~/.cache/racerbot/dataset_examples/`, and a folder inside `data/` is refused. Reuses `bagread`, `loc.py`, `grip_truth`, `yaw_tracking`, `speed_tracking`, pure pursuit's `racing_math` and the classifier's LB windows.
+- Algorithm accuracy is two separate results. Command tracking works on every run. Path tracking runs only against the run's own racing line, checked against its parameters and the node's `/rosout` log; `loc.py` is a second position estimate, not ground truth.
+- Every example checks the accelerometer's axes before using it, and warns instead of printing a wrong number.
+
+### Findings (not acted on)
+
+- Car 1's wheel odometry reads 6.9% far (run `20261026-194514`, gain −4040). Its steering matches the bicycle model (slope 0.994 with map speed); steering delay 137 ms.
+- Heading from the gyro drifts about ten times less than heading from the steering model, on both cars.
+- Car 2 understeers at speed: it turns 67% of what is commanded above 3.5 m/s. On the racing line it ran 0.18 m RMS, 0.11 m wide on average (run `20261111-152132`, `delay_lqr`).
+- The accelerometer axes in `imu/car.yaml` are wrong on 3 of the 4 IMUs: both VESC IMUs read x and y inverted, and car 2's BNO085 is rotated 90°. The gyros are right. `vehicle_state_node`'s forward acceleration on car 2 is affected.
+
+### Tests
+
+- New `tools/run_analysis/tests/test_dataset_examples.py`: 37 tests against closed forms, run once per car.
+- Hard rule 1: `tools/mutations/dataset_examples.json`, 40 of 40 breaks caught with `tools/check_mutations.py --no-ros`.
+
+## 2026-11-26: dataset qualification of every recording
 
 Every recording in `data/<id>/racerbot_runs/` is now graded for five uses: localization, velocity estimation, steering response, lateral acceleration and algorithm accuracy.
 

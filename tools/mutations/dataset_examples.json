@@ -1,0 +1,333 @@
+{
+ "about": "Hard rule 1 for tools/run_analysis/dataset_examples/: each break must turn its tests red. Run: PATH=<python with rosbags, scipy, matplotlib>:$PATH python3 tools/check_mutations.py tools/mutations/dataset_examples.json --no-ros",
+ "copy": [
+  "tools/run_analysis",
+  "src/race_diagnostics",
+  "src/racerbot_car",
+  "src/pure_pursuit",
+  "src/gap_follow",
+  "src/imu_bridge"
+ ],
+ "mutations": [
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    out[(grid < t[0]) | (grid > t[-1]) | (nearest > max_gap)] = np.nan",
+   "new": "    out[(grid < t[0]) | (grid > t[-1])] = np.nan",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "        out[k:-k] = (x[2 * k:] - x[:-2 * k]) * fs / (2 * k)",
+   "new": "        out[k:-k] = (x[2 * k:] - x[:-2 * k]) * fs / k",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    out = np.where(den > 0.999, num / np.where(den > 0, den, 1.0), np.nan)",
+   "new": "    out = np.where(den > 0, num / np.where(den > 0, den, 1.0), np.nan)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    jump = step - speed * dt > tol_m",
+   "new": "    jump = step > tol_m",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "        jump |= turn > tol_rad",
+   "new": "        jump |= turn > 10 * tol_rad",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "        out |= np.abs(t - s) <= pad",
+   "new": "        out |= np.abs(t - s) < pad",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    theta = math.atan2(h[0, 1] - h[1, 0], h[0, 0] + h[1, 1])",
+   "new": "    theta = math.atan2(h[1, 0] - h[0, 1], h[0, 0] + h[1, 1])",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "fit[\"residual_median_m\"] > FRAME_EXPLAINS * distance_median_m",
+   "new": "fit[\"residual_median_m\"] < FRAME_EXPLAINS * distance_median_m",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    if frame == \"base_link\":\n        return x, y, yaw",
+   "new": "    if frame in (\"base_link\", \"laser\"):\n        return x, y, yaw",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    return vx * np.cos(yaw) + vy * np.sin(yaw)",
+   "new": "    return np.hypot(vx, vy)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    mapping_ok = corr[\"ax_vs_forward\"] >= AXIS_OK and corr[\"ay_vs_lateral\"] >= AXIS_OK",
+   "new": "    mapping_ok = abs(corr[\"ax_vs_forward\"]) >= AXIS_OK and abs(corr[\"ay_vs_lateral\"]) >= AXIS_OK",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "rms=float(np.sqrt(np.mean(x * x)))",
+   "new": "rms=float(np.std(x))",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    return np.where(i >= 0, ok[np.maximum(i, 0)], False)",
+   "new": "    return np.where(i >= 0, ok[np.maximum(i, 0)], True)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/common.py",
+   "old": "    if path == data or data in path.parents:",
+   "new": "    if path == data:",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/localization.py",
+   "old": "    return c0 * dx + s0 * dy, -s0 * dx + c0 * dy, c.wrap(yaw1 - yaw0)",
+   "new": "    return c0 * dx + s0 * dy, s0 * dx + c0 * dy, c.wrap(yaw1 - yaw0)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/localization.py",
+   "old": "        if j >= len(s) or bad[j + 1] - bad[i] > 0:",
+   "new": "        if j >= len(s):",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/localization.py",
+   "old": "        head.append(math.degrees(float(c.wrap(de[2] - dr[2]))) / driven)",
+   "new": "        head.append(math.degrees(float(c.wrap(de[2] - dr[2]))))",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/localization.py",
+   "old": "            ry + math.sin(ryaw) * dx + math.cos(ryaw) * dy, ryaw + dyaw)",
+   "new": "            ry + math.sin(ryaw) * dx - math.cos(ryaw) * dy, ryaw + dyaw)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/velocity_estimation.py",
+   "old": "    out[\"distance_ratio\"] = float(np.sum(v_est[ok]) / total) if total > 0 else float(\"nan\")",
+   "new": "    out[\"distance_ratio\"] = float(total / np.sum(v_est[ok])) if total > 0 else float(\"nan\")",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/velocity_estimation.py",
+   "old": "        result[\"accel_vs_wheel\"] = c.line_fit(dv_wheel[moving], a_x[moving])",
+   "new": "        result[\"accel_vs_wheel\"] = c.line_fit(a_x[moving], dv_wheel[moving])",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/steering_response.py",
+   "old": "    return np.asarray(v, dtype=float) * np.tan(np.asarray(delta, dtype=float)) / wheelbase",
+   "new": "    return np.asarray(v, dtype=float) * np.tan(np.asarray(delta, dtype=float)) * wheelbase",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/steering_response.py",
+   "old": "    return np.where(np.abs(v) >= min_speed, out, np.nan)",
+   "new": "    return out",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/steering_response.py",
+   "old": "        out[samples:] = x[:len(x) - samples]",
+   "new": "        out[samples:] = x[samples:]",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/steering_response.py",
+   "old": "    k = int(round(lag_s * c.FS)) if math.isfinite(lag_s) else 0\n    delta_d, r_hat_d = shift(delta, k), shift(r_hat, k)",
+   "new": "    k = -int(round(lag_s * c.FS)) if math.isfinite(lag_s) else 0\n    delta_d, r_hat_d = shift(delta, k), shift(r_hat, k)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/steering_response.py",
+   "old": "    gain = ls_gain(r[ok], r_hat_d[ok])",
+   "new": "    gain = ls_gain(r_hat_d[ok], r[ok])",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/steering_response.py",
+   "old": "    ok = np.isfinite(v) & np.isfinite(delta_cmd) & np.isfinite(delta_eff) & (np.abs(delta_cmd) >= MIN_STEER)",
+   "new": "    ok = np.isfinite(v) & np.isfinite(delta_cmd) & np.isfinite(delta_eff)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/lateral_acceleration.py",
+   "old": "    return np.asarray(v, dtype=float) * np.asarray(yaw_rate, dtype=float)",
+   "new": "    return np.asarray(v, dtype=float) ** 2 * np.asarray(yaw_rate, dtype=float)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/lateral_acceleration.py",
+   "old": "    axes = c.accel_axes(ax, ay, c.derivative(c.moving_average(v_wheel, n), c.FS), a_kin, driving)",
+   "new": "    axes = c.accel_axes(ay, ax, c.derivative(c.moving_average(v_wheel, n), c.FS), a_kin, driving)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    side = np.sign(dx * (py - qy[rows, best]) - dy * (px - qx[rows, best]))",
+   "new": "    side = np.sign(dy * (px - qx[rows, best]) - dx * (py - qy[rows, best]))",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    b = np.roll(a, -1, axis=0) if closed else a[1:]\n    a = a if closed else a[:-1]",
+   "new": "    b = a[1:]\n    a = a[:-1]",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    t = np.clip(((px[:, None] - a[:, 0]) * d[:, 0] + (py[:, None] - a[:, 1]) * d[:, 1]) / length2, 0.0, 1.0)",
+   "new": "    t = ((px[:, None] - a[:, 0]) * d[:, 0] + (py[:, None] - a[:, 1]) * d[:, 1]) / length2",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    x, y, yaw = c.to_base_link(pose.x, pose.y, pose.yaw, frame,",
+   "new": "    x, y, yaw = c.to_base_link(pose.x, pose.y, pose.yaw, \"base_link\",",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    tracking = c.intent_mask(run, t, lambda row: row[\"state\"] == law)",
+   "new": "    tracking = c.intent_mask(run, t, lambda row: True)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    ok = tracking & held & moving & ~jumped",
+   "new": "    ok = tracking & held & moving",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "ok=bool(recorded) and c.local_path(recorded) == line_path,",
+   "new": "ok=bool(recorded),",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "ok=n == len(line) and c.local_path(path) == line_path,",
+   "new": "ok=c.local_path(path) == line_path,",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    lag_v, corr_v = xcorr_lag(np.nan_to_num(v_cmd[a:b]), np.nan_to_num(v[a:b]), c.FS, SPEED_MAX_LAG_S)",
+   "new": "    lag_v, corr_v = xcorr_lag(np.nan_to_num(v[a:b]), np.nan_to_num(v_cmd[a:b]), c.FS, SPEED_MAX_LAG_S)",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "achieved_over_commanded=float(np.sum(v[ok]) / np.sum(v_cmd_d[ok]))",
+   "new": "achieved_over_commanded=float(np.sum(v_cmd_d[ok]) / np.sum(v[ok]))",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    driving = c.inside(grid, c.lb_spans(run)) & c.intent_mask(run, grid, lambda row: row[\"severity\"] != \"stop\")",
+   "new": "    driving = c.inside(grid, c.lb_spans(run))",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/dataset_examples/algorithm_accuracy.py",
+   "old": "    kappa_cmd = np.tan(shift(steer, j)) / c.WHEELBASE",
+   "new": "    kappa_cmd = np.tan(shift(steer, j)) * c.WHEELBASE",
+   "tests": [
+    "tools/run_analysis/tests/test_dataset_examples.py"
+   ]
+  }
+ ]
+}

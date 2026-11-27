@@ -704,6 +704,10 @@ writes a `qualification.yaml` into each run folder, and one spreadsheet,
 `data/dataset_inventory.csv`, lists every run with its grades. Use it to pick
 recordings for a study without opening sixty bags by hand.
 
+Once you have picked a run, [dataset-examples.md](dataset-examples.md) has one
+worked analysis per use: the maths, the topics, the results on real runs and
+their limits.
+
 **It is not automatic yet.** Grading after every recording, from bringup's
 recorder, is the next step and not in this version. Until then, run the
 command below after a session.
