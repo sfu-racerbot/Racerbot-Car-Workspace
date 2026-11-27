@@ -229,15 +229,17 @@ def report(run: c.Run, result: dict) -> list:
     for topic, row in result["sources"].items():
         for st in row["stretches"]:
             lines.append(f"  {topic:10} over {st['stretch_m']:g} m: translation {c.fmt(st['translation_pct_median'])}% "
-                         f"(p95 {c.fmt(st['translation_pct_p95'])}%), heading {c.fmt(st['heading_deg_per_m_median_abs'])}"
+                         f"(p95 {c.fmt(st['translation_pct_p95'])}%), "
+                         f"heading {c.fmt(st['heading_deg_per_m_median_abs'])}"
                          f" deg/m  [{st['n']} stretches]")
     if "loc_py" in result:
         lp = result["loc_py"]
-        lines.append(f"  loc.py vs map pose: {lp['verdict']} (a rigid fit leaves {c.fmt(lp['rigid_fit']['residual_median_m'])}"
+        lines.append(f"  loc.py vs map pose: {lp['verdict']} "
+                     f"(a rigid fit leaves {c.fmt(lp['rigid_fit']['residual_median_m'])}"
                      f" m of {c.fmt(lp['distance_median_m'])} m); distance p95 {c.fmt(lp['distance_p95_m'])} m, "
                      f"heading difference {c.fmt(lp['heading_difference_median_deg'])} deg (medians)")
-        lines.append("    by time: " + ", ".join(f"{w['from_s']:.0f}-{w['to_s']:.0f} s {c.fmt(w['distance_median_m'], 2)} m"
-                                              for w in lp["windows"]))
+        windows = [f"{w['from_s']:.0f}-{w['to_s']:.0f} s {c.fmt(w['distance_median_m'], 2)} m" for w in lp["windows"]]
+        lines.append("    by time: " + ", ".join(windows))
     return lines
 
 

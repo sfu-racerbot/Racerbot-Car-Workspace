@@ -301,6 +301,8 @@ def map_pose(run: "Run"):
         return None
     p = run[topic]
     return (topic, np.asarray(p.t, dtype=float), *to_base_link(p.x, p.y, p.yaw, POSE_FRAMES[topic]))
+
+
 SPEED_SPAN_S = 0.4       # s, the centred span a pose is differentiated over
 MIN_MAP_SPEED = 0.5      # m/s, below this a map speed is mostly pose noise
 

@@ -54,8 +54,8 @@ def main(argv=None) -> int:
             cmd = module.command_tracking(run)
             path = module.path_tracking(run)
             if path is not None and "_curves" in path and not args.no_loc and path["_curves"]["map_dir"] is not None:
-                path = module.path_tracking(run, None, module.locate_with_loc(run, path["_curves"]["map_dir"],
-                                                                                path["_curves"]["line"], folder))
+                rows = module.locate_with_loc(run, path["_curves"]["map_dir"], path["_curves"]["line"], folder)
+                path = module.path_tracking(run, None, rows)
             plots += len(module.plots(run, cmd, path, folder))
             print("\n".join(module.report(run, cmd, path)) + "\n")
             summary = {"command_tracking": {k: v for k, v in cmd.items() if not k.startswith("_")}}

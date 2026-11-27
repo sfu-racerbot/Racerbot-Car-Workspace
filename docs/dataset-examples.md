@@ -5,7 +5,11 @@
 > **You'll be able to:** run one offline analysis per use on any recorded run, read its plots and numbers, and know what they do and do not prove.
 > **Time:** 10 minutes to run all five on a run; an hour to read this doc properly.
 
-Every recorded run is graded for five uses. This doc gives one worked example per use: the maths behind it, which recorded topics it needs, what it measured on a real run, where the measurement stops being trustworthy, and what it means for state estimation or pure pursuit. The tools are in `tools/run_analysis/dataset_examples/`. They only read recordings; they never change a recording, a parameter or any driving code.
+Every recorded run is graded for five uses. This doc gives one worked example per use.
+
+Each example covers the maths behind it, the recorded topics it needs, and what it measured on a real run. It also says where the measurement stops being trustworthy, and what it means for state estimation or pure pursuit.
+
+The tools are in `tools/run_analysis/dataset_examples/`. They only read recordings. They never change a recording, a parameter or any driving code.
 
 ## Highlights
 
@@ -17,7 +21,9 @@ Every recorded run is graded for five uses. This doc gives one worked example pe
 - **Path tracking is checked against the controller's own log.** Pure pursuit logs its pose and cross-track error once a second; this tool's values agree to 5 cm and 1 cm (medians).
 - **Every calculation is tested against a closed form.** 37 tests (76 runs, once per car), and 40 of 40 deliberate breaks in `tools/mutations/dataset_examples.json` are caught.
 
-**Why it exists.** The classifier says *whether* a run is good for a use. It does not say what the run shows. Before this, turning a recording into "the steering delay is 137 ms" meant writing a script from scratch each time, and getting the frames, units and non-driving stretches right by hand. These five examples do that once, carefully, so the next person starts from a known-good analysis.
+**Why it exists.** The classifier says *whether* a run is good for a use. It does not say what the run shows.
+
+Before this, turning a recording into "the steering delay is 137 ms" meant writing a script from scratch each time. The frames, units and non-driving stretches all had to be got right by hand. These five examples do that once, carefully, so the next person starts from a known-good analysis.
 
 ## Contents
 
@@ -69,7 +75,9 @@ results: ~/.cache/racerbot/dataset_examples/rb1-20261026-194514 (8 plots, summar
 
 That folder holds the plots (PNG) and `summary.json`, every number by example, so two runs can be compared with a script.
 
-**If an example says `skipped, the run has no ...`:** that run did not record the topic the example needs. Pick another run, or see each example's topic table below. **If it fails with `No module named 'rosbags'`:** install it, or source ROS first.
+**If an example says `skipped, the run has no ...`:** that run did not record the [topic](glossary.md#topic) the example needs. Pick another run, or see each example's topic table below.
+
+**If it fails with `No module named 'rosbags'`:** install it, or source ROS first.
 
 ## How every example treats the data
 
@@ -177,7 +185,11 @@ a_x    = dv/dt                                  on level ground
 
 ![Speed error against map speed, and accelerometer against wheel acceleration](dataset-examples/velocity_errors.png)
 
-The wheels count 6.9% more distance than the car covers. Car 1's gain was −4040 in this run and still is. The Kalman speed inherits the same error: an accelerometer measures changes in speed, so it cannot correct a constant scale. The accelerometer follows the wheel acceleration well; its 0.5 m/s² offset is about what a 3° pitch of the mount gives (9.81 × sin 3° = 0.51).
+The wheels count 6.9% more distance than the car covers. Car 1's gain was −4040 in this run and still is.
+
+The Kalman speed inherits the same error. An accelerometer measures changes in speed, so it cannot correct a constant scale.
+
+The accelerometer follows the wheel acceleration well. Its 0.5 m/s² offset is about what a 3° pitch of the mount gives (9.81 × sin 3° = 0.51).
 
 On car 2's race run the wheel scale is closer (ratio 1.024), but its RMS error is larger (0.40 m/s), and its accelerometer cannot be checked: its axes are rotated (see [findings](#findings-at-a-glance)).
 
@@ -190,7 +202,7 @@ On car 2's race run the wheel scale is closer (ratio 1.024), but its RMS error i
 **What it means for downstream work**
 
 - **State estimation:** a speed estimator that fuses only wheels and an accelerometer will carry the wheel's scale error. The correction has to come from something that measures distance: the map pose, LiDAR, or a recalibrated gain (the [odometry calibration wizard](odom-calibration.md) exists for this).
-- **Pure pursuit:** it scales its lookahead with speed, and its speed profile is tracked against the wheel speed. A 7% scale error also leaks into every model that uses v, as examples 3 and 4 show.
+- **Pure pursuit:** it scales its [lookahead](glossary.md#lookahead) with speed, and tracks its speed profile against the wheel speed. A 7% scale error also leaks into every model that uses v, as examples 3 and 4 show.
 
 ---
 
@@ -236,7 +248,9 @@ Fitted from these:
 
 With the wheel speed, the steering seems 7% weak. With the map speed, the gain is 0.99: the bicycle model and car 1's servo calibration are right, and the apparent weakness was the wheel scale from example 2. The flat band at ±19° in the scatter plot is the steering limit (0.33 rad on car 1).
 
-**Car 2's race run (`20261111-152132`) is different.** With map speed, the slope is 0.886, and by speed it falls from 1.10 below 1.5 m/s to **0.67 above 3.5 m/s**. A servo calibration error would be the same at every speed. One that grows with speed is tyre slip, understeer: the faster the car goes, the less it turns for the same command. Delay there: 149 ms.
+**Car 2's race run (`20261111-152132`) is different.** With map speed, the slope is 0.886. Split by speed, it falls from 1.10 below 1.5 m/s to **0.67 above 3.5 m/s**. Its delay is 149 ms.
+
+A servo calibration error would be the same at every speed. One that grows with speed is tyre slip, called understeer: the faster the car goes, the less it turns for the same command.
 
 **Limitations**
 
@@ -248,7 +262,7 @@ With the wheel speed, the steering seems 7% weak. With the map speed, the gain i
 **What it means for downstream work**
 
 - **Pure pursuit:** its steering law assumes exactly this bicycle model. On car 1 the model holds within 1–2% up to 3.5 m/s. On car 2 at racing speed the car turns a third less than pure pursuit expects, so it will run wide in fast corners, which example 5 confirms.
-- **Delay:** 137–149 ms, against the `delay_lqr` law's assumed 75 ms actuation + 50 ms sensing = 125 ms. At 4 m/s the car travels about 0.55 m before a steering command takes effect, which is close to the 0.6 m minimum lookahead (`min_lookahead`).
+- **Delay:** 137–149 ms, against 125 ms assumed by the `delay_lqr` law (75 ms actuation + 50 ms sensing). At 4 m/s the car travels about 0.55 m before a steering command takes effect. That is close to the 0.6 m minimum lookahead (`min_lookahead`).
 - **State estimation:** `/odom` predicts heading with this same model, from the command. Its 2.2–3.6 °/m heading drift (example 1) is this model's error, integrated.
 
 ---
@@ -273,7 +287,9 @@ from the steering       a_y = v² · tan(δ) / L       what the command asks for
 from the accelerometer  a_y = /imu/data's y axis    also reads g·sin(roll); straight-line median removed first
 ```
 
-The **grip curve** plots delivered (v · r) against asked (v² tan δ / L), with the command shifted by the steering delay from example 3, binned with `grip_truth.curve()`. The **sustained limit** is the highest bin with at least 1 s of data (`grip_truth.sustained_limit`). `grip_truth.py` itself uses only steady corners. These courses rarely hold one long enough (30 steady samples on car 1's run, 12 on car 2's), so all driving samples are used instead.
+The **grip curve** plots delivered (v · r) against asked (v² tan δ / L), binned with `grip_truth.curve()`. The command is first shifted by the steering delay from example 3. The **sustained limit** is the highest bin with at least 1 s of data (`grip_truth.sustained_limit`).
+
+`grip_truth.py` itself uses only steady corners. These courses rarely hold one long enough (30 steady samples on car 1's run, 12 on car 2's), so all driving samples are used instead.
 
 **Result: car 1, `20261026-194514`**
 
@@ -341,7 +357,7 @@ Car 2's race run: speed delay 248 ms, ratio 1.05; curvature delay 151 ms, gain 0
 
 **Topics:** `/pf/viz/inferred_pose` (car position), `/drive_intent` (tracking or not), `/odom`, `/imu/data`, `/joy`, `/rosout` (the node's own log), plus the run's `metadata/params/`.
 
-**Model:** cross-track error e is the signed distance from the rear axle to the closest point of the closed racing line: positive when the car is left of the line's direction of travel (the workspace convention, `racing_math.project_onto_path`). Every segment is checked, so a hairpin cannot pick the wrong side.
+**Model:** cross-track error e is the signed distance from the rear axle to the closest point of the closed [racing line](glossary.md#racing-line). It is positive when the car is left of the line's direction of travel, the workspace convention (`racing_math.project_onto_path`). Every segment is checked, so a hairpin cannot pick the wrong side.
 
 **Checks that the line, map and frames are really this run's.** The tool prints each one:
 
@@ -415,7 +431,13 @@ Car 1's BNO085 is the control: both channels follow what they should, with the r
 
 Runner: `python3 -m pytest tools/run_analysis/tests/` (the tool suites, no ROS needed). The examples' tests are in `test_dataset_examples.py`: 37 tests, each run once per car.
 
-Every expected value is a closed form computed in the test. For example: a circle's chord speed for the map speed; a 0.12 s delay and 0.9 gain injected into synthetic yaw rates; a car 0.2 m outside a 5 m circle, reported as the particle filter would (the LiDAR's pose). Cross-track error is also checked against pure pursuit's own `racing_math.project_onto_path`, a second, independent implementation. The log parsing is tested on real lines copied from car 2's run.
+Every expected value is a closed form computed in the test. For example:
+
+- a circle's chord speed, for the map speed;
+- a 0.12 s delay and 0.9 gain injected into synthetic yaw rates;
+- a car 0.2 m outside a 5 m circle, reported as the particle filter would (the LiDAR's pose).
+
+Cross-track error is also checked against pure pursuit's own `racing_math.project_onto_path`, a second, independent implementation. The log parsing is tested on real lines copied from car 2's run.
 
 Hard rule 1 (CLAUDE.md): each of the 40 breaks in `tools/mutations/dataset_examples.json` (a flipped sign, a missing check, a swapped argument) turns the tests red:
 
@@ -426,4 +448,8 @@ PATH=<python with rosbags, scipy, matplotlib>:$PATH python3 tools/check_mutation
 
 **Working when:** the last line reads `40/40 breaks caught`.
 
-**To add an example:** put its maths in a pure function next to the others, take a `Run` from `common.load()`, use `common`'s driving mask, map pose and jump handling rather than your own, test the maths against a closed form, and add a break for each rule to the mutation file.
+**To add an example:**
+
+1. Put its maths in a pure function next to the others, and take a `Run` from `common.load()`.
+2. Use `common`'s driving mask, map pose and jump handling rather than your own.
+3. Test the maths against a closed form, and add a break for each rule to the mutation file.

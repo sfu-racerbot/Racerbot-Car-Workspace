@@ -186,7 +186,8 @@ def plots(run: c.Run, result: dict, folder: Path) -> list:
     axes[0].legend(fontsize=7)
     lags, corr = result["_xcorr"]
     axes[1].plot(np.array(lags) * 1000, corr, "k-")
-    axes[1].axvline(result["delay_s"] * 1000, color="tab:orange", lw=1, label=f"delay {result['delay_s'] * 1000:.0f} ms")
+    axes[1].axvline(result["delay_s"] * 1000, color="tab:orange", lw=1,
+                    label=f"delay {result['delay_s'] * 1000:.0f} ms")
     axes[1].set_xlabel("shift of the prediction (ms)")
     axes[1].set_ylabel("correlation with the gyro")
     axes[1].legend(fontsize=7)
@@ -197,10 +198,12 @@ def plots(run: c.Run, result: dict, folder: Path) -> list:
 
 def report(run: c.Run, result: dict) -> list:
     m = result["steering_map"]
-    lines = [f"steering_response  {run.car}/{run.run_id}  {result['fitted_s']:.0f} s fitted (LB held, >= {MIN_SPEED} m/s)",
+    lines = [f"steering_response  {run.car}/{run.run_id}  {result['fitted_s']:.0f} s fitted "
+             f"(LB held, >= {MIN_SPEED} m/s)",
              f"  delay {c.fmt(result['delay_s'] * 1000)} ms (correlation {c.fmt(result['delay_correlation'])}), "
              f"yaw gain {c.fmt(result['yaw_gain'])}",
-             f"  steering map: delta_eff = {c.fmt(m['slope'])} delta_cmd + {c.fmt(result['straight_ahead_offset_deg'])} deg"
+             f"  steering map: delta_eff = {c.fmt(m['slope'])} delta_cmd + "
+             f"{c.fmt(result['straight_ahead_offset_deg'])} deg"
              f"  (r {c.fmt(m['r'])})",
              f"  residual yaw rate RMS {c.fmt(result['residual_yaw_rate']['rms'])} rad/s",
              "  turned / commanded by |steering|: " + ", ".join(

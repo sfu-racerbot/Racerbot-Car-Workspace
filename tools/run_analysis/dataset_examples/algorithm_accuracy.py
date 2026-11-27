@@ -147,11 +147,13 @@ def checks(run: c.Run, params: dict, line_path: Path, line, map_dir) -> list:
     ready, _ = node_log(run)
     if ready:
         n, path = ready[-1]
-        out.append(dict(check="waypoint count matches the node's log", ok=n == len(line) and c.local_path(path) == line_path,
+        out.append(dict(check="waypoint count matches the node's log",
+                        ok=n == len(line) and c.local_path(path) == line_path,
                         detail=f"node: {n} waypoints from {path}; file: {len(line)}"))
     else:
         out.append(dict(check="waypoint count matches the node's log", ok=False, detail="no 'ready:' line in /rosout"))
-    out.append(dict(check="map is the line's folder", ok=map_dir is not None and Path(map_dir).resolve() == line_path.parent.resolve(),
+    out.append(dict(check="map is the line's folder",
+                    ok=map_dir is not None and Path(map_dir).resolve() == line_path.parent.resolve(),
                     detail=f"map_server loaded {map_dir}"))
     topic = params.get("pose_topic", "")
     out.append(dict(check="pose topic and frame", ok=run.has(topic) and run.frames.get(topic, "").strip("/") == "map",
@@ -256,7 +258,8 @@ def plots(run: c.Run, cmd: dict, path: dict | None, folder: Path) -> list:
     if "_curves" in cmd:
         k = cmd["_curves"]
         fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-        axes[0].plot(k["t"], k["v_cmd"], "-", color="tab:orange", lw=1, label=f"commanded (/drive), delayed {cmd['speed']['delay_s'] * 1000:.0f} ms")
+        axes[0].plot(k["t"], k["v_cmd"], "-", color="tab:orange", lw=1,
+                     label=f"commanded (/drive), delayed {cmd['speed']['delay_s'] * 1000:.0f} ms")
         axes[0].plot(k["t"], k["v"], "k-", lw=0.8, label="wheel speed (/odom)")
         axes[1].plot(k["t"], k["kappa_cmd"], "-", color="tab:orange", lw=1, label="commanded tan(delta)/L, delayed")
         axes[1].plot(k["t"], k["kappa"], "k-", lw=0.6, label="achieved r / v")
@@ -278,10 +281,12 @@ def plots(run: c.Run, cmd: dict, path: dict | None, folder: Path) -> list:
             g = Grid.from_map(k["map_dir"])
             axes[0].imshow(g.occ, origin="lower", cmap="Greys", alpha=0.6,
                            extent=[g.ox, g.ox + g.occ.shape[1] * g.res, g.oy, g.oy + g.occ.shape[0] * g.res])
-        axes[0].plot(*np.vstack([k["line"][:, :2], k["line"][:1, :2]]).T, "-", color="tab:green", lw=1.5, label="racing line")
+        closed = np.vstack([k["line"][:, :2], k["line"][:1, :2]])
+        axes[0].plot(closed[:, 0], closed[:, 1], "-", color="tab:green", lw=1.5, label="racing line")
         axes[0].plot(k["x"][~k["ok"]], k["y"][~k["ok"]], ".", ms=1, color="0.75", label="not scored")
         sc = axes[0].scatter(k["x"][k["ok"]], k["y"][k["ok"]], c=np.abs(k["e"][k["ok"]]), s=2, cmap="viridis",
-                             vmin=0, vmax=max(0.3, float(np.nanpercentile(np.abs(k["e"][k["ok"]]), 95))) if k["ok"].any() else 1)
+                             vmin=0, vmax=max(0.3, float(np.nanpercentile(np.abs(k["e"][k["ok"]]), 95)))
+                             if k["ok"].any() else 1)
         fig.colorbar(sc, ax=axes[0], label="|cross-track error| (m)")
         pad = 1.0
         axes[0].set_xlim(np.nanmin(k["line"][:, 0]) - pad, np.nanmax(k["line"][:, 0]) + pad)
@@ -310,7 +315,8 @@ def report(run: c.Run, cmd: dict, path: dict | None) -> list:
     lines.append(f"  COMMAND TRACKING ({cmd['driving_s']:.0f} s with the algorithm driving)")
     if "speed" in cmd:
         s, k = cmd["speed"], cmd["curvature"]
-        lines.append(f"    speed: delay {c.fmt(s['delay_s'] * 1000)} ms, achieved - commanded mean {c.fmt(s['error']['mean'])} m/s, "
+        lines.append(f"    speed: delay {c.fmt(s['delay_s'] * 1000)} ms, "
+                     f"achieved - commanded mean {c.fmt(s['error']['mean'])} m/s, "
                      f"RMS {c.fmt(s['error']['rms'])} m/s, achieved/commanded {c.fmt(s['achieved_over_commanded'])}")
         lines.append(f"    curvature: delay {c.fmt(k['delay_s'] * 1000)} ms, gain {c.fmt(k['gain'])}, "
                      f"RMS error {c.fmt(k['error']['rms'])} 1/m")
@@ -334,11 +340,13 @@ def report(run: c.Run, cmd: dict, path: dict | None) -> list:
                  f"{ts['near_pose_jump']:.0f} s near {path['pose']['jumps']} particle-filter jumps")
     for name in ("cross_track", "straights", "corners"):
         e = path[name]
-        lines.append(f"    {name:11}: mean {c.fmt(e['mean'])} m, RMS {c.fmt(e['rms'])} m, p95 |e| {c.fmt(e['p95_abs'])} m, "
+        lines.append(f"    {name:11}: mean {c.fmt(e['mean'])} m, RMS {c.fmt(e['rms'])} m, "
+                     f"p95 |e| {c.fmt(e['p95_abs'])} m, "
                      f"max {c.fmt(e['max_abs'])} m")
     if "agrees_with_node_log" in path:
         a = path["agrees_with_node_log"]
-        lines.append(f"    vs the node's own DRIVE log ({a['lines']} lines): pose {c.fmt(a['pose_distance_median_m'])} m apart, "
+        lines.append(f"    vs the node's own DRIVE log ({a['lines']} lines): "
+                     f"pose {c.fmt(a['pose_distance_median_m'])} m apart, "
                      f"|e| differs {c.fmt(a['cross_track_difference_median_m'])} m (medians)")
     if "loc_py" in path:
         lp = path["loc_py"]

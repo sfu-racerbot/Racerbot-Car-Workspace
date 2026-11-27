@@ -412,9 +412,9 @@ def test_cross_track_agrees_with_pure_pursuits_own_projection():
 
 
 def test_node_log_parses_the_real_ready_and_drive_lines(tmp_path):
-    run = c.Run(path=tmp_path, car="rb2", run_id="x", rosout=[(1.0, "pure_pursuit_node", READY),
-                                                               (2.0, "pure_pursuit_node", DRIVE),
-                                                               (3.0, "pure_pursuit_node", "STOP [body_contact] ...")])
+    rosout = [(1.0, "pure_pursuit_node", READY), (2.0, "pure_pursuit_node", DRIVE),
+              (3.0, "pure_pursuit_node", "STOP [body_contact] ...")]
+    run = c.Run(path=tmp_path, car="rb2", run_id="x", rosout=rosout)
     ready, drive = aa.node_log(run)
     assert ready == [(186, "/home/racerbotcar-2/racerbot-ws/data/rb2/racerbot_auto/20261111-151026-rebuilt/"
                            "raceline_profiled.csv")]

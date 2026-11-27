@@ -129,8 +129,8 @@ def plots(run: c.Run, result: dict, folder: Path) -> list:
     axes[2].set_xlabel("lateral a_y (m/s^2)")
     axes[2].set_ylabel("forward a_x (m/s^2)")
     axes[2].set_aspect("equal")
-    axes[2].set_title("accelerometer g-g diagram" + ("" if result["accelerometer_axes"]["mapping_ok"]
-                                                       else " (axes as recorded: wrong)"), fontsize=9)
+    wrong = "" if result["accelerometer_axes"]["mapping_ok"] else " (axes as recorded: wrong)"
+    axes[2].set_title("accelerometer g-g diagram" + wrong, fontsize=9)
     fig.suptitle(f"{run.car} {run.run_id}: lateral acceleration")
     path = c.save(fig, folder / "lateral_acceleration.png")
     plt.close(fig)
@@ -139,7 +139,8 @@ def plots(run: c.Run, result: dict, folder: Path) -> list:
 
 def report(run: c.Run, result: dict) -> list:
     f, k, ax = result["accel_vs_kinematic"], result["kinematic"], result["accelerometer_axes"]
-    lines = [f"lateral_acceleration  {run.car}/{run.run_id}  v from {result['speed_from']}, {result['driving_s']:.0f} s driving",
+    lines = [f"lateral_acceleration  {run.car}/{run.run_id}  v from {result['speed_from']}, "
+             f"{result['driving_s']:.0f} s driving",
              f"  v r: p95 |a_y| {c.fmt(k['p95_abs_mps2'])} m/s^2, {c.fmt(k['cornering_s'])} s above {CORNERING} m/s^2"]
     if ax["mapping_ok"]:
         lines.append(f"  accelerometer vs v r: slope {c.fmt(f['slope'])}, r {c.fmt(f['r'])} "
