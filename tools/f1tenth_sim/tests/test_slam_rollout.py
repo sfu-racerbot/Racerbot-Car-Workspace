@@ -16,7 +16,8 @@ from sim_fidelity.calibration import calibration_for_car  # noqa: E402
 
 
 def analytic(rate=0.0, beta=0.0, speed=2.0, duration=7.0, yaw0=2.8):
-    lr = .18
+    # CG to rear axle: the selected car's own (car 2's from its measured axle weights).
+    lr = calibration_for_car().lr
     t = np.arange(round(duration / .05) + 1) * .05
     yaw = yaw0 + rate * t
     if rate:
@@ -118,7 +119,7 @@ def test_initial_state_and_delay_history_are_set_without_warmup():
     motion, _ = analytic(.6, -.07)
     cal = calibration_for_car()
     state = sr.initial_state(motion, 20, .17, cal.lr)
-    assert state == pytest.approx([.18, -25, .17, 2, 0, .6, -.07])
+    assert state == pytest.approx([cal.lr, -25, .17, 2, 0, .6, -.07])
     plant = KinematicPlant(cal, 1)
     times = np.arange(-10, 2) * sr.CONTROL_DT
     drive = np.c_[times, times * 0, times + .2, times + 3]

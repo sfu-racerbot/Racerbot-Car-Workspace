@@ -117,7 +117,9 @@ def test_november_floor_reaches_the_plant_and_new_track_contact_layer():
             for _ in range(40):
                 plant.step([(command, .3)])
             expected = evidence('replay')['selected_linkage_slope'] * command + evidence('measurement')['steering_trim_rad']
-            assert plant.truth(0)[2] == pytest.approx(expected, abs=1e-4)  # rad
+            # The plant's steering state is the real wheel angle that drives the same circle on
+            # car 2's measured axles (calibration.physical_steering, docs/sim-calibration.md).
+            assert plant.truth(0)[2] == pytest.approx(cal.physical_steering(expected), abs=1e-4)  # rad
         image = np.array(Image.open(SIM / 'maps' / f'{track}_contact.png').convert('L'))[::-1]
         import yaml
         resolution = yaml.safe_load((SIM / 'maps' / f'{track}_map.yaml').read_text())['resolution']

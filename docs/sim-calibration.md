@@ -313,11 +313,42 @@ rb2 passed November: 4 s speed mean/median .311/.289→.306/.284 m/s; signed spe
 
 rb1 failed: 4 s speed mean/median .373/.361→.424/.415 m/s; bias +.098→+.247 m/s. Its default remains unchanged. rb2's two accepted speed scales are now its default; tyres stay unchanged. Select the old rb2 scales with `--floor pre_slam_speed_2026_11_rb2`. Full tables: [speed report](../tools/f1tenth_sim/SLAM_SPEED_FIT.md) and its linked fitting JSON.
 
+### Car 2's weight and body (2026-11-23)
+
+Car 2 was weighed and tape-measured on **November 23, 2026**. These values are now car 2's default in the simulator (`RB2_MEASURED` in `sim_fidelity/calibration.py`):
+
+| What | Value | Field |
+|---|---|---|
+| Mass | **3.955 kg** (front axle 1.673 kg, rear axle 2.283 kg, one scale, one axle at a time) | `mass` |
+| Weight split | **42% front / 58% rear**: 2.283 / 3.955 = 0.577 | `cog_front_fraction` |
+| Wheelbase, hub centre to hub centre | **0.325 m** (Traxxas publishes 0.324) | `physical_wheelbase` |
+| Rear hub centre to LiDAR centre | **0.265 m** | `lidar_offset_x` |
+| Width, outer tyre edge to outer tyre edge | **0.27 m** | `body_width` |
+| Length, bumper to bumper | **0.495 m** | `body_length` |
+
+Yaw inertia was never measured. It is scaled with the measured mass. The padded safety envelope (`width` 0.31, `length` 0.58) is unchanged.
+
+**How steering works with the real wheelbase.** Car 2's steering map and full-lock angles were fitted on 2026-10-16 from driven circles, using `angle = atan(0.36 / radius)`. So a command of angle `a` really means "drive a circle of radius 0.36 / tan(a)". Every controller config still uses 0.36 m (`wheelbase`), and the real car is unchanged. The simulator now turns each command into the real wheel angle that drives that same circle on 0.325 m axles, `atan(tan(a) × 0.325 / 0.36)` (`physical_steering`). It then runs the physics (CG position, tyres, grip limit) on the real axles. A car with no measured axle distance (car 1) is unchanged.
+
+**What it did to the scores.** `slam_rollout.py` on the ten November 11 rb2 drives in the table above:
+
+| Candidate | Eval 2 s yaw RMS rad/s | Eval 4 s position m | Eval high-a_y yaw bias rad/s (4 s) |
+|---|---:|---:|---:|
+| Before (2026-11-22 default) | .3159 | .9338 | −.2057 |
+| Mass 3.955 kg only, inertia scaled with it | .3159 | .9338 | −.2057 |
+| CG at 42/58 only | .3157 | .9403 | −.2069 |
+| Real wheelbase only | .3248 | .9563 | −.2154 |
+| **All measured values (new default)** | **.3248** | **.9631** | **−.2170** |
+
+The fit got about 3% worse on these drives. The measurements were adopted anyway, because they are what the car is. The numbers fitted against the old geometry (tyre stiffness, friction 0.55, the grip curves) were tuned to make up for the old geometry, and they should be re-fitted on the real geometry rather than kept for being slightly closer. Mass alone changes nothing, because Gym's single-track model scales tyre force with mass.
+
+The remaining gap is the same as before. In hard corners (|a_y| ≥ 3 m/s²) the simulator turns about **0.21 rad/s less** than measured on the evaluation drives. That points to grip at the limit, which the next fit has to address on top of these values.
+
 ### Limits before trusting these numbers
 
 - `loc.py` predicts motion with wheel speed and gyro before correcting against scans. This is **not independent ground truth**.
 - rb1 rollout evaluation is one usable drive, not a broad floor survey.
-- Localization poses refer to the rear axle; the CG conversion assumes `l_r=.18 m`. The CG has not been measured.
+- Localization poses refer to the rear axle; the CG conversion used `l_r=.18 m` until 2026-11-23. Car 2 now uses its measured 42/58 balance, so `l_r` is about .137 m on the real 0.325 m axles (see above).
 - No steering-rack sensor was recorded. Initial steering uses command, not observed wheel angle.
 - Derivatives amplify localization noise. Sparse steady windows cannot identify axle forces reliably. No result here has been validated by driving a physical car.
 

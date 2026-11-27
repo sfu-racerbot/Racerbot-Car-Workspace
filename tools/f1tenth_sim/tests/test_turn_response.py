@@ -71,4 +71,4 @@ def test_plant_replay_uses_commands_only_and_changes_turning(tmp_path):
     baseline, candidate = [study.replay(track, cal, m, 3.5, rows) for m in (None, model)]
     assert abs(candidate[-1, 5] - baseline[-1, 5]) > .10
     np.testing.assert_allclose(candidate[-1, 5], steady_rate(candidate[-1, 3], candidate[-1, 2],
-                               cal.wheelbase, model.gain, model.trim_rad, model.lateral_limit_mps2), atol=.002)
+                               cal.physical_wheelbase, model.gain, model.trim_rad, model.lateral_limit_mps2), atol=.002)

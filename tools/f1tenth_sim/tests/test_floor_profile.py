@@ -224,7 +224,8 @@ def test_plant_steers_through_the_floor_linkage(eval_gap):
             plant.reset(np.array([[line.xs[0], line.ys[0], line.yaws[0]]]))
             for _ in range(40):
                 plant.step([(0.0, 0.3)])
-            assert plant.truth(0)[2] == pytest.approx(expected, abs=1e-4)     # rad
+            # The steering state is the real wheel angle on the real axles (physical_steering).
+            assert plant.truth(0)[2] == pytest.approx(cal.physical_steering(expected), abs=1e-4)     # rad
         finally:
             plant.close()
 

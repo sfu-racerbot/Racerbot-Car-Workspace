@@ -198,7 +198,8 @@ def test_cli_writes_strict_json_and_cache_samples_and_refuses_outside_cache(tmp_
     assert sm.main([str(source), '--car', 'rb2', '--json', str(report), '--samples']) == 0
     result = json.loads(report.read_text())
     assert result['car'] == 'rb2'
-    assert result['geometry']['lr_m'] == pytest.approx(.18)
+    # Car 2's CG from its axle weights (statics: lr = L * front / total), measured 2026-11-23.
+    assert result['geometry']['lr_m'] == pytest.approx(0.325 * 1.673 / (1.673 + 2.283), abs=1e-9)  # m
     assert result['runs'][0]['run'] == 'track'
     assert result['runs'][0]['wheel_over_ground']['median'] == pytest.approx(1.04, abs=.001)
     with np.load(tmp_path / '.cache/racerbot/slam_motion/rb2_track.npz') as saved:

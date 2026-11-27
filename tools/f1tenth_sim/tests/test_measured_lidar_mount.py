@@ -41,8 +41,14 @@ def test_forward_beam_from_rear_axle_at_room_origin(room, backend, options, expe
         car = SimBridge(SimConfig(path, line, seed=12347, car='rb2', **options))
     try:
         for yaw in (0.0, math.pi / 2):
-            # Put the rear axle at (0, 0), independently of the caster.
-            car.reset(np.array([[0.18 * math.cos(yaw), 0.18 * math.sin(yaw), yaw]]))
+            # Put the rear axle at (0, 0), independently of the caster: the levine plant's
+            # pose is the CG, lr ahead of the axle (car 2's measured lr); the bridge keeps 0.18.
+            lr = car.calibration.lr if backend == 'levine' else 0.18
+            if backend == 'levine':
+                # Closed form for the plant's own geometry: wall at 2.00 m, scanner at the
+                # calibration's lidar_offset_x ahead of the rear axle (measured) or of the CG (legacy).
+                expected = 2.00 - car.calibration.lidar_offset_x - (0.0 if options else lr)
+            car.reset(np.array([[lr * math.cos(yaw), lr * math.sin(yaw), yaw]]))
             if backend == 'levine':
                 car.step([(0., 0.)])  # allow the delayed scan to arrive
                 obs, *_ = car.step([(0., 0.)])
