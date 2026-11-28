@@ -24,7 +24,11 @@ car_explorer:
     brake_delay: 0.24       # s, car 2 race-day braking delay (braking_lag.py, run 20261111-152132)
     half_width: 0.135       # m, half of car 2's measured 0.27 m tyre to tyre
     lidar_x: 0.265          # m, car 2 rear hub to LiDAR, measured 2026-11-23
-    front_reach: 0.41       # m, rear axle to front bumper: estimate, not measured
+    # m, rear axle to front bumper. Bounded, not measured: car 2 is 0.495 m bumper
+    # to bumper with a 0.325 m wheelbase (2026-11-23), and each bumper sits at least
+    # a tyre radius (0.05 m) past its axle, so 0.375-0.445 m. The upper end, so the
+    # wall check never thinks the nose is shorter than it is.
+    front_reach: 0.445
     # --- Slide: turning under this share of what the steering asks.
     slide_ratio: 0.7
     slide_min_speed: 1.5    # m/s
@@ -36,12 +40,26 @@ car_explorer:
     # --- Session.
     min_voltage: 10.5       # V, 3S pack
     max_session_sec: 900.0  # s of LB-held driving
-    brake_every: 3          # a brake test after every 3rd raise; 0 = none
+    # --- Stop tests: max_speed and min_speed drop to brake_speed on a straight
+    # the live scan and the course map both show room for, so the car brakes
+    # as hard as it can and the fit learns its braking.
     brake_min_speed: 2.5    # m/s
     brake_clear: 1.0        # m spare beyond the braking distance
     brake_decel: 2.9        # m/s^2, car 2 race-day braking, same run
-    brake_speed: 1.5        # m/s, the max_speed a brake test drops to
-    brake_hold_sec: 1.5     # s
+    brake_speed: 0.5        # m/s
+    brake_hold_sec: 3.0     # s at most
+    brake_gap_sec: 20.0     # s of driving between stop tests
+    # --- Learning the course: one gentle lap first, when a pose is available.
+    learn_timeout_sec: 90.0 # s; no lap closed by then, carry on with the scan alone
+    pose_frame: map         # SLAM's frame; the course map needs a fixed frame
+    base_frame: base_link
+    # --- What the fit needs: seconds of driving that teach each number.
+    grip_info_ratio: 0.8    # cornering at this share of the limit
+    brake_info_excess: 1.0  # m/s faster than the command
+    steer_info_rate: 1.0    # rad/s of steering change
+    need_grip_sec: 20.0
+    need_braking_sec: 4.0
+    need_steering_sec: 15.0
     # --- Wiring.
     target_node: /gap_follow_node
     status_topic: /car_explorer/status

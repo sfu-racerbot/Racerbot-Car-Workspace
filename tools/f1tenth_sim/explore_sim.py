@@ -42,14 +42,14 @@ import eval_gap  # noqa: E402
 from gap_mirror import GapController  # noqa: E402
 from sim_fidelity.calibration import (FLOORS, add_car_argument, calibration_for_car,  # noqa: E402
                                       car_from_args, with_floor)
-from car_explorer.explorer import (LATERAL, SPEED, Conductor, Fence, Inputs, Rules,  # noqa: E402
-                                   path_stop_margin)
+from car_explorer.explorer import (LATERAL, MIN_SPEED, SPEED, Conductor, Fence,  # noqa: E402
+                                   Inputs, Rules, path_stop_margin, straight_room)
 
 CONTROL_DT = eval_gap.CONTROL_DT
 
 
 def run(track, calibration, car_id, *, minutes, seed=1, rules=None, fence=None, geometry=None,
-        grip_scale=None):
+        grip_scale=None, use_pose=True):
     """Drive ``minutes`` of simulated time with the explorer tuning gap_follow.
 
     Returns (report, recording). The recording holds 40 Hz arrays of the
@@ -68,13 +68,16 @@ def run(track, calibration, car_id, *, minutes, seed=1, rules=None, fence=None, 
     params = eval_gap.parse_set([], car_id)
     ctrl = GapController(params, _Lidar)
 
-    conductor = Conductor(fence or Fence(), rules or Rules())
+    rules = rules or Rules()
+    # gap_follow's own min_speed, as explorer_node reads it through get_parameters.
+    conductor = Conductor(fence or Fence(), rules, {MIN_SPEED: float(ctrl.p[MIN_SPEED])})
     for name, value in conductor.start().items():
         ctrl.p[name] = value
     geometry = geometry or dict(wheelbase=calibration.wheelbase, half_width=0.135, lidar_x=0.265,
-                                front_reach=0.41, delay=0.24)
+                                front_reach=0.445, delay=rules.brake_delay)
     steps = int(round(minutes * 60.0 / CONTROL_DT))
-    rec = {k: [] for k in ('t', 'steer', 'speed_cmd', 'speed', 'yaw_rate', 'max_speed', 'max_lateral')}
+    rec = {k: [] for k in ('t', 'steer', 'speed_cmd', 'speed', 'yaw_rate', 'max_speed', 'max_lateral',
+                           'min_speed')}
     contact_steps, min_clear, applied = 0, math.inf, []
     info = {'lap_counts': [0]}
     for step in range(steps):
@@ -89,19 +92,29 @@ def run(track, calibration, car_id, *, minutes, seed=1, rules=None, fence=None, 
         if step % 2 == 0:  # the node's 20 Hz
             margin = path_stop_margin(ego['scan'], _Lidar.angle_min, _Lidar.angle_increment,
                                       speed=float(state[3]), steering=steering, **geometry)
+            room = straight_room(ego['scan'], _Lidar.angle_min, _Lidar.angle_increment,
+                                 half_width=geometry['half_width'], lidar_x=geometry['lidar_x'],
+                                 front_reach=geometry['front_reach'])
+            # The pose SLAM would give on the car: here the plant's true one.
+            pose = (float(truth[0]), float(truth[1]), float(truth[4])) if use_pose else None
             out = conductor.update(Inputs(
                 now=now, lb_held=True, speed=float(state[3]), steering=steering,
                 yaw_rate=float(state[5]), stop_margin=margin, voltage=None,
-                safety_state=ctrl.stop_reason if ctrl.stopped else 'gap_follow'))
+                safety_state=ctrl.stop_reason if ctrl.stopped else 'gap_follow',
+                speed_cmd=float(speed_cmd), pose=pose, straight_room=room))
             if out is not None:
                 applied.append({'t': round(now, 2), **out})
                 for name, value in out.items():
                     ctrl.p[name] = value
-        for key, value in (('t', now), ('steer', steering), ('speed_cmd', speed_cmd),
-                           ('speed', float(truth[3])), ('yaw_rate', float(truth[5])),
-                           ('max_speed', ctrl.p[SPEED]), ('max_lateral', ctrl.p[LATERAL])):
-            rec[key].append(value)
         obs, _r, done, _t, info = plant.step([(steering, speed_cmd)])
+        # The motion each command produced: the state after this tick, as the
+        # fitter's replay (fit_sim.simulate_commands) reports it.
+        after = plant.truth(0)
+        for key, value in (('t', now), ('steer', steering), ('speed_cmd', speed_cmd),
+                           ('speed', float(after[3])), ('yaw_rate', float(after[5])),
+                           ('max_speed', ctrl.p[SPEED]), ('max_lateral', ctrl.p[LATERAL]),
+                           ('min_speed', ctrl.p[MIN_SPEED])):
+            rec[key].append(value)
         clear = plant.chassis_map_clearance(0)
         if math.isfinite(clear):
             min_clear = min(min_clear, clear)
@@ -123,12 +136,20 @@ FIT_NAMES = ('surface_friction', 'steering_delay_ticks', 'speed_loop_brake_max')
 
 
 def fit_recording(rec, start_calibration, names=FIT_NAMES, workers=4, maxiter=12):
+    """Fit the recording: values, a 90% range for each, the score on held-back
+    windows, and whether grip changed between the start and end of the session."""
     from sim_fidelity import explorer_fit as ef
     windows = ef.windows_from_series(rec['t'], rec['steer'], rec['speed_cmd'], rec['speed'],
                                      rec['yaw_rate'], np.ones(len(rec['t']), bool),
                                      horizon=2.0, spacing=3.0, min_speed=1.0)
-    return ef.fit(start_calibration, windows, list(names), maxiter=maxiter, popsize=6,
-                  workers=workers), len(windows)
+    result = ef.fit(start_calibration, windows, list(names), maxiter=maxiter, popsize=6,
+                    workers=workers, holdout_every=5, with_intervals=True)
+    fitted = replace(start_calibration, **result.values)
+    try:
+        change = ef.drift(fitted, windows, 'surface_friction', workers=workers)
+    except ValueError as exc:   # too short a session to split
+        change = {'skipped': str(exc)}
+    return result, len(windows), change
 
 
 def main(argv=None) -> int:
@@ -157,12 +178,16 @@ def main(argv=None) -> int:
     if args.record:
         np.savez(args.record, **rec)
     if args.fit:
-        result, n = fit_recording(rec, base, workers=args.workers)
+        result, n, change = fit_recording(rec, base, workers=args.workers)
         report['fit'] = {'windows': n, 'values': result.values,
                          'truth': {k: getattr(truth, k) for k in result.values},
+                         'range_90': result.intervals,
                          'cost_before': round(result.cost_before, 4),
                          'cost_after': round(result.cost_after, 4),
-                         'sensitivity': {k: round(v, 4) for k, v in result.sensitivity.items()}}
+                         'held_back_before': round(result.holdout_before, 4),
+                         'held_back_after': round(result.holdout_after, 4),
+                         'sensitivity': {k: round(v, 4) for k, v in result.sensitivity.items()},
+                         'grip_change': change}
     text = json.dumps(report, indent=1, default=float)
     if args.output:
         Path(args.output).write_text(text + '\n')

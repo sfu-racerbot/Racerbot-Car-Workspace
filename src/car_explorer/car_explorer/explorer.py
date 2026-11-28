@@ -22,6 +22,19 @@ What it does (docs/explorer.md):
   car is within its reaction distance (speed x braking delay) plus
   ``wall_margin`` of something on its current path. Backing off is applied
   at once, never waits for a straight.
+* **Learns the course first.** With a pose (SLAM's ``map`` frame on the car,
+  the true pose in the simulator) it drives one gentle lap and remembers how
+  much straight room there is at each place and heading (``CourseMap``).
+  Stop tests then go only where the map *and* the live scan both show room,
+  and each place is used once, so the tests spread round the course.
+* **Collects what the fit needs, and keeps going until it has it.** A ledger
+  counts the seconds of driving that teach each number: cornering near the
+  limit (grip), braking harder than the speed loop's linear range
+  (braking), and fast steering (steering delay). A stop test runs whenever
+  braking is the number short of data. The session ends only when both
+  settings have found their limit *and* every number has its seconds.
+* **Notices a floor that changes.** A second slide below the limit already
+  found lowers cornering again and is logged as a possible floor change.
 * **Records what it covered**, so the fitter knows which speeds and corner
   loads the session filled.
 """
@@ -42,7 +55,10 @@ GAP_FOLLOW_MAX_LATERAL = (0.3, 4.0)
 # was too much.
 SAFETY_STATES = frozenset({'ttc_brake', 'ttc_escape', 'emergency_clearance'})
 
-SPEED, LATERAL = 'max_speed', 'max_lateral_accel'
+SPEED, LATERAL, MIN_SPEED = 'max_speed', 'max_lateral_accel', 'min_speed'
+
+# What each ledger entry teaches the fit (docs/explorer.md).
+INFO = ('grip', 'braking', 'steering')
 
 
 class ConfigError(ValueError):
@@ -222,6 +238,101 @@ def path_stop_margin(ranges, angle_min, angle_increment, *, speed, steering, whe
     return nearest - reaction
 
 
+def straight_room(ranges, angle_min, angle_increment, *, half_width, lidar_x, front_reach,
+                  max_range=30.0) -> float:
+    """Room straight ahead of the body, with no reaction distance: what the
+    course map remembers for each place."""
+    return path_stop_margin(ranges, angle_min, angle_increment, speed=0.0, steering=0.0,
+                            wheelbase=1.0, half_width=half_width, lidar_x=lidar_x,
+                            front_reach=front_reach, delay=0.0, max_range=max_range)
+
+
+def _wrap(angle):
+    return (angle + math.pi) % (2 * math.pi) - math.pi
+
+
+@dataclass
+class CourseMap:
+    """What the explorer learns about the course: the least straight room it
+    has seen ahead at each place and heading, and how many laps it has done.
+
+    Places are ``cell`` m squares, headings ``sectors`` slices of a turn, in
+    whatever fixed frame the pose comes in (SLAM's ``map`` on the car). A lap
+    closes when the car comes back within ``close_radius`` of where it
+    started, heading the same way, after ``min_lap_m`` of driving away.
+    """
+    cell: float = 0.5
+    sectors: int = 8
+    close_radius: float = 1.0
+    min_lap_m: float = 10.0
+    room: dict = field(default_factory=dict)
+    tested: set = field(default_factory=set)
+    laps: int = 0
+    _start: tuple | None = None
+    _last: tuple | None = None
+    _travelled: float = 0.0
+    _away: bool = False
+
+    def key(self, x, y, yaw):
+        sector = int(((yaw % (2 * math.pi)) / (2 * math.pi)) * self.sectors) % self.sectors
+        return (math.floor(x / self.cell), math.floor(y / self.cell), sector)
+
+    @property
+    def learned(self) -> bool:
+        return self.laps >= 1
+
+    def add(self, pose, room) -> None:
+        if pose is None or len(pose) != 3 or not _finite(*pose):
+            return
+        x, y, yaw = (float(v) for v in pose)
+        if self._start is None:
+            self._start = (x, y, yaw)
+        if self._last is not None:
+            self._travelled += math.hypot(x - self._last[0], y - self._last[1])
+        self._last = (x, y)
+        if isinstance(room, (int, float)) and not math.isnan(room):
+            k = self.key(x, y, yaw)
+            self.room[k] = min(self.room.get(k, math.inf), float(room))
+        sx, sy, syaw = self._start
+        near = (math.hypot(x - sx, y - sy) <= self.close_radius
+                and abs(_wrap(yaw - syaw)) < math.pi / 4)
+        if not near and self._travelled >= self.min_lap_m:
+            self._away = True
+        elif near and self._away:
+            self.laps += 1
+            self._away = False
+            self._travelled = 0.0
+
+    def room_at(self, pose):
+        """The least straight room seen here, or None for a place never seen."""
+        if pose is None or len(pose) != 3 or not _finite(*pose):
+            return None
+        return self.room.get(self.key(*pose))
+
+    def report(self) -> dict:
+        return {'laps': self.laps, 'learned': self.learned, 'places': len(self.room),
+                'places_tested': len(self.tested)}
+
+
+@dataclass
+class Ledger:
+    """Seconds of driving that teach each number the fit looks for."""
+    need: dict
+    seconds: dict = field(default_factory=lambda: {k: 0.0 for k in INFO})
+
+    def add(self, name, dt):
+        self.seconds[name] += dt
+
+    def short(self) -> list:
+        """Numbers still short of data, the furthest behind first."""
+        behind = [(self.seconds[k] / self.need[k], k) for k in INFO
+                  if self.need[k] > 0 and self.seconds[k] < self.need[k]]
+        return [k for _, k in sorted(behind)]
+
+    def report(self) -> dict:
+        return {k: {'seconds': round(self.seconds[k], 2), 'need': self.need[k]} for k in INFO}
+
+
 # --- the conductor ----------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -238,26 +349,38 @@ class Rules:
     event_cooldown_sec: float = 3.0   # s after a back-off before another limit sign counts
     wheelbase: float = 0.325          # m, measured on car 2 2026-11-23 (hub to hub)
     min_voltage: float = 10.5         # V: 3S pack; below it acceleration changes, end the session
-    brake_every: int = 3              # a brake test every N raises
-    brake_min_speed: float = 2.5      # m/s needed to make a brake test worth having
+    brake_delay: float = 0.24         # s before braking bites (car 2, braking_lag.py, run 20261111-152132)
+    brake_min_speed: float = 2.5      # m/s needed to make a stop test worth having
     brake_clear: float = 1.0          # m of spare room needed beyond the braking distance
     brake_decel: float = 2.9          # m/s^2, the braking assumed when checking that room
-    brake_speed: float = 1.5          # m/s: the max_speed a brake test drops to (>= min_speed)
-    brake_hold_sec: float = 1.5
+    brake_speed: float = 0.5          # m/s: max_speed and min_speed during a stop test
+    brake_hold_sec: float = 3.0       # s: a stop test ends by then at the latest
+    brake_gap_sec: float = 20.0       # s of driving between stop tests
+    learn_timeout_sec: float = 90.0   # s: no lap closed by then, carry on with the scan alone
+    grip_info_ratio: float = 0.8      # cornering at this share of the limit teaches grip
+    brake_info_excess: float = 1.0    # m/s above the command teaches braking
+    steer_info_rate: float = 1.0      # rad/s of steering change teaches steering delay
+    need_grip_sec: float = 20.0       # seconds of each the fit needs (explore_sim.py sweep)
+    need_braking_sec: float = 4.0
+    need_steering_sec: float = 15.0
     max_session_sec: float = 900.0    # LB-held driving time
 
     def __post_init__(self):
-        values = [getattr(self, n) for n in self.__dataclass_fields__ if n != 'brake_every']
+        values = [getattr(self, n) for n in self.__dataclass_fields__]
         _require(_finite(*values), 'every rule must be a finite number')
         _require(self.segment_sec > 0 and self.max_session_sec > 0, 'times must be positive')
         _require(self.wall_margin >= 0, 'wall_margin must be >= 0')
         _require(0 < self.slide_ratio < 1, 'slide_ratio must be between 0 and 1')
         _require(self.wheelbase > 0, 'wheelbase must be positive')
         _require(self.brake_decel > 0, 'brake_decel must be positive')
-        _require(isinstance(self.brake_every, int) and self.brake_every >= 0,
-                 'brake_every must be a whole number >= 0 (0 = no brake tests)')
+        _require(self.brake_delay >= 0, 'brake_delay must be >= 0')
         _require(GAP_FOLLOW_MAX_SPEED[0] <= self.brake_speed < self.brake_min_speed,
                  'brake_speed must be inside gap_follow range and below brake_min_speed')
+        _require(self.brake_hold_sec > 0 and self.brake_gap_sec >= 0 and self.learn_timeout_sec >= 0,
+                 'stop-test and learning times must be positive')
+        _require(0 < self.grip_info_ratio <= 1, 'grip_info_ratio must be in (0, 1]')
+        _require(min(self.need_grip_sec, self.need_braking_sec, self.need_steering_sec) >= 0,
+                 'the seconds each number needs must be >= 0')
 
 
 @dataclass
@@ -271,6 +394,9 @@ class Inputs:
     stop_margin: float | None = None       # path_stop_margin of the latest scan
     voltage: float | None = None
     safety_state: str | None = None        # latest gap_follow /drive_intent state
+    speed_cmd: float | None = None         # gap_follow's latest speed command
+    pose: tuple | None = None              # (x, y, yaw) in a fixed frame (SLAM's map)
+    straight_room: float | None = None     # straight_room() of the latest scan
 
 
 @dataclass
@@ -298,37 +424,69 @@ class Coverage:
 
 
 class Conductor:
-    """Call ``update`` at a steady rate; apply every setting it returns."""
+    """Call ``update`` at a steady rate; apply every setting it returns.
 
-    def __init__(self, fence: Fence | None = None, rules: Rules | None = None):
+    ``baseline`` holds gap_follow's own values of any other setting a test
+    touches (``min_speed``); without it there are no stop tests, because
+    gap_follow refuses a ``max_speed`` below its ``min_speed``.
+    """
+
+    def __init__(self, fence: Fence | None = None, rules: Rules | None = None,
+                 baseline: dict | None = None):
         self.ladder = Ladder(fence or Fence())
         self.rules = rules or Rules()
         self.coverage = Coverage()
+        self.course = CourseMap()
+        r = self.rules
+        self.ledger = Ledger({'grip': r.need_grip_sec, 'braking': r.need_braking_sec,
+                              'steering': r.need_steering_sec})
+        self.baseline = dict(baseline or {})
+        if MIN_SPEED in self.baseline:
+            _require(_finite(self.baseline[MIN_SPEED]) and self.baseline[MIN_SPEED] >= 0,
+                     'baseline min_speed must be a finite number >= 0')
         self.applied: dict | None = None
         self.pending: dict | None = None
         self.driving_sec = 0.0
         self.segment_sec = 0.0
         self.raises = 0
         self.brake_until: float | None = None
-        self.brake_due = False
+        self.since_brake = 0.0
         self.done_reason: str | None = None
         self._last_now: float | None = None
+        self._last_steer: tuple | None = None
         self._slide_since: float | None = None
         self._steer_history: list = []   # (now, steering) over the last slide_steer_window
         self._quiet_until = -math.inf
+        self._pose_seen = False
 
     @property
     def done(self) -> bool:
         return self.done_reason is not None
 
+    @property
+    def can_stop_test(self) -> bool:
+        return MIN_SPEED in self.baseline
+
+    def _out(self, setting: dict, testing: bool = False) -> dict:
+        """A setting to send: the ladder's two values, and min_speed put back
+        to gap_follow's own (or lowered for a stop test)."""
+        out = dict(setting)
+        if self.can_stop_test:
+            out[MIN_SPEED] = (min(self.baseline[MIN_SPEED], self.rules.brake_speed) if testing
+                              else self.baseline[MIN_SPEED])
+        return out
+
     def start(self) -> dict:
         """The first setting, to apply before the car moves."""
         self.applied = self.ladder.setting()
-        return dict(self.applied)
+        return self._out(self.applied)
 
     def _event(self, now, kind, axis, detail):
         self._quiet_until = now + self.rules.event_cooldown_sec
         self._slide_since = None
+        if axis is not None and axis in self.ladder.limits:
+            detail += (f'; below the limit already found ({self.ladder.limits[axis]}): '
+                       'the floor may have changed')
         self.coverage.events.append({'t': round(now, 3), 'kind': kind, 'detail': detail,
                                      'setting': dict(self.applied or {})})
         backed = self.ladder.back_off(axis)
@@ -336,7 +494,73 @@ class Conductor:
         self.brake_until = None
         self.pending = None
         self.applied = backed
-        return dict(backed)
+        return self._out(backed)
+
+    def _slide(self, now, detail):
+        """Blame a slide on what has been rising since the last one. The first
+        slide finds the cornering limit; once cornering is held, only speed is
+        still being raised, so a later slide lowers speed. Sliding with both at
+        their lowest notch ends the session: there is nothing left to lower."""
+        lad = self.ladder
+        if not lad.lateral_frozen:
+            axis = LATERAL
+        elif lad.speed_level > 0:
+            axis = SPEED
+        elif lad.lateral_level > 0:
+            axis = LATERAL
+        else:
+            self.done_reason = 'still sliding at the gentlest settings'
+            self.coverage.events.append({'t': round(now, 3), 'kind': 'slide',
+                                         'detail': f'{detail}; {self.done_reason}',
+                                         'setting': dict(self.applied)})
+            if self.brake_until is not None:        # put gap_follow's own min_speed back
+                self.brake_until = None
+                self.applied = lad.setting()
+                return self._out(self.applied)
+            return None
+        if axis == SPEED:
+            detail += '; cornering is already held, so speed comes down'
+        return self._event(now, 'slide', axis, detail)
+
+    @property
+    def learning(self) -> bool:
+        """Driving the first, gentle lap that maps the course."""
+        return (self._pose_seen and not self.course.learned
+                and self.driving_sec < self.rules.learn_timeout_sec)
+
+    def _count_information(self, x: Inputs, dt) -> None:
+        r = self.rules
+        steer_rate = None
+        if x.steering is not None and _finite(x.steering):
+            if self._last_steer is not None and x.now > self._last_steer[0]:
+                steer_rate = abs(x.steering - self._last_steer[1]) / (x.now - self._last_steer[0])
+            self._last_steer = (x.now, x.steering)
+        else:
+            self._last_steer = None
+        lateral_ref = self.ladder.limits.get(LATERAL, self.applied[LATERAL])
+        if (x.yaw_rate is not None and _finite(x.yaw_rate) and abs(x.speed) >= 1.0
+                and abs(x.speed * x.yaw_rate) >= r.grip_info_ratio * lateral_ref):
+            self.ledger.add('grip', dt)
+        if (x.speed_cmd is not None and _finite(x.speed_cmd)
+                and x.speed - x.speed_cmd >= r.brake_info_excess):
+            self.ledger.add('braking', dt)
+        if steer_rate is not None and steer_rate >= r.steer_info_rate and abs(x.speed) >= 1.5:
+            self.ledger.add('steering', dt)
+
+    def _stop_test_room(self, x: Inputs) -> bool:
+        """Both the live scan and, once learned, the course map show room to
+        stop from here, and this place has not had a stop test yet."""
+        r = self.rules
+        need = x.speed ** 2 / (2 * r.brake_decel) + r.brake_clear
+        if x.stop_margin is None or not _finite(x.stop_margin) or x.stop_margin < need:
+            return False
+        if not self.course.learned:
+            return True
+        # The map remembers room with no reaction distance taken off.
+        mapped = self.course.room_at(x.pose)
+        if mapped is None or mapped - x.speed * r.brake_delay < need:
+            return False
+        return self.course.key(*x.pose) not in self.course.tested
 
     def update(self, x: Inputs) -> dict | None:
         """The setting to apply now, or None to leave gap_follow as it is."""
@@ -352,10 +576,11 @@ class Conductor:
             self.done_reason = f'battery {x.voltage:.2f} V below {r.min_voltage} V'
             self.coverage.events.append({'t': round(x.now, 3), 'kind': 'battery',
                                          'detail': self.done_reason, 'setting': dict(self.applied)})
+            was_testing = self.brake_until is not None
             self.brake_until = None
-            if self.applied[SPEED] != self.ladder.setting()[SPEED]:
+            if was_testing or self.applied[SPEED] != self.ladder.setting()[SPEED]:
                 self.applied = self.ladder.setting()
-                return dict(self.applied)
+                return self._out(self.applied)
             return None
 
         moving = (x.lb_held and x.speed is not None and _finite(x.speed)
@@ -377,59 +602,71 @@ class Conductor:
                     self._slide_since = x.now
                 if x.now - self._slide_since >= r.slide_hold_sec:
                     self._slide_since = None
-                    return self._event(x.now, 'slide', LATERAL,
-                                       f'turning under {r.slide_ratio:.0%} of what the steering asks')
+                    return self._slide(x.now, f'turning under {r.slide_ratio:.0%} '
+                                              'of what the steering asks')
             else:
                 self._slide_since = None
 
         if not moving:
             self._slide_since = None
+            self._last_steer = None
             # Stopped or LB released: a waiting raise can go in now, nothing else moves on.
             if self.pending is not None and not x.lb_held:
                 self.applied, self.pending, self.segment_sec = self.pending, None, 0.0
-                return dict(self.applied)
+                return self._out(self.applied)
             return None
 
+        if x.pose is not None:
+            self._pose_seen = True
+            self.course.add(x.pose, x.straight_room)
+        learning = self.learning
         self.driving_sec += dt
-        self.segment_sec += dt
+        self.since_brake += dt
+        if not learning:
+            self.segment_sec += dt
         self.coverage.add(x.speed, x.yaw_rate, dt)
+        self._count_information(x, dt)
 
         straight = x.steering is not None and _finite(x.steering) and abs(x.steering) < r.straight_steer
 
         if self.brake_until is not None:
-            if x.now >= self.brake_until:
+            slow = x.speed <= r.brake_speed + 0.3
+            if x.now >= self.brake_until or slow:
                 self.brake_until = None
+                self.since_brake = 0.0
                 self.coverage.brake_tests += 1
-                return dict(self.applied)   # back to the ladder's speed
+                return self._out(self.applied)   # back to the ladder's speed and min_speed
             return None
 
         if self.driving_sec >= r.max_session_sec:
             self.done_reason = f'session time {r.max_session_sec:.0f} s reached'
             return None
+        if learning:
+            return None
 
-        if (self.brake_due and straight and x.speed >= r.brake_min_speed
-                and x.stop_margin is not None and _finite(x.stop_margin)
-                and x.stop_margin >= x.speed ** 2 / (2 * r.brake_decel) + r.brake_clear):
-            self.brake_due = False
+        short = self.ledger.short()
+        if (self.can_stop_test and short and short[0] == 'braking'
+                and self.since_brake >= r.brake_gap_sec and straight
+                and x.speed >= r.brake_min_speed and self._stop_test_room(x)):
             self.brake_until = x.now + r.brake_hold_sec
-            return {SPEED: r.brake_speed, LATERAL: self.applied[LATERAL]}
+            if self.course.learned:
+                self.course.tested.add(self.course.key(*x.pose))
+            return self._out({SPEED: r.brake_speed, LATERAL: self.applied[LATERAL]}, testing=True)
 
         if self.pending is None and self.segment_sec >= r.segment_sec:
             self.segment_sec = 0.0
             nxt = self.ladder.raise_one()
             if nxt is None:
-                if self.ladder.finished and not self.brake_due:
-                    self.done_reason = 'both settings at their limit'
+                if self.ladder.finished and not short:
+                    self.done_reason = 'both settings at their limit and every number has its data'
                 return None
             self.raises += 1
-            if r.brake_every and self.raises % r.brake_every == 0:
-                self.brake_due = True
             self.pending = nxt
 
         if self.pending is not None and straight:
             # The clean stretch for the next raise counts from when this one bites.
             self.applied, self.pending, self.segment_sec = self.pending, None, 0.0
-            return dict(self.applied)
+            return self._out(self.applied)
         return None
 
     def _remember_steering(self, x: Inputs) -> None:
@@ -470,5 +707,6 @@ class Conductor:
         out = self.coverage.report()
         out.update({'setting': dict(self.applied or {}), 'limits': dict(self.ladder.limits),
                     'driving_sec': round(self.driving_sec, 3), 'raises': self.raises,
-                    'done': self.done_reason})
+                    'done': self.done_reason, 'course': self.course.report(),
+                    'information': self.ledger.report(), 'stop_tests': self.can_stop_test})
         return out

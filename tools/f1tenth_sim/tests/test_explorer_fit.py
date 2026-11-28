@@ -46,7 +46,7 @@ def planted_fit():
                                      np.ones(len(t), bool), horizon=2.0, spacing=2.0)
     result = ef.fit(base, windows, ['surface_friction', 'steering_delay_ticks',
                                     'speed_loop_brake_max'],
-                    maxiter=12, popsize=6, workers=4)
+                    maxiter=12, popsize=6, workers=4, holdout_every=5, with_intervals=True)
     return base, truth, result
 
 
@@ -60,6 +60,20 @@ def test_the_fitter_finds_planted_numbers_it_never_saw():
         truth.speed_loop_brake_max, rel=0.10)  # 10% of braking
     assert result.cost_after < 0.6 * result.cost_before
     assert result.at_bound == []
+
+
+def test_the_fit_holds_on_windows_it_never_saw():
+    _, _, result = planted_fit()
+    # Every 5th window was held back from the search; the fit must explain those too.
+    assert result.holdout_after < 0.3 * result.holdout_before
+
+
+def test_every_fitted_number_comes_with_a_range_around_it():
+    _, _, result = planted_fit()
+    for name, (low, high) in result.intervals.items():
+        assert low <= result.values[name] + 1e-9 and result.values[name] - 1e-9 <= high, name
+    # A delay's range is whole ticks.
+    assert all(float(v).is_integer() for v in result.intervals['steering_delay_ticks'])
 
 
 def test_every_planted_number_is_pinned_down_by_the_data():
@@ -102,7 +116,7 @@ def series(n=200, speed=2.0):
 
 def test_windows_tile_a_clean_run_at_the_requested_spacing():
     s = series(n=8 + 4 * 40)  # 8 prior ticks, then 4 s
-    w = ef.windows_from_series(**s, horizon=1.0, spacing=1.0)
+    w = ef.windows_from_series(**s, horizon=1.0, spacing=1.0, lead_in=0.0)
     assert len(w) == 4
     assert all(len(x.commands) == 40 for x in w)
     assert all(len(x.prior_speed_commands) == 8 for x in w)
@@ -113,22 +127,118 @@ def test_a_window_never_spans_an_untrusted_tick():
     s['speed'] = 2.0 + 0.001 * np.arange(len(s['t']))  # speed tags each tick's index
     bad = 8 + 60  # inside the second second
     s['good'][bad] = False
-    w = ef.windows_from_series(**s, horizon=1.0, spacing=1.0)
+    w = ef.windows_from_series(**s, horizon=1.0, spacing=1.0, lead_in=0.0)
     starts = [int(round((x.speed[0] - 2.0) / 0.001)) for x in w]
     # 8..48 is clean; the next clean start after the bad tick is 69, then 109.
     assert starts == [8, bad + 1, bad + 41]
     assert all(not (st <= bad < st + 40) for st in starts)
 
 
+def test_a_window_replays_a_lead_in_first_and_scores_only_after_it():
+    s = series(n=8 + 20 + 40)
+    s['speed'] = 2.0 + 0.001 * np.arange(len(s['t']))  # speed tags each tick's index
+    s['speed_cmd'] = s['speed'].copy()
+    (w,) = ef.windows_from_series(**s, horizon=1.0, spacing=5.0, lead_in=0.5)
+    assert w.lead_in == 20 and len(w.commands) == 60 and len(w.speed) == 40
+    # Scored from tick 28; the replay starts at the lead-in's first tick, 8, with the 8 before it.
+    assert w.speed[0] == pytest.approx(2.0 + 0.001 * 28, abs=1e-12)  # change-detector of indexing
+    assert w.initial_speed == pytest.approx(2.0 + 0.001 * 8, abs=1e-12)
+    assert w.prior_speed_commands == pytest.approx(tuple(2.0 + 0.001 * i for i in range(8)))
+    assert w.t0 == pytest.approx(28 * ef.DT)
+
+
+def test_an_untrusted_tick_in_the_lead_in_drops_the_window_too():
+    s = series(n=8 + 20 + 40)
+    s['good'][8 + 5] = False
+    assert ef.windows_from_series(**s, horizon=1.0, spacing=5.0, lead_in=0.5) == []
+
+
+def test_the_lead_in_removes_the_start_up_error_no_number_can_fix():
+    """Replaying a planted car's own recording with its own numbers must
+    score near zero once the lead-in lets the wheels and turn rate catch up."""
+    from run_analysis.fit_sim import simulate_commands
+    base = calibration_for_car(PLANTED_CAR)
+    t, cmd = explorer_commands()
+    v, yaw = simulate_commands(cmd, base, initial_speed=0.0)
+    args = (t, cmd[:, 0], cmd[:, 1], v, yaw, np.ones(len(t), bool))
+    cold = ef.windows_from_series(*args, horizon=2.0, spacing=6.0, lead_in=0.0)
+    warm = ef.windows_from_series(*args, horizon=2.0, spacing=6.0, lead_in=0.75)
+    assert ef.cost(base, warm) < 0.25 * ef.cost(base, cold)
+
+
+def test_interval_finds_a_parabolas_minimum_and_resampling_spread():
+    grid = np.linspace(0.0, 2.0, 21)
+    centres = np.array([0.9, 1.0, 1.1, 1.0, 0.95, 1.05])
+    errors = (grid[:, None] - centres[None, :]) ** 2
+    best, low, high = ef.interval(grid, errors)
+    # Closed form: the mean of quadratics is a quadratic with its minimum at the mean centre.
+    assert best == pytest.approx(centres.mean(), abs=1e-9)
+    assert centres.min() <= low <= best <= high <= centres.max()
+    same = (grid[:, None] - np.full((1, 6), 1.23)) ** 2
+    assert ef.interval(grid, same)[1:] == pytest.approx((1.23, 1.23), abs=1e-9)
+
+
+def test_interval_for_a_delay_stays_on_whole_ticks():
+    grid = [2, 3, 4, 5, 6]
+    errors = np.array([[4.0, 4.0], [1.0, 1.2], [0.1, 0.0], [1.0, 0.9], [4.0, 4.0]])
+    assert ef.interval(grid, errors, whole=True) == (4.0, 4.0, 4.0)
+
+
+def test_interval_refuses_a_mismatched_or_empty_table():
+    with pytest.raises(ValueError, match='grid points, windows'):
+        ef.interval([1.0, 2.0], np.zeros((3, 4)))
+    with pytest.raises(ValueError, match='grid points, windows'):
+        ef.interval([1.0, 2.0], np.zeros((2, 0)))
+
+
+def test_holdout_takes_every_nth_window_by_time_and_keeps_the_rest():
+    ws = [ef.Window(np.zeros((2, 2)), np.zeros(2), np.zeros(2), 1.0, (), 0, float(k))
+          for k in (5, 1, 3, 0, 2, 4, 6, 9, 8, 7)]
+    kept, held = ef.split_holdout(ws, every=5)
+    assert [w.t0 for w in held] == [4.0, 9.0]
+    assert sorted(w.t0 for w in kept) == [0.0, 1.0, 2.0, 3.0, 5.0, 6.0, 7.0, 8.0]
+    with pytest.raises(ValueError, match='2 or more'):
+        ef.split_holdout(ws, every=1)
+
+
+def drift_windows(start_friction, end_friction):
+    """12 s of explorer-like driving on one floor, then 12 s on another."""
+    from run_analysis.fit_sim import simulate_commands
+    base = calibration_for_car(PLANTED_CAR)
+    t, cmd = explorer_commands()
+    half = len(t) // 2
+    out = []
+    for part, friction in ((slice(0, half), start_friction), (slice(half, None), end_friction)):
+        truth = replace(base, surface_friction=friction)
+        v, yaw = simulate_commands(cmd[part], truth, initial_speed=0.0)
+        out += ef.windows_from_series(t[part], cmd[part, 0], cmd[part, 1], v, yaw,
+                                      np.ones(len(v), bool), horizon=1.0, spacing=1.0)
+    return base, out
+
+
+@pytest.mark.parametrize('start, end, changed', [(0.42, 0.42, False), (0.42, 0.30, True)])
+def test_drift_flags_a_floor_that_changed_mid_session_and_only_then(start, end, changed):
+    base, windows = drift_windows(start, end)
+    result = ef.drift(replace(base, surface_friction=0.42), windows, parts=2, workers=4)
+    assert result['changed'] is changed, result
+
+
+def test_drift_refuses_too_few_windows():
+    base = calibration_for_car(PLANTED_CAR)
+    w = ef.Window(np.zeros((2, 2)), np.zeros(2), np.zeros(2), 1.0, (), 0, 0.0)
+    with pytest.raises(ValueError, match='too few windows'):
+        ef.drift(base, [w] * 5, parts=2)
+
+
 def test_a_window_needs_the_car_moving_at_its_start():
     s = series(speed=0.2)
-    assert ef.windows_from_series(**s, horizon=1.0, min_speed=0.5) == []
+    assert ef.windows_from_series(**s, horizon=1.0, min_speed=0.5, lead_in=0.0) == []
 
 
 def test_nan_in_a_window_drops_it():
     s = series(n=8 + 40)
     s['yaw_rate'][20] = math.nan
-    assert ef.windows_from_series(**s, horizon=1.0) == []
+    assert ef.windows_from_series(**s, horizon=1.0, lead_in=0.0) == []
 
 
 def test_mismatched_lengths_and_too_short_a_horizon_are_refused():

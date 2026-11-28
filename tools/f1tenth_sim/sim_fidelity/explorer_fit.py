@@ -12,14 +12,24 @@ Design rules (docs/explorer.md):
   from a tape measure or a scale; asking to fit one raises ``ValueError``.
 * **Every fitted number is readable.** Each is an existing ``CarCalibration``
   field with physical units, so a fit can be checked and argued with.
-* **Every fit says how sure it is.** ``sensitivity`` reports how much the
-  score worsens when each fitted number moves a little. A number the score
-  barely notices is not pinned down by the data, whatever value it landed on.
+* **Every fit says how sure it is.** ``interval`` gives each fitted number
+  a 90% range by resampling the windows, and ``sensitivity`` how much the
+  score worsens when it moves a little. A wide range means the data did not
+  pin that number down, whatever value it landed on.
+* **Every fit is checked on driving it never saw.** ``fit`` holds back every
+  fifth window and reports the score on those before and after.
+* **A floor that changes mid-session is caught.** ``drift`` fits grip (or any
+  number) separately on the start and the end of a session and flags ranges
+  that do not overlap.
 
 The score is the replay error the club's other fits use: recorded commands
 replayed open-loop through the plant for a few seconds from the recorded
 speed, compared with the measured speed (from scan matching) and turn rate
-(gyro). It is pure NumPy around the plant, with no ROS.
+(gyro). Each replay first drives a short unscored lead-in (``lead_in``), so
+the simulated wheels and turn rate have caught up with the real car's before
+scoring starts; without it every window began with the wheels straight and
+the car not turning, an error no parameter can remove. Pure NumPy around the
+plant, with no ROS.
 """
 
 from __future__ import annotations
@@ -67,11 +77,13 @@ YAW_SCALE = 0.30    # rad/s
 @dataclass(frozen=True)
 class Window:
     """A few seconds of recorded driving, ready to replay."""
-    commands: np.ndarray        # (N, 2): steering rad, speed m/s, at 40 Hz
-    speed: np.ndarray           # (N,) measured true speed, m/s
-    yaw_rate: np.ndarray        # (N,) measured turn rate, rad/s
-    initial_speed: float        # m/s at the window's first tick
-    prior_speed_commands: tuple  # speed commands just before it, oldest first
+    commands: np.ndarray        # (L + N, 2): steering rad, speed m/s, at 40 Hz
+    speed: np.ndarray           # (N,) measured true speed over the scored part, m/s
+    yaw_rate: np.ndarray        # (N,) measured turn rate over the scored part, rad/s
+    initial_speed: float        # m/s at the first command (the lead-in's start)
+    prior_speed_commands: tuple  # speed commands just before that, oldest first
+    lead_in: int = 0            # L: ticks replayed first and not scored
+    t0: float = 0.0             # s, recording time of the first scored tick
 
 
 @dataclass
@@ -82,6 +94,9 @@ class FitResult:
     sensitivity: dict           # name -> rise in cost for a small step either way
     at_bound: list              # names that ended on their search edge
     evaluations: int
+    holdout_before: float | None = None  # score on the held-back windows
+    holdout_after: float | None = None
+    intervals: dict = None      # name -> (low, high) 90% range, from ``interval``
 
 
 def check_names(names) -> list:
@@ -102,11 +117,14 @@ def check_names(names) -> list:
 
 def windows_from_series(t, steer, speed_cmd, speed, yaw_rate, good, *,
                         horizon: float = 3.0, spacing: float = 1.0,
-                        min_speed: float = 0.5, prior: int = 8) -> list:
+                        min_speed: float = 0.5, prior: int = 8,
+                        lead_in: float = 0.75) -> list:
     """Cut one run's uniform 40 Hz arrays into replay windows.
 
     A window starts only where the car is moving (``min_speed``) and every tick
-    in it is trusted (``good``), so a window never spans a localisation dropout.
+    in it, lead-in included, is trusted (``good``), so a window never spans a
+    localisation dropout. ``lead_in`` seconds of commands come before the
+    scored ``horizon`` and are replayed but not scored.
     """
     arrays = [np.asarray(a, float) for a in (t, steer, speed_cmd, speed, yaw_rate)]
     good = np.asarray(good, bool)
@@ -114,23 +132,27 @@ def windows_from_series(t, steer, speed_cmd, speed, yaw_rate, good, *,
     if any(len(a) != n for a in arrays) or len(good) != n:
         raise ValueError('every series must have the same length')
     width = int(round(horizon / DT))
+    lead = int(round(lead_in / DT))
     step = max(1, int(round(spacing / DT)))
     if width < 2:
         raise ValueError(f'horizon {horizon} s is shorter than two ticks')
+    if lead < 0:
+        raise ValueError(f'lead_in {lead_in} s is negative')
     t, steer, speed_cmd, speed, yaw_rate = arrays
     out = []
-    start = prior
+    start = prior + lead            # first scored tick
     while start + width <= n:
-        stop = start + width
-        block = slice(start, stop)
-        if (good[block].all() and speed[start] >= min_speed
-                and all(np.isfinite(a[block]).all() for a in arrays)
-                and np.isfinite(speed_cmd[start - prior:start]).all()):
-            out.append(Window(np.column_stack([steer[block], speed_cmd[block]]),
+        first, stop = start - lead, start + width
+        block, whole = slice(start, stop), slice(first, stop)
+        if (good[whole].all() and speed[first] >= min_speed
+                and all(np.isfinite(a[whole]).all() for a in arrays)
+                and np.isfinite(speed_cmd[first - prior:first]).all()):
+            out.append(Window(np.column_stack([steer[whole], speed_cmd[whole]]),
                               speed[block].copy(), yaw_rate[block].copy(),
-                              float(speed[start]),
-                              tuple(float(v) for v in speed_cmd[start - prior:start])))
-            start = stop - width + step
+                              float(speed[first]),
+                              tuple(float(v) for v in speed_cmd[first - prior:first]),
+                              lead, float(t[start])))
+            start += step
         else:
             start += 1
     return out
@@ -146,11 +168,12 @@ def windows_from_run(run, loc_dir, **kw) -> list:
 
 
 def replay(calibration, window: Window):
-    """(speed, yaw_rate) the plant produces for one window's commands."""
+    """(speed, yaw_rate) the plant produces over a window's scored part."""
     from run_analysis.fit_sim import simulate_commands
-    return simulate_commands(window.commands, calibration,
-                             initial_speed=window.initial_speed,
-                             prior_speed_commands=window.prior_speed_commands)
+    speed, yaw = simulate_commands(window.commands, calibration,
+                                   initial_speed=window.initial_speed,
+                                   prior_speed_commands=window.prior_speed_commands)
+    return speed[window.lead_in:], yaw[window.lead_in:]
 
 
 def window_error(calibration, window: Window) -> float:
@@ -210,18 +233,160 @@ def sensitivity(calibration, names, windows, base_cost=None) -> dict:
     return out
 
 
+def _errors_for(job):
+    calibration, windows = job
+    return [window_error(calibration, w) for w in windows]
+
+
+def _map(jobs, workers):
+    if workers == 1:
+        return [_errors_for(j) for j in jobs]
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(workers) as pool:
+        return list(pool.map(_errors_for, jobs))
+
+
+def profile_grid(calibration, name, *, points: int = 13, span: float = 0.4) -> list:
+    """Values of ``name`` to profile around the calibration's: every tick
+    within +-2 for a delay, else ``points`` values over +-``span`` of it,
+    always inside the search range."""
+    low, high, whole = PARAMETERS[name]
+    value = getattr(calibration, name)
+    if whole:
+        return [v for v in range(int(value) - 2, int(value) + 3) if low <= v <= high]
+    lo, hi = max(low, value * (1 - span)), min(high, value * (1 + span))
+    return [float(v) for v in np.linspace(lo, hi, points)]
+
+
+def profile(calibration, windows, name, grid, *, workers: int = 1) -> np.ndarray:
+    """Every window's error with ``name`` set to each grid value and every
+    other number as in ``calibration``: shape (len(grid), len(windows))."""
+    check_names([name])
+    if not windows:
+        raise ValueError('no windows to score')
+    jobs = [(replace(calibration, **{name: v}), list(windows)) for v in grid]
+    return np.asarray(_map(jobs, workers), float)
+
+
+def _best_on_grid(grid, curve):
+    """The minimum of a sampled curve, refined by a parabola through the
+    lowest point and its neighbours (not past them)."""
+    i = int(np.argmin(curve))
+    if 0 < i < len(grid) - 1:
+        x0, x1, x2 = grid[i - 1], grid[i], grid[i + 1]
+        y0, y1, y2 = curve[i - 1], curve[i], curve[i + 1]
+        den = (x0 - x1) * (x0 - x2) * (x1 - x2)
+        a = (x2 * (y1 - y0) + x1 * (y0 - y2) + x0 * (y2 - y1)) / den
+        b = (x2 * x2 * (y0 - y1) + x1 * x1 * (y2 - y0) + x0 * x0 * (y1 - y2)) / den
+        if a > 0:
+            return float(min(max(-b / (2 * a), x0), x2))
+    return float(grid[i])
+
+
+def interval(grid, errors, *, whole=False, resamples: int = 400, level: float = 0.9,
+             seed: int = 0) -> tuple:
+    """(best, low, high): the grid value with the lowest mean error, and the
+    ``level`` range of where that lowest point lands when the windows are
+    resampled with replacement (bootstrap). A delay's range is whole ticks."""
+    grid = np.asarray(grid, float)
+    errors = np.asarray(errors, float)
+    if errors.ndim != 2 or errors.shape[0] != len(grid) or errors.shape[1] == 0:
+        raise ValueError('errors must be (grid points, windows) with at least one window')
+    pick = (lambda c: float(grid[int(np.argmin(c))])) if whole else (lambda c: _best_on_grid(grid, c))
+    best = pick(errors.mean(axis=1))
+    rng = np.random.default_rng(seed)
+    n = errors.shape[1]
+    draws = [pick(errors[:, rng.integers(0, n, n)].mean(axis=1)) for _ in range(resamples)]
+    tail = (1 - level) / 2
+    return best, float(np.quantile(draws, tail)), float(np.quantile(draws, 1 - tail))
+
+
+def polish(calibration, windows, names, *, workers: int = 1, **kw):
+    """One pass over the named numbers: profile each around its value, move it
+    to the profile's lowest point when that lowers the score, and keep the 90%
+    range from the same profile. A global search stops on a coarse grid; this
+    puts each number where its own profile says, so it lies inside its range.
+    Returns (calibration, cost, {name: (low, high)})."""
+    current = calibration
+    best_cost = cost(current, windows)
+    ranges = {}
+    for name in check_names(names):
+        grid = profile_grid(current, name)
+        best, low, high = interval(grid, profile(current, windows, name, grid, workers=workers),
+                                   whole=PARAMETERS[name][2], **kw)
+        moved, _ = apply(current, [name], [best])
+        moved_cost = cost(moved, windows)
+        if moved_cost < best_cost:
+            current, best_cost = moved, moved_cost
+        ranges[name] = (low, high)
+    return current, best_cost, ranges
+
+
+def intervals(calibration, windows, names, *, workers: int = 1, **kw) -> dict:
+    """``interval`` for each named number around ``calibration``'s value."""
+    out = {}
+    for name in check_names(names):
+        grid = profile_grid(calibration, name)
+        _, low, high = interval(grid, profile(calibration, windows, name, grid, workers=workers),
+                                whole=PARAMETERS[name][2], **kw)
+        out[name] = (low, high)
+    return out
+
+
+def drift(calibration, windows, name='surface_friction', *, parts: int = 3,
+          workers: int = 1, **kw) -> dict:
+    """Fit ``name`` alone on the first and last ``parts``-th of the session
+    (by time) and say whether the two 90% ranges miss each other: a floor
+    that got dustier or a battery that sagged shows up here, where one fit
+    over the whole session would just average it away."""
+    if parts < 2:
+        raise ValueError('parts must be 2 or more')
+    ordered = sorted(windows, key=lambda w: w.t0)
+    size = len(ordered) // parts
+    if size < 3:
+        raise ValueError(f'too few windows ({len(ordered)}) to split into {parts}')
+    grid = profile_grid(calibration, name)
+    whole = PARAMETERS[name][2]
+    first = interval(grid, profile(calibration, ordered[:size], name, grid, workers=workers),
+                     whole=whole, **kw)
+    last = interval(grid, profile(calibration, ordered[-size:], name, grid, workers=workers),
+                    whole=whole, **kw)
+    changed = first[2] < last[1] or last[2] < first[1]
+    return {'name': name, 'start': first, 'end': last, 'changed': bool(changed)}
+
+
+def split_holdout(windows, every: int = 5):
+    """(fit windows, held-back windows): every ``every``-th window by time is
+    held back, so both halves span the whole session."""
+    if every < 2:
+        raise ValueError('every must be 2 or more')
+    ordered = sorted(windows, key=lambda w: w.t0)
+    held = ordered[every - 1::every]
+    kept = [w for i, w in enumerate(ordered) if (i + 1) % every]
+    return kept, held
+
+
 def fit(calibration, windows, names, *, maxiter: int = 30, popsize: int = 8,
-        seed: int = 0, workers: int = 1, tol: float = 1e-3) -> FitResult:
+        seed: int = 0, workers: int = 1, tol: float = 1e-3, holdout_every: int = 0,
+        with_intervals: bool = False) -> FitResult:
     """Search the named numbers for the lowest replay error.
 
     Differential evolution: a global search that copes with noisy scores and
     with whole-number delays (``integrality``), and parallelises with
     ``workers``. Every other calibration field stays as given.
+    ``holdout_every`` > 0 fits on all but every N-th window and scores those
+    before and after; ``with_intervals`` finishes with ``polish`` and adds
+    each number's 90% range.
     """
     from scipy.optimize import differential_evolution
     names = check_names(names)
     if not windows:
         raise ValueError('no windows to fit')
+    held = []
+    if holdout_every:
+        windows, held = split_holdout(windows, holdout_every)
+        if not windows or not held:
+            raise ValueError('too few windows to hold some back')
     bounds = [PARAMETERS[n][:2] for n in names]
     integrality = [PARAMETERS[n][2] for n in names]
     objective = _Objective(calibration, names, windows)
@@ -235,7 +400,14 @@ def fit(calibration, windows, names, *, maxiter: int = 30, popsize: int = 8,
     after = cost(fitted, windows)
     if after > before:  # never hand back something worse than the start
         fitted, values, after = calibration, {n: getattr(calibration, n) for n in names}, before
+    ranges = None
+    if with_intervals:
+        fitted, after, ranges = polish(fitted, windows, names, workers=workers)
+        values = {n: getattr(fitted, n) for n in names}
     at_bound = [n for n in names
                 if math.isclose(values[n], PARAMETERS[n][0]) or math.isclose(values[n], PARAMETERS[n][1])]
-    return FitResult(values, before, after, sensitivity(fitted, names, windows, after),
-                     at_bound, int(result.nfev))
+    out = FitResult(values, before, after, sensitivity(fitted, names, windows, after),
+                    at_bound, int(result.nfev), intervals=ranges)
+    if held:
+        out.holdout_before, out.holdout_after = cost(calibration, held), cost(fitted, held)
+    return out

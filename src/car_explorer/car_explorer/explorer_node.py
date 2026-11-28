@@ -11,6 +11,7 @@ LB held, and keeps all its own braking. The decisions are in explorer.py
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 
@@ -18,16 +19,18 @@ import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.time import Time
 
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
-from rcl_interfaces.srv import SetParameters
+from rcl_interfaces.srv import GetParameters, SetParameters
 from sensor_msgs.msg import Imu, Joy, LaserScan
 from std_msgs.msg import String
+from tf2_ros import Buffer, TransformException, TransformListener
 from vesc_msgs.msg import VescStateStamped
 
-from car_explorer.explorer import (ConfigError, Conductor, Fence, Inputs, Rules,
-                                   check_status_topic, path_stop_margin)
+from car_explorer.explorer import (MIN_SPEED, ConfigError, Conductor, Fence, Inputs, Rules,
+                                   check_status_topic, path_stop_margin, straight_room)
 
 
 FENCE_KEYS = ('speed_start', 'speed_step', 'speed_top', 'lateral_start', 'lateral_step',
@@ -54,24 +57,29 @@ class ExplorerNode(Node):
         self.declare_parameter('joy_timeout_sec', 0.5)
         self.declare_parameter('input_timeout_sec', 0.5)
         self.declare_parameter('rate_hz', 20.0)
-        # The wall check: car 2's braking delay (tools/run_analysis/braking_lag.py
-        # on run 20261111-152132: 0.24 s) and its body (measured 2026-11-23).
-        self.declare_parameter('brake_delay', 0.24)
+        # The wall check: car 2's body (measured 2026-11-23; front_reach bounded,
+        # see config/car_explorer.yaml). The braking delay is a rule (brake_delay).
         self.declare_parameter('half_width', 0.135)
         self.declare_parameter('lidar_x', 0.265)
-        self.declare_parameter('front_reach', 0.41)
+        self.declare_parameter('front_reach', 0.445)
+        self.declare_parameter('pose_frame', 'map')
+        self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('report_dir', '~/.ros/car_explorer')
 
         p = lambda k: self.get_parameter(k).value  # noqa: E731
         fence = Fence(**{k: (int(p(k)) if k == 'back_off_steps' else float(p(k)))
                          for k in FENCE_KEYS})
-        rules = Rules(**{k: (int(p(k)) if k == 'brake_every' else float(p(k)))
-                         for k in RULE_KEYS})
+        rules = Rules(**{k: float(p(k)) for k in RULE_KEYS})
         check_status_topic(p('status_topic'))
-        self.conductor = Conductor(fence, rules)
+        self.fence, self.rules = fence, rules
+        # Built once gap_follow's own min_speed is known (stop tests lower it).
+        self.conductor = None
         self.geometry = dict(wheelbase=rules.wheelbase, half_width=float(p('half_width')),
                              lidar_x=float(p('lidar_x')), front_reach=float(p('front_reach')),
-                             delay=float(p('brake_delay')))
+                             delay=rules.brake_delay)
+        self.pose_frame, self.base_frame = p('pose_frame'), p('base_frame')
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.deadman_button = int(p('deadman_button'))
         self.joy_timeout = float(p('joy_timeout_sec'))
         self.input_timeout = float(p('input_timeout_sec'))
@@ -92,14 +100,17 @@ class ExplorerNode(Node):
 
         target = p('target_node').rstrip('/')
         self.client = self.create_client(SetParameters, f'{target}/set_parameters')
+        self.getter = self.create_client(GetParameters, f'{target}/get_parameters')
         self.target = target
+        self.asked_baseline = False
         self.started = False
         self.in_flight = None
         self.queued = None
         self.create_timer(1.0 / float(p('rate_hz')), self._tick)
         self.get_logger().info(
             f'explorer ready: will tune {target} from {fence.speed_start} m/s, '
-            f'{fence.lateral_start} m/s^2; wall margin {rules.wall_margin} m. '
+            f'{fence.lateral_start} m/s^2; wall margin {rules.wall_margin} m; course map in '
+            f'{self.pose_frame}. '
             'It never drives: hold LB as usual.')
 
     # --- inputs -------------------------------------------------------------------------
@@ -116,6 +127,14 @@ class ExplorerNode(Node):
         return value
 
     def _scan(self, msg):
+        g = self.geometry
+        try:
+            room = straight_room(msg.ranges, msg.angle_min, msg.angle_increment,
+                                 half_width=g['half_width'], lidar_x=g['lidar_x'],
+                                 front_reach=g['front_reach'])
+        except ConfigError:
+            room = None
+        self._put('straight_room', room)
         speed = self._get('speed')
         steering = self._get('steering')
         if speed is None or steering is None:
@@ -136,6 +155,22 @@ class ExplorerNode(Node):
 
     def _drive(self, msg):
         self._put('steering', float(msg.drive.steering_angle))
+        self._put('speed_cmd', float(msg.drive.speed))
+
+    def _pose(self):
+        """(x, y, yaw) of the car in the pose frame, or None if SLAM has not
+        published it lately. The course map needs a fixed frame; without one
+        the explorer runs on the live scan alone."""
+        try:
+            tf = self.tf_buffer.lookup_transform(self.pose_frame, self.base_frame, Time())
+        except TransformException:
+            return None
+        age = (self.get_clock().now() - Time.from_msg(tf.header.stamp)).nanoseconds * 1e-9
+        if age > self.input_timeout:
+            return None
+        t, q = tf.transform.translation, tf.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        return (float(t.x), float(t.y), yaw)
 
     def _intent(self, msg):
         try:
@@ -157,7 +192,27 @@ class ExplorerNode(Node):
         return bool(held) and stamp is not None and self._now() - stamp <= self.joy_timeout
 
     # --- the loop -----------------------------------------------------------------------
+    def _ask_baseline(self):
+        request = GetParameters.Request()
+        request.names = [MIN_SPEED]
+        self.getter.call_async(request).add_done_callback(self._got_baseline)
+
+    def _got_baseline(self, future):
+        baseline = {}
+        try:
+            value = future.result().values[0]
+            baseline[MIN_SPEED] = float(value.double_value)
+        except Exception as exc:  # noqa: BLE001 - no baseline only means no stop tests
+            self.get_logger().warning(f'could not read {self.target} min_speed ({exc}); '
+                                      'no stop tests this session')
+        self.conductor = Conductor(self.fence, self.rules, baseline)
+
     def _tick(self):
+        if self.conductor is None:
+            if not self.asked_baseline and self.getter.service_is_ready():
+                self.asked_baseline = True
+                self._ask_baseline()
+            return
         if not self.started:
             if not self.client.service_is_ready():
                 return
@@ -168,7 +223,8 @@ class ExplorerNode(Node):
             now=self._now(), lb_held=self._lb_held(), speed=self._get('speed'),
             steering=self._get('steering'), yaw_rate=self._get('yaw_rate'),
             stop_margin=self._get('stop_margin'), voltage=self._get('voltage'),
-            safety_state=self._get('safety_state')))
+            safety_state=self._get('safety_state'), speed_cmd=self._get('speed_cmd'),
+            pose=self._pose(), straight_room=self._get('straight_room')))
         if out is not None:
             self._send(out)
 
@@ -201,13 +257,16 @@ class ExplorerNode(Node):
             self._send(nxt)
 
     def _publish_status(self, setting, refused):
-        report = self.conductor.report()
+        report = self.conductor.report() if self.conductor else {}
         report.update({'last_sent': setting, 'refused': refused, 'session': self.session})
         self.status_pub.publish(String(data=json.dumps(report)))
         self.write_report(report)
 
     def write_report(self, report=None):
-        report = report or self.conductor.report()
+        if report is None:
+            if self.conductor is None:
+                return
+            report = self.conductor.report()
         try:
             os.makedirs(self.report_dir, exist_ok=True)
             path = os.path.join(self.report_dir, f'{self.session}.json')
