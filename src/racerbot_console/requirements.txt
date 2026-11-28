@@ -1,0 +1,3 @@
+# Installed into the console's own virtual environment by tools/console/install.sh,
+# never into the system Python. Pinned so every car runs the same menu.
+textual==8.2.8
