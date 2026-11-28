@@ -23,16 +23,25 @@ bringup the usual way and leave LB released while the recorder prepares a paused
 Starting an algorithm resumes that recording in the same directory.
 
 Replace `<id>` in commands with the car ID, without angle brackets. You do not need the
-recorder terminal from the [TL;DR](#tldr) below any more, unless you want
-one for a run that is not an algorithm (manual driving, say).
+recorder terminal from the [TL;DR](#tldr) below any more. Manual driving is
+recorded the same way (since 2026-11-22).
 
 ### Highlights
 
 - **On by default, in every bringup** (`bringup_launch.py` and its two
   alternates). Off with one flag: `record:=false`.
-- **Records only while an algorithm runs.** Bringup alone, the dashboard,
-  and manual driving with the gamepad record no messages. The idle standby
-  already has its bag and diagnostic subscriptions ready.
+- **Records only while something is driving the car.** That means an
+  algorithm, or [teleop](glossary.md#teleop) (driving by hand with the
+  gamepad, `teleop_launch.py` or `wiimote_teleop_launch.py`). Bringup alone
+  and the dashboard record no messages. The idle standby already has its bag
+  and diagnostic subscriptions ready.
+- **Manual driving is recorded for the whole time teleop is open.** Teleop
+  sends commands all the time, whether LB is held or not. So the recording
+  starts about 1.5 s after `teleop_launch.py` starts and stops about 3 s
+  after you close it.
+- **Close teleop when you finish driving.** Otherwise the bag keeps growing
+  while the car sits still. Hand-driven runs are data for the simulator,
+  just like algorithm runs.
 - **Any algorithm, anyone's.** It watches for any [node](glossary.md#node)
   publishing `/drive` (or `/auto_map/drive`, `/auto_race/drive`,
   `neural_racer`'s shadow output, or the motor command topics). Our

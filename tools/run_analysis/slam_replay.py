@@ -232,12 +232,16 @@ def pose_sequence_error(recorded, replayed) -> dict:
 
 
 def map_from_bag_files(grid, resolution, origin_xy, out_dir) -> tuple[Path, Path]:
-    """Save trinary pixels with nav2's y flip, and S4's 0.65/0.25 YAML thresholds.
+    """Save trinary pixels with nav2's y flip, and 0.65/0.196 YAML thresholds.
 
     Convention checked in navigation2 jazzy nav2_map_server/src/map_io.cpp,
     tryWriteMapToFile: <=25 free, >=65 occupied, others unknown; rows inverted.
     https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_map_server/src/map_io.cpp
-    YAML uses the requested free_thresh 0.25 (newer nav2 uses 0.196 there).
+    The YAML's free_thresh is 0.196, what the cars' own map saver writes
+    (data/rb2/racerbot_auto/20261111-151125/map.yaml), so a replayed map loads
+    with the same thresholds as the live one (docs/ai-handoff/project-state.md).
+    For trinary pixels it changes nothing on load: free pixels are 254, an
+    occupancy of 0.004, under either threshold.
     """
     import numpy as np
     cells = np.asarray(grid)
@@ -255,7 +259,7 @@ def map_from_bag_files(grid, resolution, origin_xy, out_dir) -> tuple[Path, Path
     pgm.write_bytes(f'P5\n{width} {height}\n255\n'.encode('ascii') + pixels[::-1].tobytes())
     meta.write_text(yaml.safe_dump(dict(image='map.pgm', mode='trinary',
                     resolution=float(resolution), origin=[float(origin_xy[0]), float(origin_xy[1]), 0],
-                    negate=0, occupied_thresh=.65, free_thresh=.25), sort_keys=False), encoding='utf-8')
+                    negate=0, occupied_thresh=.65, free_thresh=.196), sort_keys=False), encoding='utf-8')
     return pgm, meta
 
 

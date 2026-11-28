@@ -222,6 +222,8 @@ def test_a_recording_that_dies_is_not_restarted_until_the_algorithm_restarts():
     ('/drive', '/some_new_node'),               # anyone else's
     ('/ackermann_cmd', '/bypasses_the_mux'),    # a node skipping ackermann_mux
     ('/commands/motor/speed', '/straight_to_vesc'),
+    ('/teleop', '/joy_teleop'),                 # manual driving, teleop_launch.py
+    ('/teleop', '/wiimote_teleop'),             # manual driving, wiimote_teleop_launch.py
 ])
 def test_every_algorithm_starts_a_recording_with_the_shipped_config(topic, node):
     m = ar.AutoRecorder(shipped())
@@ -233,14 +235,14 @@ def test_every_algorithm_starts_a_recording_with_the_shipped_config(topic, node)
 
 
 @pytest.mark.parametrize('topic,node', [
-    ('/teleop', '/joy_teleop'),                     # manual driving
     ('/ackermann_cmd', '/ackermann_mux'),           # bringup itself
     ('/commands/motor/speed', '/ackermann_to_vesc_node'),
     ('/commands/servo/position', '/ackermann_to_vesc_node'),
     ('/drive', '/rosbag2_player'),                  # a bag played back
+    ('/teleop', '/rosbag2_player'),                 # a manual run played back
     ('/drive_intent', '/gap_follow_node'),          # a diagnostic, not a command
 ])
-def test_bringup_teleop_and_playback_never_start_a_recording(topic, node):
+def test_bringup_and_playback_never_start_a_recording(topic, node):
     m = ar.AutoRecorder(shipped())
     decisions = run(m, [(t, {topic: [node]}, BRINGUP) for t in range(0, 120)])
     assert all(d.action == '' for d in decisions)
@@ -251,10 +253,52 @@ def test_bringup_alone_with_its_command_publishers_is_idle():
     """What bringup really puts on the trigger topics, all at once."""
     pubs = {'/ackermann_cmd': ['/ackermann_mux'],
             '/commands/motor/speed': ['/ackermann_to_vesc_node'],
-            '/commands/servo/position': ['/ackermann_to_vesc_node'],
-            '/teleop': ['/joy_teleop']}
+            '/commands/servo/position': ['/ackermann_to_vesc_node']}
     m = ar.AutoRecorder(shipped())
     assert all(d.action == '' for d in run(m, [(t, pubs, BRINGUP) for t in range(60)]))
+
+
+# ------------------------------------------------- manual driving (shipped)
+# Oracle: the user's request of 2026-11-22 (record hand-driven runs too) as
+# written in config/auto_record.yaml's trigger_topics comment and
+# docs/run-diagnostics.md#automatic-recording: joy_teleop publishes /teleop
+# all the time, LB held or not, so a session is recorded from teleop_launch.py
+# starting until stop_delay_sec after it closes, and never beside another
+# recorder.
+
+BRINGUP_PUBS = {'/ackermann_cmd': ['/ackermann_mux'],
+                '/commands/motor/speed': ['/ackermann_to_vesc_node'],
+                '/commands/servo/position': ['/ackermann_to_vesc_node']}
+TELEOP = {**BRINGUP_PUBS, '/teleop': ['/joy_teleop']}
+
+
+def test_a_teleop_session_is_one_recording_from_open_to_close():
+    s = shipped()
+    m = ar.AutoRecorder(s)
+    # Bringup alone for 10 s, teleop open from t=10 to t=70, then bringup alone.
+    steps = ([(t * 0.25, BRINGUP_PUBS, BRINGUP) for t in range(40)]
+             + [(t * 0.25, TELEOP, BRINGUP + ['/joy_teleop']) for t in range(40, 280)]
+             + [(t * 0.25, BRINGUP_PUBS, BRINGUP) for t in range(280, 400)])
+    timed = [(t, m.update(t, pubs, nodes)) for t, pubs, nodes in steps]
+    starts = [t for t, d in timed if d.action == 'start']
+    stops = [t for t, d in timed if d.action == 'stop']
+    # One recording, starting start_delay_sec after teleop is first seen
+    # (t=10.0) and stopping stop_delay_sec after it is last seen (t=69.75,
+    # the last poll before it closes).
+    assert starts == [10.0 + s.start_delay_sec]
+    assert stops == [69.75 + s.stop_delay_sec]
+    assert [d.algorithms for t, d in timed if d.action == 'start'] == [
+        {'/teleop': ['/joy_teleop']}]
+
+
+def test_teleop_is_not_recorded_beside_a_hand_started_recorder():
+    """docs/launchstart.md's old advice (start record_run.py by hand for a
+    manual drive) still works: the automatic recorder stays out of the way."""
+    m = ar.AutoRecorder(shipped())
+    nodes = BRINGUP + ['/joy_teleop', '/race_diag_node', '/rosbag2_recorder']
+    decisions = run(m, [(t, TELEOP, nodes) for t in range(0, 120)])
+    assert all(d.action == '' for d in decisions)
+    assert decisions[-1].recorders == ['/race_diag_node', '/rosbag2_recorder']
 
 
 def test_an_algorithm_beside_bringup_is_reported_alone():

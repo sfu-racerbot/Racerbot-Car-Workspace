@@ -9,14 +9,18 @@ auto_record:
   ros__parameters:
     output_directory: ''  # Empty resolves per car with racerbot_car.paths.data_dir.
 
-    # A node publishing on any of these is an algorithm. /drive is what
+    # A node publishing on any of these starts a recording. /drive is what
     # every control layer publishes, ours and team A's (ftg, disparity_
     # extender, reactive); the auto_map_race sources, neural_racer's shadow
     # output, and the downstream command topics catch an algorithm that
-    # bypasses ackermann_mux. /teleop is deliberately absent: manual
-    # driving is not recorded.
+    # bypasses ackermann_mux. /teleop is manual driving (teleop_launch.py,
+    # wiimote_teleop_launch.py): hand-driven runs are data for the simulator
+    # too (2026-11-22). joy_teleop publishes /teleop all the time, LB held or
+    # not, so a manual session is recorded from teleop_launch.py starting
+    # until stop_delay_sec after it closes.
     trigger_topics:
       - /drive
+      - /teleop
       - /auto_map/drive
       - /auto_race/drive
       - /neural_racer/shadow_drive

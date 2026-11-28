@@ -413,9 +413,9 @@ ros2 launch racerbot_launch dashboard_launch.py
 
 **Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/racerbot-ws/data/<id>/racerbot_runs/<ts>`; when it stops, `saved run ...`.
 
-Manual driving is not recorded. Turn automatic recording off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
+Manual driving is recorded too (since 2026-11-22): from about 1.5 s after `teleop_launch.py` starts until about 3 s after you close it, LB held or not. Close teleop when you finish driving. Turn automatic recording off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
 
-To record something else, such as a manual drive, start `ros2 launch race_diagnostics record_run.py` in its own terminal first. Bringup's recorder then stays out of the way.
+If you start `ros2 launch race_diagnostics record_run.py` in its own terminal first, bringup's recorder stays out of the way and that recording is the only one.
 
 Afterwards, in **any terminal**:
 

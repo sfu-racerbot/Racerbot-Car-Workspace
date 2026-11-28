@@ -156,8 +156,7 @@ class AutoRecordNode(Node):
         self._note(
             'info',
             f"auto_record ready: records a run while any node publishes "
-            f"{', '.join(self.settings.trigger_topics)} (manual /teleop is not "
-            f"recorded), into {self.output_directory}/<time>/; never beside "
+            f"{', '.join(self.settings.trigger_topics)} (manual driving too), into {self.output_directory}/<time>/; never beside "
             f"another recorder ({', '.join(self.settings.other_recorders)}). "
             f"Turn off with bringup record:=false.")
 
