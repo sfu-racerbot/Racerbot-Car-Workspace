@@ -1,0 +1,268 @@
+{
+ "copy": [
+  "src/racerbot_console",
+  "src/racerbot_doctor",
+  "src/racerbot_car"
+ ],
+ "mutations": [
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    if buttons[button] == 1:\n        return Shown(Level.OK, 'HELD')",
+   "new": "    if True:\n        return Shown(Level.OK, 'HELD')",
+   "tests": [
+    "src/racerbot_console/test/test_status.py",
+    "src/racerbot_console/test/test_app.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    if not is_fresh(stamp, now):\n        return Shown(Level.WARN, 'controller silent')\n",
+   "new": "",
+   "tests": [
+    "src/racerbot_console/test/test_status.py",
+    "src/racerbot_console/test/test_app.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    return 0.0 <= age <= timeout",
+   "new": "    return age <= timeout",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    return 0.0 <= age <= timeout",
+   "new": "    return 0.0 <= age < timeout",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    if volts < doctor_car.BATTERY_FAIL_V:",
+   "new": "    if volts <= doctor_car.BATTERY_FAIL_V:",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    if volts < doctor_car.BATTERY_WARN_V:",
+   "new": "    if volts < doctor_car.BATTERY_WARN_V * 0.9:",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    if volts > doctor_car.BATTERY_HIGH_V:",
+   "new": "    if volts >= doctor_car.BATTERY_HIGH_V:",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    cell = volts / doctor_car.BATTERY_CELLS",
+   "new": "    cell = volts / 4",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    if count == 1:\n        return Shown(Level.OK, '/joy 1 pub')",
+   "new": "    if count >= 1:\n        return Shown(Level.OK, '/joy 1 pub')",
+   "tests": [
+    "src/racerbot_console/test/test_status.py",
+    "src/racerbot_console/test/test_app.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "    level = Level.OK if hz >= min_hz else Level.WARN",
+   "new": "    level = Level.OK if hz > min_hz else Level.WARN",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "        if len(recent) < 2 or now - recent[-1] > STALE_SEC:",
+   "new": "        if len(recent) < 2:",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/status.py",
+   "old": "        return (len(recent) - 1) / span",
+   "new": "        return len(recent) / span",
+   "tests": [
+    "src/racerbot_console/test/test_status.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/layers.py",
+   "old": "        label = DRIVING.get((pkg, exe))",
+   "new": "        label = {e: l for (p, e), l in DRIVING.items()}.get(exe)",
+   "tests": [
+    "src/racerbot_console/test/test_layers.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/layers.py",
+   "old": "    elif len(missing) == len(doctor_car.BRINGUP_EXES):",
+   "new": "    elif len(missing) >= 1:",
+   "tests": [
+    "src/racerbot_console/test/test_layers.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/layers.py",
+   "old": "        if len(parts) >= 3 and parts[-3] == 'lib':",
+   "new": "        if len(parts) >= 3:",
+   "tests": [
+    "src/racerbot_console/test/test_layers.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/sysinfo.py",
+   "old": "    idle = values[3] + (values[4] if len(values) > 4 else 0)   # idle + iowait",
+   "new": "    idle = values[3]",
+   "tests": [
+    "src/racerbot_console/test/test_sysinfo.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/sysinfo.py",
+   "old": "        if total <= 0 or busy < 0:",
+   "new": "        if total <= 0:",
+   "tests": [
+    "src/racerbot_console/test/test_sysinfo.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/sysinfo.py",
+   "old": "    used = (fields['MemTotal'] - fields['MemAvailable']) / 1e6",
+   "new": "    used = (fields['MemTotal'] - fields.get('MemFree', 0)) / 1e6",
+   "tests": [
+    "src/racerbot_console/test/test_sysinfo.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/sysinfo.py",
+   "old": "        if TEMP_MIN_C <= c <= TEMP_MAX_C and (best is None or c > best):",
+   "new": "        if best is None or c > best:",
+   "tests": [
+    "src/racerbot_console/test/test_sysinfo.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/sysinfo.py",
+   "old": "            return value / 10.0",
+   "new": "            return value / 100.0",
+   "tests": [
+    "src/racerbot_console/test/test_sysinfo.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/sysinfo.py",
+   "old": "        if 0 <= value <= 1000:",
+   "new": "        if 0 <= value:",
+   "tests": [
+    "src/racerbot_console/test/test_sysinfo.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/runs.py",
+   "old": "    runs.sort(key=lambda r: (r.started or datetime.min, r.path.name), reverse=True)",
+   "new": "    runs.sort(key=lambda r: (r.started or datetime.min, r.path.name))",
+   "tests": [
+    "src/racerbot_console/test/test_runs.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/runs.py",
+   "old": "        for depth in (4, 5):",
+   "new": "        for depth in (4,):",
+   "tests": [
+    "src/racerbot_console/test/test_runs.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/runs.py",
+   "old": "    return float(value) if value >= 0 else None",
+   "new": "    return float(value)",
+   "tests": [
+    "src/racerbot_console/test/test_runs.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/runs.py",
+   "old": "    if isinstance(value, bool) or not isinstance(value, (int, float)):",
+   "new": "    if not isinstance(value, (int, float)):",
+   "tests": [
+    "src/racerbot_console/test/test_runs.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/jobs.py",
+   "old": "    if spec.moves_car:\n        raise JobRefused",
+   "new": "    if False:\n        raise JobRefused",
+   "tests": [
+    "src/racerbot_console/test/test_jobs.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/jobs.py",
+   "old": "        # The leader is gone; a child that ignored the signals may not be.\n        try:\n            os.killpg(pgid, signal.SIGKILL)\n        except ProcessLookupError:\n            pass\n",
+   "new": "",
+   "tests": [
+    "src/racerbot_console/test/test_jobs.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/jobs.py",
+   "old": "        spec = JOBS.get(key)\n        if spec is None:\n            raise JobRefused(f'unknown job {key!r}')",
+   "new": "        spec = JOBS.get(key) or JobSpec(key, key, (key,))",
+   "tests": [
+    "src/racerbot_console/test/test_jobs.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/app.py",
+   "old": "    if len(layers.driving) > 1:",
+   "new": "    if len(layers.driving) > 2:",
+   "tests": [
+    "src/racerbot_console/test/test_app.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/app.py",
+   "old": "    if layers.simulator and layers.hardware != 'off':",
+   "new": "    if layers.simulator and layers.hardware == 'off':",
+   "tests": [
+    "src/racerbot_console/test/test_app.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/app.py",
+   "old": "        if running and not self._quit_armed:",
+   "new": "        if False:",
+   "tests": [
+    "src/racerbot_console/test/test_app.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_console/racerbot_console/app.py",
+   "old": "             shown(status.battery(live.volts if status.is_fresh(live.volts_t, live.now)\n                                  else None))]",
+   "new": "             shown(status.battery(live.volts))]",
+   "tests": [
+    "src/racerbot_console/test/test_app.py"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Start the terminal menu (src/racerbot_console) on a car. See docs/console.md.
+#
+#   racerbot            open the menu, or go back to the one already open
+#   racerbot --no-tmux  run it in this terminal only (it stops if the tab closes)
+#
+# The menu runs inside a tmux session called "racerbot", so closing the
+# browser tab doesn't stop it, and the next OnePortal login lands on the same
+# screen. It sources ROS and the workspace itself.
+set -uo pipefail
+
+WS="${RACERBOT_WS:-$HOME/racerbot-ws}"
+VENV="${RACERBOT_CONSOLE_VENV:-$HOME/.local/share/racerbot/console-venv}"
+SESSION=racerbot
+
+if [[ "${1:-}" != "--inside" && "${1:-}" != "--no-tmux" ]]; then
+    if [[ -n "${TMUX:-}" ]]; then
+        exec "$0" --inside
+    fi
+    if command -v tmux >/dev/null 2>&1; then
+        exec tmux new-session -A -s "$SESSION" "$(readlink -f "$0") --inside"
+    fi
+    echo "tmux is not installed, so the menu will stop if this tab closes." >&2
+    echo "Install it once with: sudo apt install tmux" >&2
+fi
+
+if [[ ! -x "$VENV/bin/python" ]]; then
+    echo "The menu is not installed yet. Run once:" >&2
+    echo "  $WS/tools/console/install.sh" >&2
+    [[ "${1:-}" == "--inside" ]] && read -r -p "Press enter to close. " _
+    exit 1
+fi
+
+# ROS's setup scripts read unset variables, so no `set -u` while sourcing.
+set +u
+source /opt/ros/jazzy/setup.bash
+source "$WS/install/setup.bash"
+set -u
+
+cd "$WS"
+"$VENV/bin/python" -m racerbot_console.app
+status=$?
+if [[ $status -ne 0 && "${1:-}" == "--inside" ]]; then
+    read -r -p "The menu stopped with an error (exit $status). Press enter to close. " _
+fi
+exit $status
