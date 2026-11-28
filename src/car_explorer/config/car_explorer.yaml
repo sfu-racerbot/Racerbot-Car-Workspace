@@ -1,0 +1,49 @@
+# car_explorer: tunes gap_follow between stretches of clean driving to find
+# the car's limits for the simulator fit. It never drives and publishes no
+# drive topic. docs/explorer.md explains every value.
+car_explorer:
+  ros__parameters:
+    # --- The ladder. Tops are gap_follow's own slider maxima: no explorer cap
+    # (club decision 2026-11-28; the limit is what it measures).
+    speed_start: 2.0        # m/s
+    speed_step: 0.5
+    speed_top: 5.0
+    lateral_start: 1.5      # m/s^2
+    lateral_step: 0.25
+    lateral_top: 4.0
+    back_off_steps: 2       # notches down when the car shows a limit
+    # --- When to raise.
+    segment_sec: 15.0       # s of clean, LB-held driving per notch
+    straight_steer: 0.05    # rad: raises wait for a straight
+    moving_speed: 0.3       # m/s
+    # --- The speed-aware wall check: back off when the car is within its
+    # reaction distance (speed x brake_delay) plus this of something on its
+    # current path. Kept small on purpose (club decision 2026-11-28);
+    # gap_follow's own TTC braking is unchanged and still stops the car.
+    wall_margin: 0.03       # m
+    brake_delay: 0.24       # s, car 2 race-day braking delay (braking_lag.py, run 20261111-152132)
+    half_width: 0.135       # m, half of car 2's measured 0.27 m tyre to tyre
+    lidar_x: 0.265          # m, car 2 rear hub to LiDAR, measured 2026-11-23
+    front_reach: 0.41       # m, rear axle to front bumper: estimate, not measured
+    # --- Slide: turning under this share of what the steering asks.
+    slide_ratio: 0.7
+    slide_min_speed: 1.5    # m/s
+    slide_min_steer: 0.08   # rad
+    slide_hold_sec: 0.2     # s
+    slide_steer_window: 0.3 # s the steering must have been held (the servo lags the command)
+    event_cooldown_sec: 3.0 # s after a back-off before another limit sign counts
+    wheelbase: 0.325        # m, car 2 hub to hub, measured 2026-11-23
+    # --- Session.
+    min_voltage: 10.5       # V, 3S pack
+    max_session_sec: 900.0  # s of LB-held driving
+    brake_every: 3          # a brake test after every 3rd raise; 0 = none
+    brake_min_speed: 2.5    # m/s
+    brake_clear: 1.0        # m spare beyond the braking distance
+    brake_decel: 2.9        # m/s^2, car 2 race-day braking, same run
+    brake_speed: 1.5        # m/s, the max_speed a brake test drops to
+    brake_hold_sec: 1.5     # s
+    # --- Wiring.
+    target_node: /gap_follow_node
+    status_topic: /car_explorer/status
+    deadman_button: 4       # LB on the F710 (XInput)
+    report_dir: ~/.ros/car_explorer
